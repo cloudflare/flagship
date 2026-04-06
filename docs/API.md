@@ -195,7 +195,7 @@ Context attributes are serialized as URL query parameters and sent with each eva
 | ----------------------------- | -------------------------------------------- |
 | `string`, `number`, `boolean` | Passed directly as a string                  |
 | `Date`                        | Converted to ISO 8601                        |
-| Objects, arrays               | **Not supported** — the provider throws `INVALID_CONTEXT`. Keys with complex values are silently dropped if using `ContextTransformer` directly. |
+| Objects, arrays               | **Not supported** — the provider throws `INVALID_CONTEXT`. Keys with complex values are dropped with a console warning if using `ContextTransformer` directly. |
 
 `targetingKey` is the standard OpenFeature field for identifying the evaluation subject (user ID, session ID, etc.) and is treated like any other attribute.
 
@@ -259,7 +259,7 @@ OpenFeature.addHooks(
     // event.value       — resolved value (evaluation events only)
     // event.reason      — resolution reason
     // event.variant     — variation key
-    // event.errorCode   — OpenFeature error code (set on both error and failed evaluation events)
+    // event.errorCode   — OpenFeature error code (set on evaluation events when the resolution produced an error)
     // event.errorMessage
     // event.context     — evaluation context
     // event.hints       — hook hints from EvaluationOptions (optional)
@@ -315,7 +315,7 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 - `FLAGSHIP_DEFAULT_BASE_URL` — default base URL constant
 - Types: `FlagshipProviderOptions`, `FlagshipClientProviderOptions`, `FlagshipEvaluationResponse`, `CachedFlag`
 
-**`@cloudflare/flagship/server`** (all core exports plus):
+**`@cloudflare/flagship/server`** (core value exports + server-relevant types, plus):
 
 - `FlagshipServerProvider` — async per-request provider
 - `LoggingHook` — evaluation logging hook

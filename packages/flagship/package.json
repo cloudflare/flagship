@@ -34,7 +34,6 @@
 		"examples:browser": "tsx examples/browser.ts",
 		"examples:server": "tsx examples/server.ts",
 		"examples:worker": "tsx examples/cloudflare-worker.ts",
-		"examples:demo": "cd examples/demo && pnpm dev",
 		"lint": "oxlint src",
 		"lint:fix": "oxlint --fix src",
 		"clean": "rm -rf dist"

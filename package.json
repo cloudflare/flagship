@@ -18,7 +18,8 @@
     "lint": "oxlint .",
     "typecheck": "pnpm -r run typecheck",
     "check": "sherif && oxfmt --check . && oxlint . && pnpm run typecheck",
-    "test": "pnpm -r run test"
+    "test": "pnpm -r run test",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
@@ -27,6 +28,7 @@
     "lint-staged": "^16.4.0",
     "oxfmt": "^0.43.0",
     "oxlint": "^1.58.0",
+    "pkg-pr-new": "^0.0.66",
     "sherif": "^1.11.1",
     "tsx": "^4.21.0"
   },

@@ -5,5 +5,8 @@
 	"semi": true,
 	"useTabs": true,
 	"sortPackageJson": false,
-	"embeddedLanguageFormatting": "off"
+	"embeddedLanguageFormatting": "off",
+	"ignorePatterns": [
+		"**/CHANGELOG.md"
+	]
 }

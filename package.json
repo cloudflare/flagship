@@ -27,7 +27,8 @@
     "lint-staged": "^16.4.0",
     "oxfmt": "^0.43.0",
     "oxlint": "^1.58.0",
-    "sherif": "^1.11.1"
+    "sherif": "^1.11.1",
+    "tsx": "^4.21.0"
   },
   "packageManager": "pnpm@10.8.1",
   "overrides": {},

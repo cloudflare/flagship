@@ -6,7 +6,5 @@
 	"useTabs": true,
 	"sortPackageJson": false,
 	"embeddedLanguageFormatting": "off",
-	"ignorePatterns": [
-		"**/CHANGELOG.md"
-	]
+	"ignorePatterns": ["**/CHANGELOG.md"]
 }

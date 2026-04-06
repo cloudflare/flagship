@@ -39,22 +39,22 @@ Requires Node 22+ and pnpm 10+.
 
 Run from the repo root:
 
-| Command              | What it does                                         |
-| -------------------- | ---------------------------------------------------- |
-| `pnpm run build`     | Build all packages                                   |
-| `pnpm run test`      | Run all tests                                        |
-| `pnpm run check`     | Full CI check: sherif + oxfmt + oxlint + typecheck   |
-| `pnpm run lint`      | Run oxlint                                           |
-| `pnpm run format`    | Format all files with oxfmt                          |
-| `pnpm run typecheck` | TypeScript type checking across packages             |
+| Command              | What it does                                       |
+| -------------------- | -------------------------------------------------- |
+| `pnpm run build`     | Build all packages                                 |
+| `pnpm run test`      | Run all tests                                      |
+| `pnpm run check`     | Full CI check: sherif + oxfmt + oxlint + typecheck |
+| `pnpm run lint`      | Run oxlint                                         |
+| `pnpm run format`    | Format all files with oxfmt                        |
+| `pnpm run typecheck` | TypeScript type checking across packages           |
 
 Package-level (run from `packages/flagship/`):
 
-| Command           | What it does                    |
-| ----------------- | ------------------------------- |
-| `pnpm run build`  | Build with tsdown (ESM + CJS)  |
-| `pnpm run test`   | Run vitest                      |
-| `pnpm run dev`    | Watch mode                      |
+| Command          | What it does                  |
+| ---------------- | ----------------------------- |
+| `pnpm run build` | Build with tsdown (ESM + CJS) |
+| `pnpm run test`  | Run vitest                    |
+| `pnpm run dev`   | Watch mode                    |
 
 ## SDK Architecture
 
@@ -76,6 +76,7 @@ Each sub-path is a separate bundle (built with tsdown) so importing one never pu
 ### Linting — Oxlint
 
 Config in `.oxlintrc.json`. Plugins: `typescript`, `import`, `unicorn`. Key rules:
+
 - `eqeqeq: "error"` — always use `===`
 - `no-explicit-any: "warn"` (off in tests)
 - `no-unused-vars: "error"` with `_` prefix ignore pattern
@@ -110,15 +111,18 @@ CI runs on every PR: `pnpm install → build → check → test`. All checks mus
 ## Boundaries
 
 **Always:**
+
 - Run `pnpm run check` before considering work done
 - Keep OpenFeature peer dependencies optional
 - Use `import type` for type-only imports
 
 **Ask first:**
+
 - Adding new dependencies to published packages
 - Changing the SDK's public API surface
 
 **Never:**
+
 - Hardcode secrets or API keys
 - Use `any` without justification
 - Modify `node_modules/` or `dist/` directories

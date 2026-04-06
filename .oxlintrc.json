@@ -26,10 +26,5 @@
 			}
 		}
 	],
-	"ignorePatterns": [
-		"**/dist/**",
-		"**/node_modules/**",
-		"**/build/**",
-		"**/.wrangler/**"
-	]
+	"ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/build/**", "**/.wrangler/**"]
 }

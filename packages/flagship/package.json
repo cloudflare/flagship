@@ -1,6 +1,6 @@
 {
 	"name": "@cloudflare/flagship",
-	"version": "0.2.0",
+	"version": "0.1.0",
 	"description": "OpenFeature provider for Flagship feature flags",
 	"type": "module",
 	"main": "./dist/index.cjs",

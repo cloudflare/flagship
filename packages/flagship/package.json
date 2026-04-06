@@ -1,0 +1,85 @@
+{
+	"name": "@cloudflare/flagship",
+	"version": "0.2.0",
+	"description": "OpenFeature provider for Flagship feature flags",
+	"type": "module",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.mjs",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"require": "./dist/index.cjs",
+			"import": "./dist/index.mjs"
+		},
+		"./server": {
+			"types": "./dist/server.d.ts",
+			"require": "./dist/server.cjs",
+			"import": "./dist/server.mjs"
+		},
+		"./web": {
+			"types": "./dist/web.d.ts",
+			"require": "./dist/web.cjs",
+			"import": "./dist/web.mjs"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"dev": "tsdown --watch",
+		"build": "tsdown",
+		"test": "vitest run",
+		"test:coverage": "vitest --coverage",
+		"examples:browser": "tsx examples/browser.ts",
+		"examples:server": "tsx examples/server.ts",
+		"examples:worker": "tsx examples/cloudflare-worker.ts",
+		"examples:demo": "cd examples/demo && pnpm dev",
+		"lint": "oxlint src",
+		"lint:fix": "oxlint --fix src",
+		"clean": "rm -rf dist"
+	},
+	"license": "Apache-2.0",
+	"author": "Cloudflare Inc.",
+	"repository": {
+		"directory": "packages/flagship",
+		"type": "git",
+		"url": "git+https://github.com/cloudflare/flagship.git"
+	},
+	"homepage": "https://github.com/cloudflare/flagship",
+	"bugs": {
+		"url": "https://github.com/cloudflare/flagship/issues"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"keywords": [
+		"openfeature",
+		"feature-flags",
+		"flagship",
+		"provider"
+	],
+	"peerDependencies": {
+		"@openfeature/server-sdk": "^1.20.2",
+		"@openfeature/web-sdk": "^1.7.3"
+	},
+	"peerDependenciesMeta": {
+		"@openfeature/server-sdk": {
+			"optional": true
+		},
+		"@openfeature/web-sdk": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@openfeature/core": "^1.9.2",
+		"@openfeature/server-sdk": "^1.20.2",
+		"@openfeature/web-sdk": "^1.7.3",
+		"@types/node": "^24.12.0",
+		"@vitest/coverage-v8": "^4.1.2",
+		"tsdown": "^0.21.7",
+		"tsx": "^4.21.0",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.2"
+	}
+}

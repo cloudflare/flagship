@@ -39,6 +39,7 @@ export class FlagshipClientProvider implements Provider {
 	private client: FlagshipClient;
 	private readonly prefetchFlags: string[];
 	private readonly cacheTTL: number;
+	private readonly logging: boolean;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
 
 	constructor(options: FlagshipClientProviderOptions) {
@@ -46,6 +47,7 @@ export class FlagshipClientProvider implements Provider {
 		this.client = new FlagshipClient(options);
 		this.prefetchFlags = options.prefetchFlags || [];
 		this.cacheTTL = options.cacheTTL ?? 0;
+		this.logging = options.logging ?? false;
 	}
 
 	get status(): ProviderStatus {
@@ -56,7 +58,7 @@ export class FlagshipClientProvider implements Provider {
 		if (this.prefetchFlags.length > 0) {
 			const results = await Promise.allSettled(this.prefetchFlags.map((flagKey) => this.fetchAndCache(flagKey, context)));
 			const failures = results.filter((r) => r.status === 'rejected');
-			if (failures.length > 0) {
+			if (failures.length > 0 && this.logging) {
 				console.warn(`[Flagship] ${failures.length} of ${this.prefetchFlags.length} flag(s) failed to pre-fetch during initialization.`);
 			}
 		}
@@ -84,7 +86,7 @@ export class FlagshipClientProvider implements Provider {
 			}
 			const results = await Promise.allSettled(this.prefetchFlags.map((flagKey) => this.fetchAndCache(flagKey, newContext)));
 			const failures = results.filter((r) => r.status === 'rejected');
-			if (failures.length > 0) {
+			if (failures.length > 0 && this.logging) {
 				console.warn(`[Flagship] ${failures.length} of ${this.prefetchFlags.length} flag(s) failed to re-fetch during context change.`);
 			}
 		}

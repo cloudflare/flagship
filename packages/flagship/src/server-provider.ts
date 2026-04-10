@@ -3,6 +3,9 @@ import { ErrorCode, ProviderStatus, OpenFeatureEventEmitter, ProviderEvents } fr
 import { FlagshipClient } from './client.js';
 import { FlagshipError, FlagshipErrorCode, type FlagshipProviderOptions } from './types.js';
 
+// Shared no-op used to build a silent logger when logging is false.
+const _noop = (): void => {};
+
 /**
  * OpenFeature provider for Flagship (server-side / dynamic context).
  *
@@ -34,11 +37,23 @@ export class FlagshipServerProvider implements Provider {
 	readonly events = new OpenFeatureEventEmitter();
 
 	private readonly client: FlagshipClient;
+	private readonly logging: boolean;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
 
 	constructor(options: FlagshipProviderOptions) {
 		this.metadata = { name: 'Flagship Server Provider' };
 		this.client = new FlagshipClient(options);
+		this.logging = options.logging ?? false;
+	}
+
+	/**
+	 * Returns the provided logger when logging is enabled, or a no-op logger
+	 * when `logging` is `false`. Using this in every resolve method ensures
+	 * the SDK produces no console output unless the caller opts in.
+	 */
+	private logger(logger: Logger): Logger {
+		if (this.logging) return logger;
+		return { debug: _noop, info: _noop, warn: _noop, error: _noop };
 	}
 
 	/**
@@ -114,21 +129,20 @@ export class FlagshipServerProvider implements Provider {
 		expectedType: 'boolean' | 'string' | 'number' | 'object',
 		logger: Logger,
 	): Promise<ResolutionDetails<T>> {
+		const log = this.logger(logger);
 		try {
-			logger.debug(`[Flagship] Evaluating flag "${flagKey}" (expected: ${expectedType})`);
+			log.debug(`[Flagship] Evaluating flag "${flagKey}" (expected: ${expectedType})`);
 
 			const result = await this.client.evaluate(flagKey, context);
 
 			const actualType = this.getValueType(result.value);
 			if (actualType !== expectedType) {
 				const msg = `Flag "${flagKey}" type mismatch: expected ${expectedType}, got ${actualType}`;
-				logger.warn(`[Flagship] ${msg}`);
+				log.warn(`[Flagship] ${msg}`);
 				return { value: defaultValue, errorCode: ErrorCode.TYPE_MISMATCH, errorMessage: msg, reason: 'ERROR' };
 			}
 
-			logger.debug(
-				`[Flagship] Flag "${flagKey}" resolved: value=${String(result.value)} reason=${result.reason} variant=${result.variant}`,
-			);
+			log.debug(`[Flagship] Flag "${flagKey}" resolved: value=${String(result.value)} reason=${result.reason} variant=${result.variant}`);
 
 			return {
 				value: result.value as T,
@@ -137,7 +151,7 @@ export class FlagshipServerProvider implements Provider {
 				flagMetadata: {},
 			};
 		} catch (error) {
-			return this.handleError(flagKey, defaultValue, error, logger);
+			return this.handleError(flagKey, defaultValue, error, log);
 		}
 	}
 

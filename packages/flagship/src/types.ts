@@ -40,6 +40,20 @@ export interface FlagshipProviderOptions {
 	endpoint?: string;
 
 	/**
+	 * Enable SDK-level logging. When `false` (the default), the SDK produces no
+	 * console output of its own — all internal `debug`, `warn`, and `error` calls
+	 * are suppressed. Set to `true` to surface evaluation debug info and errors in
+	 * the console, which can be helpful during development or debugging.
+	 *
+	 * Note: this only controls logs emitted directly by the Flagship SDK.
+	 * OpenFeature's own framework-level logs are controlled separately via
+	 * `OpenFeature.setLogger(...)`.
+	 *
+	 * @default false
+	 */
+	logging?: boolean;
+
+	/**
 	 * Bearer token for authenticating requests to the Flagship API.
 	 * When set, an `Authorization: Bearer <token>` header is automatically
 	 * added to every request.

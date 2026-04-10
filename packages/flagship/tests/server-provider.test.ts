@@ -630,13 +630,42 @@ describe('FlagshipServerProvider', () => {
 	});
 
 	describe('logger integration', () => {
-		it('calls logger.debug on successful resolution', async () => {
+		it('does not call logger when logging is false (default)', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({ flagKey: 'my-flag', value: true }),
 			});
 
+			// logging defaults to false — the injected logger must never be called
 			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
+			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+			await provider.resolveBooleanEvaluation('my-flag', false, {}, spyLogger);
+
+			expect(spyLogger.debug).not.toHaveBeenCalled();
+			expect(spyLogger.warn).not.toHaveBeenCalled();
+			expect(spyLogger.error).not.toHaveBeenCalled();
+		});
+
+		it('does not call logger.error on network failure when logging is false (default)', async () => {
+			const mockResponse = new Response(null, { status: 500, statusText: 'Error' });
+			(global.fetch as any).mockResolvedValueOnce(mockResponse);
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+			await provider.resolveBooleanEvaluation('my-flag', false, {}, spyLogger);
+
+			expect(spyLogger.error).not.toHaveBeenCalled();
+		});
+
+		it('calls logger.debug on successful resolution when logging is true', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true }),
+			});
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', logging: true });
 			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 			await provider.resolveBooleanEvaluation('my-flag', false, {}, spyLogger);
@@ -646,13 +675,13 @@ describe('FlagshipServerProvider', () => {
 			expect(spyLogger.error).not.toHaveBeenCalled();
 		});
 
-		it('calls logger.warn on type mismatch', async () => {
+		it('calls logger.warn on type mismatch when logging is true', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({ flagKey: 'my-flag', value: 'wrong' }),
 			});
 
-			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', logging: true });
 			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 			await provider.resolveBooleanEvaluation('my-flag', false, {}, spyLogger);
@@ -660,11 +689,11 @@ describe('FlagshipServerProvider', () => {
 			expect(spyLogger.warn).toHaveBeenCalledWith(expect.stringContaining('type mismatch'));
 		});
 
-		it('calls logger.error on network failure', async () => {
+		it('calls logger.error on network failure when logging is true', async () => {
 			const mockResponse = new Response(null, { status: 500, statusText: 'Error' });
 			(global.fetch as any).mockResolvedValueOnce(mockResponse);
 
-			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0, logging: true });
 			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 			await provider.resolveBooleanEvaluation('my-flag', false, {}, spyLogger);
@@ -672,10 +701,10 @@ describe('FlagshipServerProvider', () => {
 			expect(spyLogger.error).toHaveBeenCalled();
 		});
 
-		it('calls logger.error on unknown error', async () => {
+		it('calls logger.error on unknown error when logging is true', async () => {
 			(global.fetch as any).mockRejectedValueOnce('non-error string thrown');
 
-			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0, logging: true });
 			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 			await provider.resolveBooleanEvaluation('my-flag', false, {}, spyLogger);
@@ -683,11 +712,11 @@ describe('FlagshipServerProvider', () => {
 			expect(spyLogger.error).toHaveBeenCalled();
 		});
 
-		it('includes flag key in logger.error message', async () => {
+		it('includes flag key in logger.error message when logging is true', async () => {
 			const mockResponse = new Response(null, { status: 500, statusText: 'Error' });
 			(global.fetch as any).mockResolvedValueOnce(mockResponse);
 
-			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0, logging: true });
 			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 			await provider.resolveBooleanEvaluation('special-flag', false, {}, spyLogger);

@@ -608,7 +608,6 @@ describe('FlagshipClientProvider', () => {
 
 		it('initialize still reaches READY when some pre-fetches fail', async () => {
 			const { ProviderStatus } = require('@openfeature/web-sdk');
-			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
@@ -623,6 +622,44 @@ describe('FlagshipClientProvider', () => {
 
 			await provider.initialize();
 			expect(provider.status).toBe(ProviderStatus.READY);
+		});
+
+		it('does not call console.warn on pre-fetch failure when logging is false (default)', async () => {
+			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+			(FlagshipClient as any).mockImplementation(function () {
+				return {
+					evaluate: vi.fn().mockRejectedValue(new Error('network')),
+				};
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['flag1', 'flag2'],
+			});
+
+			await provider.initialize();
+			expect(consoleSpy).not.toHaveBeenCalled();
+
+			consoleSpy.mockRestore();
+		});
+
+		it('calls console.warn on pre-fetch failure when logging is true', async () => {
+			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+			(FlagshipClient as any).mockImplementation(function () {
+				return {
+					evaluate: vi.fn().mockRejectedValue(new Error('network')),
+				};
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['flag1', 'flag2'],
+				logging: true,
+			});
+
+			await provider.initialize();
 			expect(consoleSpy).toHaveBeenCalled();
 
 			consoleSpy.mockRestore();

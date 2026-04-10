@@ -1,87 +1,280 @@
 /**
- * Example: FlagshipClientProvider (Node.js / browser)
+ * Example: Client-side usage (Browser)
  *
- * Run this to test the client provider end-to-end:
- *   pnpm --filter @cloudflare/flagship run examples:browser
+ * The FlagshipClientProvider implements caching to support synchronous flag
+ * resolution in the browser. Flags are pre-fetched when the evaluation context
+ * changes and cached in memory for instant access.
  *
- * The FlagshipClientProvider works like other production OpenFeature client
- * providers (ofrep-web, flagd-web): all flags are fetched upfront during
- * initialization and on every context change, then served synchronously from
- * an in-memory cache. Any flag not listed in `prefetchFlags` returns
- * FLAG_NOT_FOUND at resolution time.
+ * NOTE: This is an example file. Type checking may show errors in editors
+ * due to dynamic imports, but the code works at runtime.
  */
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 
-import { OpenFeature } from '@openfeature/web-sdk';
-import { FlagshipClientProvider } from '@cloudflare/flagship/web';
+const FLAGSHIP_APP_ID = 'your-app-id';
+const FLAGSHIP_ACCOUNT_ID = 'your-account-id';
 
-const ACCOUNT_ID = 'a89743af3e108be922f3440b9feeb9da';
-const APP_ID = '80c8011b-2778-4d34-bdd1-8e50e228ad98';
+/**
+ * Basic client provider setup with caching
+ */
+async function basicClientSetup() {
+	const { OpenFeature } = await import('@openfeature/web-sdk');
+	const { FlagshipClientProvider } = await import('@cloudflare/flagship/web');
 
-// ---------------------------------------------------------------------------
-// 1. Initialize — fetches all prefetchFlags upfront
-// ---------------------------------------------------------------------------
+	await OpenFeature.setProviderAndWait(
+		new FlagshipClientProvider({
+			appId: FLAGSHIP_APP_ID,
+			accountId: FLAGSHIP_ACCOUNT_ID,
+			token: 'your-token',
+			prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads', 'theme-config'],
+		}),
+	);
 
-await OpenFeature.setProviderAndWait(
-	new FlagshipClientProvider({
-		accountId: ACCOUNT_ID,
-		appId: APP_ID,
-		// List every flag key your app uses. These are fetched on init and on
-		// every context change. Any key omitted here returns FLAG_NOT_FOUND.
-		prefetchFlags: ['boolean-test'],
-		logging: true,
-	}),
-);
+	// Setting context triggers pre-fetching of the configured flags
+	await OpenFeature.setContext({
+		targetingKey: 'user-123',
+		email: 'user@example.com',
+		plan: 'premium',
+		country: 'US',
+	});
 
-console.log('Provider ready.\n');
+	const client = OpenFeature.getClient();
 
-// ---------------------------------------------------------------------------
-// 2. Set context — triggers a re-fetch of all prefetchFlags for this user
-// ---------------------------------------------------------------------------
+	// Flags are resolved synchronously from cache after pre-fetch
+	const darkMode = client.getBooleanValue('dark-mode', false);
+	const welcomeMsg = client.getStringValue('welcome-message', 'Welcome!');
+	const maxUploads = client.getNumberValue('max-uploads', 5);
+	const themeConfig = client.getObjectValue('theme-config', { primaryColor: '#000000', fontSize: 14 });
 
-await OpenFeature.setContext({
-	email: 'asinha@cloudflare.com',
-});
+	console.log('Flags loaded from cache:');
+	console.log('- Dark mode:', darkMode);
+	console.log('- Welcome message:', welcomeMsg);
+	console.log('- Max uploads:', maxUploads);
+	console.log('- Theme config:', themeConfig);
 
-console.log('Context set.\n');
+	if (darkMode) {
+		document.body.classList.add('dark-mode');
+	}
+	document.getElementById('welcome')!.textContent = welcomeMsg;
+}
 
-// ---------------------------------------------------------------------------
-// 3. Resolve flags synchronously from cache
-// ---------------------------------------------------------------------------
+/**
+ * Handling user login — context change triggers re-fetch
+ */
+async function handleUserLogin() {
+	const { OpenFeature } = await import('@openfeature/web-sdk');
 
-const client = OpenFeature.getClient();
+	// Updating context automatically re-fetches all pre-configured flags for the new user
+	await OpenFeature.setContext({
+		targetingKey: 'user-456',
+		email: 'newuser@example.com',
+		plan: 'free',
+		country: 'CA',
+	});
 
-const details = client.getBooleanDetails('boolean-test', false);
+	const client = OpenFeature.getClient();
+	const darkMode = client.getBooleanValue('dark-mode', false);
+	console.log('Dark mode for logged-in user:', darkMode);
+}
 
-console.log('boolean-test details:');
-console.log('  value:    ', details.value);
-console.log('  reason:   ', details.reason); // 'CACHED' on success
-console.log('  variant:  ', details.variant);
-console.log('  errorCode:', details.errorCode ?? 'none');
+/**
+ * Handling evaluation details — reason reflects how the flag resolved
+ */
+async function checkEvaluationDetails() {
+	const { OpenFeature } = await import('@openfeature/web-sdk');
+	const client = OpenFeature.getClient();
 
-// ---------------------------------------------------------------------------
-// 4. Demonstrate FLAG_NOT_FOUND for a flag not in prefetchFlags
-// ---------------------------------------------------------------------------
+	const details = client.getBooleanDetails('dark-mode', false);
 
-const missing = client.getBooleanDetails('not-in-prefetch', false);
-console.log('\nnot-in-prefetch details:');
-console.log('  value:    ', missing.value); // false (default)
-console.log('  reason:   ', missing.reason); // 'ERROR'
-console.log('  errorCode:', missing.errorCode); // FLAG_NOT_FOUND
+	console.log('Evaluation details:');
+	console.log('- Value:', details.value);
+	console.log('- Reason:', details.reason); // 'CACHED' on success, 'ERROR' on cache miss or type mismatch
+	console.log('- Variant:', details.variant);
+	console.log('- Metadata:', details.flagMetadata);
 
-// ---------------------------------------------------------------------------
-// 5. Context change — cache is cleared and all flags re-fetched for new user
-// ---------------------------------------------------------------------------
+	if (details.errorCode) {
+		console.error('Error:', details.errorCode, details.errorMessage);
+	}
 
-console.log('\nChanging context to a different user…');
+	switch (details.reason) {
+		case 'CACHED':
+			console.log('✓ Flag resolved from cache');
+			break;
+		case 'DEFAULT':
+			console.warn('⚠ Flag not in cache, using default value');
+			break;
+		case 'ERROR':
+			console.error('✗ Error resolving flag:', details.errorMessage);
+			break;
+	}
+}
 
-await OpenFeature.setContext({
-	email: 'other@cloudflare.com',
-});
+/**
+ * Progressive enhancement pattern
+ */
+async function progressiveEnhancement() {
+	const { OpenFeature } = await import('@openfeature/web-sdk');
+	const { FlagshipClientProvider } = await import('@cloudflare/flagship/web');
 
-const afterChange = client.getBooleanDetails('boolean-test', false);
-console.log('\nboolean-test after context change:');
-console.log('  value:    ', afterChange.value);
-console.log('  reason:   ', afterChange.reason);
+	await OpenFeature.setProviderAndWait(
+		new FlagshipClientProvider({
+			appId: FLAGSHIP_APP_ID,
+			accountId: FLAGSHIP_ACCOUNT_ID,
+			token: 'your-token',
+			prefetchFlags: ['premium-features', 'beta-access'],
+		}),
+	);
+
+	// Anonymous user on initial load
+	await OpenFeature.setContext({
+		targetingKey: 'anonymous',
+		plan: 'free',
+	});
+
+	const client = OpenFeature.getClient();
+
+	function updateUI() {
+		const premiumFeatures = client.getBooleanValue('premium-features', false);
+		const betaAccess = client.getBooleanValue('beta-access', false);
+
+		const premiumElement = document.getElementById('premium-features');
+		if (premiumElement) premiumElement.style.display = premiumFeatures ? 'block' : 'none';
+
+		const betaElement = document.getElementById('beta-features');
+		if (betaElement) betaElement.style.display = betaAccess ? 'block' : 'none';
+	}
+
+	updateUI();
+
+	document.getElementById('login-button')?.addEventListener('click', async () => {
+		// On login, update context with real user data — flags are re-fetched automatically
+		await OpenFeature.setContext({
+			targetingKey: 'user-789',
+			email: 'premium@example.com',
+			plan: 'premium',
+		});
+		updateUI();
+	});
+}
+
+/**
+ * Cache hit/miss monitoring
+ */
+async function cacheMonitoring() {
+	const { OpenFeature } = await import('@openfeature/web-sdk');
+	const { FlagshipClientProvider } = await import('@cloudflare/flagship/web');
+
+	await OpenFeature.setProviderAndWait(
+		new FlagshipClientProvider({
+			appId: FLAGSHIP_APP_ID,
+			accountId: FLAGSHIP_ACCOUNT_ID,
+			prefetchFlags: ['flag1', 'flag2', 'flag3'],
+		}),
+	);
+
+	await OpenFeature.setContext({ targetingKey: 'user-123' });
+
+	const client = OpenFeature.getClient();
+	const flags = ['flag1', 'flag2', 'flag3', 'flag4']; // flag4 not in prefetchFlags — returns FLAG_NOT_FOUND
+	const stats = { hits: 0, errors: 0 };
+
+	flags.forEach((flagKey) => {
+		const details = client.getBooleanDetails(flagKey, false);
+		switch (details.reason) {
+			case 'CACHED':
+				stats.hits++;
+				console.log(`✓ Cache HIT: ${flagKey}`);
+				break;
+			case 'ERROR':
+				stats.errors++;
+				console.error(`✗ ${details.errorCode}: ${flagKey} - ${details.errorMessage}`);
+				break;
+		}
+	});
+
+	console.log('Cache statistics:', stats);
+	console.log(`Cache hit rate: ${((stats.hits / flags.length) * 100).toFixed(1)}%`);
+}
+
+/**
+ * Production setup with proper error handling
+ */
+async function productionClientApp() {
+	const { OpenFeature } = await import('@openfeature/web-sdk');
+	const { FlagshipClientProvider } = await import('@cloudflare/flagship/web');
+
+	try {
+		// Initialize provider and pre-fetch flags
+		await OpenFeature.setProviderAndWait(
+			new FlagshipClientProvider({
+				appId: FLAGSHIP_APP_ID,
+				accountId: FLAGSHIP_ACCOUNT_ID,
+				token: 'your-token',
+				prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads', 'premium-features', 'beta-access', 'theme-config'],
+				timeout: 5000,
+				retries: 1,
+			}),
+		);
+
+		// Set user context — triggers flag pre-fetch
+		await OpenFeature.setContext({
+			targetingKey: getCurrentUserId(),
+			email: getUserEmail(),
+			plan: getUserPlan(),
+			country: getUserCountry(),
+		});
+
+		const client = OpenFeature.getClient();
+		applyDarkMode(client);
+		applyWelcomeMessage(client);
+		applyUploadLimits(client);
+		applyPremiumFeatures(client);
+		applyTheme(client);
+	} catch (error) {
+		console.error('Failed to initialize Flagship:', error);
+	}
+}
+
+function applyDarkMode(client: any) {
+	document.body.classList.toggle('dark-mode', client.getBooleanValue('dark-mode', false));
+}
+
+function applyWelcomeMessage(client: any) {
+	const element = document.getElementById('welcome');
+	if (element) element.textContent = client.getStringValue('welcome-message', 'Welcome!');
+}
+
+function applyUploadLimits(client: any) {
+	const element = document.getElementById('upload-limit');
+	if (element) element.textContent = `Max uploads: ${client.getNumberValue('max-uploads', 5)}`;
+}
+
+function applyPremiumFeatures(client: any) {
+	const element = document.getElementById('premium-section');
+	if (element) element.style.display = client.getBooleanValue('premium-features', false) ? 'block' : 'none';
+}
+
+function applyTheme(client: any) {
+	const theme = client.getObjectValue('theme-config', { primaryColor: '#007bff', fontSize: 14 });
+	document.documentElement.style.setProperty('--primary-color', theme.primaryColor);
+	document.documentElement.style.setProperty('--font-size', `${theme.fontSize}px`);
+}
+
+function getCurrentUserId(): string {
+	return localStorage.getItem('userId') || 'anonymous';
+}
+
+function getUserEmail(): string {
+	return localStorage.getItem('userEmail') || '';
+}
+
+function getUserPlan(): string {
+	return localStorage.getItem('userPlan') || 'free';
+}
+
+function getUserCountry(): string {
+	return 'US';
+}
+
+export { basicClientSetup, handleUserLogin, checkEvaluationDetails, progressiveEnhancement, cacheMonitoring, productionClientApp };

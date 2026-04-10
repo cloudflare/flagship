@@ -11,9 +11,7 @@ import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js'
  * `resolve*` methods are synchronous, as required by the OpenFeature web SDK.
  *
  * A cache miss (flag key not in `prefetchFlags`, or fetch failed) returns
- * `ErrorCode.FLAG_NOT_FOUND` with the default value — identical to how
- * production OpenFeature client providers such as `ofrep-web` and `flagd-web`
- * behave.
+ * `ErrorCode.FLAG_NOT_FOUND` with the default value.
  *
  * @example
  * ```typescript
@@ -60,8 +58,7 @@ export class FlagshipClientProvider implements Provider {
 	/**
 	 * Fetches all `prefetchFlags` in parallel and populates the cache.
 	 * Individual flag fetch failures are logged when `logging` is enabled but
-	 * do not prevent the provider from reaching READY — matching the behaviour
-	 * of `ofrep-web` and `flagd-web`.
+	 * do not prevent the provider from reaching READY.
 	 */
 	async initialize(context: EvaluationContext = {}): Promise<void> {
 		await this.fetchAll(context, 'initialization');

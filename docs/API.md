@@ -188,7 +188,7 @@ When the context changes, the entire cache is **cleared before re-fetching** all
 | `accountId`     | `string`      | —                                     | Account ID (required with `appId`)                    |
 | `baseUrl`       | `string`      | `https://api.flagship.cloudflare.dev` | Base URL override (only used with `appId`)            |
 | `endpoint`      | `string`      | —                                     | Full evaluation URL (mutually exclusive with `appId`) |
-| `token`         | `string`      | —                                     | Bearer token — adds `Authorization: Bearer` header    |
+| `authToken`     | `string`      | —                                     | Bearer token — adds `Authorization: Bearer` header    |
 | `logging`       | `boolean`     | `false`                               | Log fetch errors and cache misses to the console      |
 | `prefetchFlags` | `string[]`    | `[]`                                  | Flag keys to fetch on init and every context change   |
 | `timeout`       | `number`      | `5000`                                | Request timeout in ms                                 |
@@ -210,13 +210,13 @@ Context attributes are serialized as URL query parameters and sent with each eva
 
 ## Authentication
 
-All providers support the `token` option, which adds an `Authorization: Bearer <token>` header to every request:
+All providers support the `authToken` option, which adds an `Authorization: Bearer <token>` header to every request:
 
 ```typescript
-new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', token: 'your-secret-token' });
+new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', authToken: 'your-secret-token' });
 ```
 
-If you also provide an `Authorization` header via `fetchOptions.headers`, the explicit header takes precedence and `token` is ignored for that slot.
+If you also provide an `Authorization` header via `fetchOptions.headers`, the explicit header takes precedence and `authToken` is ignored for that slot.
 
 ## Logging
 

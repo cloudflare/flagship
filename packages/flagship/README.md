@@ -91,7 +91,7 @@ const darkMode = client.getBooleanValue('dark-mode', false);
 | OpenFeature compliant | Implements the CNCF OpenFeature specification                            |
 | Server + client       | Async per-request (server) and sync cache-based (browser) providers      |
 | All flag types        | Boolean, string, number, and object (JSON)                               |
-| Authentication        | `token` option adds `Authorization: Bearer` to every request             |
+| Authentication        | `authToken` option adds `Authorization: Bearer` to every request         |
 | Logging               | `logging` option surfaces fetch errors and cache misses (off by default) |
 | Retries + timeouts    | Configurable retry logic with `AbortController`-based timeouts           |
 | Hooks                 | Built-in `LoggingHook` and `TelemetryHook`                               |

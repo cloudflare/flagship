@@ -22,7 +22,7 @@ import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js'
  *   new FlagshipClientProvider({
  *     appId: 'app-abc123',
  *     accountId: 'your-account-id',
- *     token: 'your-token',
+ *     authToken: 'your-token',
  *     prefetchFlags: ['dark-mode', 'welcome-message'],
  *   })
  * );
@@ -121,7 +121,6 @@ export class FlagshipClientProvider implements Provider {
 					value: result.value,
 					reason: result.reason,
 					variant: result.variant,
-					timestamp: Date.now(),
 				});
 			}),
 		);

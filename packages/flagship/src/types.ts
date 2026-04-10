@@ -7,7 +7,7 @@ export const FLAGSHIP_DEFAULT_BASE_URL = 'https://api.flagship.cloudflare.dev';
  * Provide either `appId` + `accountId` (recommended) or `endpoint` (for full control).
  *
  * @example Using appId + accountId (recommended)
- * { appId: 'app-abc123', accountId: 'your-account-id', token: 'your-token' }
+ * { appId: 'app-abc123', accountId: 'your-account-id', authToken: 'your-token' }
  *
  * @example Using appId with custom base URL for local dev
  * { appId: 'app-abc123', accountId: 'your-account-id', baseUrl: 'http://localhost:8787' }
@@ -59,18 +59,18 @@ export interface FlagshipProviderOptions {
 	 * added to every request.
 	 *
 	 * If you also supply an `Authorization` header via `fetchOptions.headers`,
-	 * the explicit header takes precedence and `token` is ignored for
+	 * the explicit header takes precedence and `authToken` is ignored for
 	 * that header slot.
 	 *
 	 * @example
-	 * { appId: 'app-abc123', accountId: 'my-account', token: 'my-secret-token' }
+	 * { appId: 'app-abc123', accountId: 'my-account', authToken: 'my-secret-token' }
 	 */
-	token?: string;
+	authToken?: string;
 
 	/**
 	 * Custom fetch options applied to every request (e.g. custom headers).
 	 * Headers provided here are merged with any headers derived from other
-	 * options (e.g. `token`), with values in `fetchOptions.headers`
+	 * options (e.g. `authToken`), with values in `fetchOptions.headers`
 	 * taking precedence.
 	 */
 	fetchOptions?: RequestInit;

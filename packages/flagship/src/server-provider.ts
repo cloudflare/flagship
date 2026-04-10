@@ -21,6 +21,7 @@ const _noop = (): void => {};
  *   new FlagshipServerProvider({
  *     appId: 'app-abc123',
  *     accountId: 'your-account-id',
+ *     token: 'your-token',
  *   })
  * );
  *

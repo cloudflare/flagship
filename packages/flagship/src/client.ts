@@ -120,18 +120,18 @@ export class FlagshipClient {
 }
 
 /**
- * Merge `bearerToken` and `fetchOptions` into a single `RequestInit`.
+ * Merge `token` and `fetchOptions` into a single `RequestInit`.
  *
  * Precedence for the `Authorization` header (highest → lowest):
  * 1. An explicit `Authorization` value inside `fetchOptions.headers`
- * 2. A value derived from `bearerToken`
+ * 2. A value derived from `token`
  *
  * All other `fetchOptions` fields are spread as-is.
  */
 function buildFetchOptions(options: FlagshipProviderOptions): RequestInit {
-	const { bearerToken, fetchOptions = {} } = options;
+	const { token, fetchOptions = {} } = options;
 
-	if (!bearerToken) {
+	if (!token) {
 		return fetchOptions;
 	}
 
@@ -140,7 +140,7 @@ function buildFetchOptions(options: FlagshipProviderOptions): RequestInit {
 	// Only inject the Authorization header when the caller hasn't already
 	// provided one explicitly — their value takes precedence.
 	if (!existingHeaders.has('Authorization')) {
-		existingHeaders.set('Authorization', `Bearer ${bearerToken}`);
+		existingHeaders.set('Authorization', `Bearer ${token}`);
 	}
 
 	return {

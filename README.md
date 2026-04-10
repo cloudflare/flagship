@@ -17,12 +17,16 @@ import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '@cloudflare/flagship/server';
 
 await OpenFeature.setProviderAndWait(
-  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id' }),
+  new FlagshipServerProvider({
+    appId: 'your-app-id',
+    accountId: 'your-account-id',
+    token: 'your-token',
+  }),
 );
 
 const client = OpenFeature.getClient();
 const enabled = await client.getBooleanValue('dark-mode', false, {
-  userId: 'user-123',
+  targetingKey: 'user-123',
   plan: 'premium',
 });
 ```
@@ -34,6 +38,8 @@ const enabled = await client.getBooleanValue('dark-mode', false, {
 | **OpenFeature compliant** | Implements the CNCF OpenFeature specification                                      |
 | **Server + client**       | Async per-request evaluation (server) and sync cache-based evaluation (browser)    |
 | **All flag types**        | Boolean, string, number, and object (JSON)                                         |
+| **Authentication**        | `token` option adds `Authorization: Bearer` to every request                       |
+| **Logging**               | `logging` option surfaces fetch errors and cache misses (off by default)           |
 | **Retries + timeouts**    | Configurable retry logic with `AbortController`-based timeouts                     |
 | **Hooks**                 | Built-in `LoggingHook` and `TelemetryHook` for observability                       |
 | **Tree-shakeable**        | Server and client bundles are fully isolated — importing one never loads the other |

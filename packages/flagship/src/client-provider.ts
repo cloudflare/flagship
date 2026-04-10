@@ -6,9 +6,14 @@ import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js'
 /**
  * OpenFeature provider for Flagship (client-side / browser).
  *
- * Pre-fetches a configured set of flags when the evaluation context changes
- * and serves them synchronously from an in-memory cache, as required by the
- * OpenFeature web SDK.
+ * Fetches all flags listed in `prefetchFlags` during initialization and on
+ * every context change, storing results in an in-memory cache. All
+ * `resolve*` methods are synchronous, as required by the OpenFeature web SDK.
+ *
+ * A cache miss (flag key not in `prefetchFlags`, or fetch failed) returns
+ * `ErrorCode.FLAG_NOT_FOUND` with the default value — identical to how
+ * production OpenFeature client providers such as `ofrep-web` and `flagd-web`
+ * behave.
  *
  * @example
  * ```typescript
@@ -19,8 +24,8 @@ import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js'
  *   new FlagshipClientProvider({
  *     appId: 'app-abc123',
  *     accountId: 'your-account-id',
- *     prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads'],
- *     cacheTTL: 60_000,
+ *     token: 'your-token',
+ *     prefetchFlags: ['dark-mode', 'welcome-message'],
  *   })
  * );
  *
@@ -38,7 +43,6 @@ export class FlagshipClientProvider implements Provider {
 	private cache: Map<string, CachedFlag> = new Map();
 	private client: FlagshipClient;
 	private readonly prefetchFlags: string[];
-	private readonly cacheTTL: number;
 	private readonly logging: boolean;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
 
@@ -46,7 +50,6 @@ export class FlagshipClientProvider implements Provider {
 		this.metadata = { name: 'Flagship Client Provider' };
 		this.client = new FlagshipClient(options);
 		this.prefetchFlags = options.prefetchFlags || [];
-		this.cacheTTL = options.cacheTTL ?? 0;
 		this.logging = options.logging ?? false;
 	}
 
@@ -54,14 +57,14 @@ export class FlagshipClientProvider implements Provider {
 		return this.currentStatus;
 	}
 
+	/**
+	 * Fetches all `prefetchFlags` in parallel and populates the cache.
+	 * Individual flag fetch failures are logged when `logging` is enabled but
+	 * do not prevent the provider from reaching READY — matching the behaviour
+	 * of `ofrep-web` and `flagd-web`.
+	 */
 	async initialize(context: EvaluationContext = {}): Promise<void> {
-		if (this.prefetchFlags.length > 0) {
-			const results = await Promise.allSettled(this.prefetchFlags.map((flagKey) => this.fetchAndCache(flagKey, context)));
-			const failures = results.filter((r) => r.status === 'rejected');
-			if (failures.length > 0 && this.logging) {
-				console.warn(`[Flagship] ${failures.length} of ${this.prefetchFlags.length} flag(s) failed to pre-fetch during initialization.`);
-			}
-		}
+		await this.fetchAll(context, 'initialization');
 		this.currentStatus = ProviderStatus.READY;
 		this.events.emit(ProviderEvents.Ready);
 	}
@@ -72,80 +75,96 @@ export class FlagshipClientProvider implements Provider {
 	}
 
 	/**
-	 * Returning a Promise causes the SDK to automatically emit
-	 * `ProviderEvents.Reconciling` while this method is executing.
-	 *
-	 * Cache entries for all prefetchFlags are invalidated before fetching
-	 * so a failed re-fetch yields DEFAULT rather than stale values from
-	 * the previous context.
+	 * Invalidates the entire cache and re-fetches all `prefetchFlags` for the
+	 * new context. Returning a Promise causes the SDK to automatically emit
+	 * `ProviderEvents.Reconciling` while this method executes.
 	 */
 	async onContextChange(_oldContext: EvaluationContext, newContext: EvaluationContext = {}): Promise<void> {
-		if (this.prefetchFlags.length > 0) {
-			for (const flagKey of this.prefetchFlags) {
-				this.cache.delete(flagKey);
-			}
-			const results = await Promise.allSettled(this.prefetchFlags.map((flagKey) => this.fetchAndCache(flagKey, newContext)));
-			const failures = results.filter((r) => r.status === 'rejected');
-			if (failures.length > 0 && this.logging) {
-				console.warn(`[Flagship] ${failures.length} of ${this.prefetchFlags.length} flag(s) failed to re-fetch during context change.`);
-			}
-		}
+		this.cache.clear();
+		await this.fetchAll(newContext, 'context change');
 	}
 
 	resolveBooleanEvaluation(
 		flagKey: string,
 		defaultValue: boolean,
 		_context: EvaluationContext,
-		_logger: Logger,
+		logger: Logger,
 	): ResolutionDetails<boolean> {
-		return this.resolveFromCache(flagKey, defaultValue, 'boolean');
+		return this.resolveFromCache(flagKey, defaultValue, 'boolean', logger);
 	}
 
-	resolveStringEvaluation(flagKey: string, defaultValue: string, _context: EvaluationContext, _logger: Logger): ResolutionDetails<string> {
-		return this.resolveFromCache(flagKey, defaultValue, 'string');
+	resolveStringEvaluation(flagKey: string, defaultValue: string, _context: EvaluationContext, logger: Logger): ResolutionDetails<string> {
+		return this.resolveFromCache(flagKey, defaultValue, 'string', logger);
 	}
 
-	resolveNumberEvaluation(flagKey: string, defaultValue: number, _context: EvaluationContext, _logger: Logger): ResolutionDetails<number> {
-		return this.resolveFromCache(flagKey, defaultValue, 'number');
+	resolveNumberEvaluation(flagKey: string, defaultValue: number, _context: EvaluationContext, logger: Logger): ResolutionDetails<number> {
+		return this.resolveFromCache(flagKey, defaultValue, 'number', logger);
 	}
 
 	resolveObjectEvaluation<T extends JsonValue>(
 		flagKey: string,
 		defaultValue: T,
 		_context: EvaluationContext,
-		_logger: Logger,
+		logger: Logger,
 	): ResolutionDetails<T> {
-		return this.resolveFromCache(flagKey, defaultValue, 'object');
+		return this.resolveFromCache(flagKey, defaultValue, 'object', logger);
 	}
 
-	private async fetchAndCache(flagKey: string, context: EvaluationContext): Promise<void> {
-		const result = await this.client.evaluate(flagKey, context);
-		this.cache.set(flagKey, {
-			value: result.value,
-			reason: result.reason,
-			variant: result.variant,
-			timestamp: Date.now(),
-		});
+	/**
+	 * Fetches all `prefetchFlags` in parallel using `Promise.allSettled`.
+	 * Failures are logged individually when `logging` is enabled.
+	 */
+	private async fetchAll(context: EvaluationContext, phase: string): Promise<void> {
+		if (this.prefetchFlags.length === 0) return;
+
+		const results = await Promise.allSettled(
+			this.prefetchFlags.map(async (flagKey) => {
+				const result = await this.client.evaluate(flagKey, context);
+				this.cache.set(flagKey, {
+					value: result.value,
+					reason: result.reason,
+					variant: result.variant,
+					timestamp: Date.now(),
+				});
+			}),
+		);
+
+		if (this.logging) {
+			results.forEach((result, i) => {
+				if (result.status === 'rejected') {
+					const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+					console.warn(`[Flagship] Failed to fetch flag "${this.prefetchFlags[i]}" during ${phase}: ${reason}`);
+				}
+			});
+		}
 	}
 
-	private resolveFromCache<T>(flagKey: string, defaultValue: T, expectedType: string): ResolutionDetails<T> {
+	private resolveFromCache<T>(flagKey: string, defaultValue: T, expectedType: string, logger: Logger): ResolutionDetails<T> {
 		const cached = this.cache.get(flagKey);
 
 		if (!cached) {
-			return { value: defaultValue, reason: 'DEFAULT' };
-		}
-
-		if (this.cacheTTL > 0 && Date.now() - cached.timestamp > this.cacheTTL) {
-			this.cache.delete(flagKey);
-			return { value: defaultValue, reason: 'DEFAULT' };
+			const msg = `Flag "${flagKey}" not found in cache. Add it to prefetchFlags to ensure it is fetched on initialization.`;
+			if (this.logging) {
+				logger.warn(`[Flagship] ${msg}`);
+			}
+			return {
+				value: defaultValue,
+				reason: 'ERROR',
+				errorCode: ErrorCode.FLAG_NOT_FOUND,
+				errorMessage: msg,
+			};
 		}
 
 		const actualType = this.getValueType(cached.value);
 		if (actualType !== expectedType) {
+			const msg = `Flag "${flagKey}" type mismatch: expected ${expectedType}, got ${actualType}`;
+			if (this.logging) {
+				logger.warn(`[Flagship] ${msg}`);
+			}
 			return {
 				value: defaultValue,
 				errorCode: ErrorCode.TYPE_MISMATCH,
-				errorMessage: `Flag "${flagKey}" type mismatch: expected ${expectedType}, got ${actualType}`,
+				errorMessage: msg,
 				reason: 'ERROR',
 			};
 		}

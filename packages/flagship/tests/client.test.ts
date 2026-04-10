@@ -282,7 +282,7 @@ describe('FlagshipClient', () => {
 			});
 		});
 
-		it('should send Authorization header when bearerToken is provided', async () => {
+		it('should send Authorization header when token is provided', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({ flagKey: 'my-flag', value: true }),
@@ -290,7 +290,7 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				bearerToken: 'my-secret-token',
+				token: 'my-secret-token',
 			});
 
 			await client.evaluate('my-flag', {});
@@ -300,7 +300,7 @@ describe('FlagshipClient', () => {
 			expect(headers.get('Authorization')).toBe('Bearer my-secret-token');
 		});
 
-		it('should not override an explicit Authorization header with bearerToken', async () => {
+		it('should not override an explicit Authorization header with token', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({ flagKey: 'my-flag', value: true }),
@@ -308,7 +308,7 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				bearerToken: 'token-from-bearer-option',
+				token: 'token-from-token-option',
 				fetchOptions: {
 					headers: {
 						Authorization: 'Bearer token-from-fetch-options',
@@ -320,11 +320,11 @@ describe('FlagshipClient', () => {
 
 			const callArgs = (global.fetch as any).mock.calls[0];
 			const headers: Headers = callArgs[1].headers;
-			// fetchOptions.headers takes precedence over bearerToken
+			// fetchOptions.headers takes precedence over token
 			expect(headers.get('Authorization')).toBe('Bearer token-from-fetch-options');
 		});
 
-		it('should preserve other fetchOptions headers alongside bearerToken', async () => {
+		it('should preserve other fetchOptions headers alongside token', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({ flagKey: 'my-flag', value: true }),
@@ -332,7 +332,7 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				bearerToken: 'my-secret-token',
+				token: 'my-secret-token',
 				fetchOptions: {
 					headers: {
 						'X-Custom-Header': 'custom-value',
@@ -348,7 +348,7 @@ describe('FlagshipClient', () => {
 			expect(headers.get('X-Custom-Header')).toBe('custom-value');
 		});
 
-		it('should not add Authorization header when bearerToken is not set', async () => {
+		it('should not add Authorization header when token is not set', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({ flagKey: 'my-flag', value: true }),

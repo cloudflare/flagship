@@ -29,11 +29,18 @@ import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '@cloudflare/flagship/server';
 
 await OpenFeature.setProviderAndWait(
-  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id' }),
+  new FlagshipServerProvider({
+    appId: 'your-app-id',
+    accountId: 'your-account-id',
+    token: 'your-token',
+  }),
 );
 
 const client = OpenFeature.getClient();
-const enabled = await client.getBooleanValue('dark-mode', false, { userId: 'user-123' });
+const enabled = await client.getBooleanValue('dark-mode', false, {
+  targetingKey: 'user-123',
+  plan: 'premium',
+});
 ```
 
 ## Quick start — Cloudflare Workers
@@ -48,14 +55,18 @@ export default {
   async fetch(request: Request): Promise<Response> {
     if (!initialized) {
       await OpenFeature.setProviderAndWait(
-        new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id' }),
+        new FlagshipServerProvider({
+          appId: 'your-app-id',
+          accountId: 'your-account-id',
+          token: 'your-token',
+        }),
       );
       initialized = true;
     }
 
     const client = OpenFeature.getClient();
     const darkMode = await client.getBooleanValue('dark-mode', false, {
-      userId: new URL(request.url).searchParams.get('userId') ?? 'anonymous',
+      targetingKey: new URL(request.url).searchParams.get('userId') ?? 'anonymous',
     });
 
     return Response.json({ darkMode });
@@ -69,31 +80,38 @@ export default {
 import { OpenFeature } from '@openfeature/web-sdk';
 import { FlagshipClientProvider } from '@cloudflare/flagship/web';
 
+// 1. Initialize — fetches all prefetchFlags with empty context
 await OpenFeature.setProviderAndWait(
   new FlagshipClientProvider({
     appId: 'your-app-id',
     accountId: 'your-account-id',
+    token: 'your-token',
+    // List every flag your app uses. Flags not listed here return FLAG_NOT_FOUND.
     prefetchFlags: ['dark-mode', 'welcome-message'],
   }),
 );
 
-await OpenFeature.setContext({ userId: 'user-123', plan: 'premium' });
+// 2. Set context — re-fetches all prefetchFlags for this user
+await OpenFeature.setContext({ targetingKey: 'user-123', plan: 'premium' });
 
+// 3. Resolve synchronously from cache
 const client = OpenFeature.getClient();
-const darkMode = client.getBooleanValue('dark-mode', false);
+const darkMode = client.getBooleanValue('dark-mode', false); // reason: 'CACHED'
 ```
 
 ## Features
 
-| Feature               | Description                                                         |
-| --------------------- | ------------------------------------------------------------------- |
-| OpenFeature compliant | Implements the CNCF OpenFeature specification                       |
-| Server + client       | Async per-request (server) and sync cache-based (browser) providers |
-| All flag types        | Boolean, string, number, and object (JSON)                          |
-| Retries + timeouts    | Configurable retry logic with `AbortController`-based timeouts      |
-| Hooks                 | Built-in `LoggingHook` and `TelemetryHook`                          |
-| Tree-shakeable        | Server and client bundles are fully isolated                        |
-| TypeScript            | Strict types throughout                                             |
+| Feature               | Description                                                              |
+| --------------------- | ------------------------------------------------------------------------ |
+| OpenFeature compliant | Implements the CNCF OpenFeature specification                            |
+| Server + client       | Async per-request (server) and sync cache-based (browser) providers      |
+| All flag types        | Boolean, string, number, and object (JSON)                               |
+| Authentication        | `token` option adds `Authorization: Bearer` to every request             |
+| Logging               | `logging` option surfaces fetch errors and cache misses (off by default) |
+| Retries + timeouts    | Configurable retry logic with `AbortController`-based timeouts           |
+| Hooks                 | Built-in `LoggingHook` and `TelemetryHook`                               |
+| Tree-shakeable        | Server and client bundles are fully isolated                             |
+| TypeScript            | Strict types throughout                                                  |
 
 ## Packages
 
@@ -103,9 +121,23 @@ const darkMode = client.getBooleanValue('dark-mode', false);
 | `@cloudflare/flagship/server` | `FlagshipServerProvider` + hooks | `@openfeature/server-sdk` |
 | `@cloudflare/flagship/web`    | `FlagshipClientProvider`         | `@openfeature/web-sdk`    |
 
+## Client provider — how the cache works
+
+The `FlagshipClientProvider` follows the same pattern as other production OpenFeature client providers (`ofrep-web`, `flagd-web`):
+
+1. All flags listed in `prefetchFlags` are fetched in parallel during `initialize()` and on every `setContext()` call.
+2. Resolution methods (`getBooleanValue`, etc.) are **synchronous** and read from the in-memory cache only — no network at resolution time.
+3. Any flag **not** in `prefetchFlags` returns `FLAG_NOT_FOUND` immediately.
+
+| `reason` | `errorCode`      | Meaning                                          |
+| -------- | ---------------- | ------------------------------------------------ |
+| `CACHED` | —                | Flag fetched and served from cache               |
+| `ERROR`  | `FLAG_NOT_FOUND` | Flag not in `prefetchFlags`, or its fetch failed |
+| `ERROR`  | `TYPE_MISMATCH`  | Cached type doesn't match the resolution type    |
+
 ## Documentation
 
-- [API reference](../../docs/API.md)
+- [Full API reference](../../docs/API.md)
 - [OpenFeature specification](https://openfeature.dev/specification/)
 - [Examples](./examples/)
 

@@ -7,7 +7,7 @@ export const FLAGSHIP_DEFAULT_BASE_URL = 'https://api.flagship.cloudflare.dev';
  * Provide either `appId` + `accountId` (recommended) or `endpoint` (for full control).
  *
  * @example Using appId + accountId (recommended)
- * { appId: 'app-abc123', accountId: 'your-account-id' }
+ * { appId: 'app-abc123', accountId: 'your-account-id', token: 'your-token' }
  *
  * @example Using appId with custom base URL for local dev
  * { appId: 'app-abc123', accountId: 'your-account-id', baseUrl: 'http://localhost:8787' }
@@ -59,18 +59,18 @@ export interface FlagshipProviderOptions {
 	 * added to every request.
 	 *
 	 * If you also supply an `Authorization` header via `fetchOptions.headers`,
-	 * the explicit header takes precedence and `bearerToken` is ignored for
+	 * the explicit header takes precedence and `token` is ignored for
 	 * that header slot.
 	 *
 	 * @example
-	 * { appId: 'app-abc123', accountId: 'my-account', bearerToken: 'my-secret-token' }
+	 * { appId: 'app-abc123', accountId: 'my-account', token: 'my-secret-token' }
 	 */
-	bearerToken?: string;
+	token?: string;
 
 	/**
 	 * Custom fetch options applied to every request (e.g. custom headers).
 	 * Headers provided here are merged with any headers derived from other
-	 * options (e.g. `bearerToken`), with values in `fetchOptions.headers`
+	 * options (e.g. `token`), with values in `fetchOptions.headers`
 	 * taking precedence.
 	 */
 	fetchOptions?: RequestInit;
@@ -100,32 +100,25 @@ export interface FlagshipProviderOptions {
  */
 export interface FlagshipClientProviderOptions extends FlagshipProviderOptions {
 	/**
-	 * Flag keys to pre-fetch whenever the evaluation context changes.
-	 * Pre-fetched flags are stored in an in-memory cache and resolved
-	 * synchronously by the OpenFeature web SDK.
-	 * @default []
+	 * Flag keys to fetch during `initialize()` and on every `onContextChange()`.
+	 * Fetched flags are stored in an in-memory cache and resolved synchronously
+	 * by the OpenFeature web SDK. Any flag key not listed here will return
+	 * `ErrorCode.FLAG_NOT_FOUND` at resolution time.
+	 *
+	 * @example
+	 * prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads']
 	 */
 	prefetchFlags?: string[];
-
-	/**
-	 * Cache TTL in milliseconds. When a cached entry is older than this value
-	 * it is evicted and the next resolution returns the default value with
-	 * reason `'DEFAULT'`. Set to `0` to disable expiry.
-	 * @default 0
-	 */
-	cacheTTL?: number;
 }
 
 /**
  * A single entry in the client provider's in-memory flag cache.
- * Fields mirror the data-plane's `EvaluateResult` plus a wall-clock timestamp
- * for TTL enforcement.
+ * Fields mirror the data-plane's `EvaluateResult`.
  */
 export interface CachedFlag {
 	value: unknown;
 	reason: string;
 	variant: string;
-	timestamp: number;
 }
 
 /**

@@ -31,4 +31,4 @@ jobs:
       - run: pnpm run build
       - run: pnpm run check
       - run: pnpm run test
-      - run: pnpm pkg-pr-new publish --peerDeps ./packages/*
+      - run: pnpm dlx pkg-pr-new publish './packages/*'

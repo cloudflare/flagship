@@ -17,7 +17,7 @@ import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '@cloudflare/flagship/server';
 
 await OpenFeature.setProviderAndWait(
-  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id' }),
+  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', token: 'your-token' }),
 );
 
 const client = OpenFeature.getClient();
@@ -29,23 +29,25 @@ const enabled = await client.getBooleanValue('dark-mode', false, {
 
 ## Features
 
-| Feature | Description |
-| --- | --- |
-| **OpenFeature compliant** | Implements the CNCF OpenFeature specification |
-| **Server + client** | Async per-request evaluation (server) and sync cache-based evaluation (browser) |
-| **All flag types** | Boolean, string, number, and object (JSON) |
-| **Retries + timeouts** | Configurable retry logic with `AbortController`-based timeouts |
-| **Hooks** | Built-in `LoggingHook` and `TelemetryHook` for observability |
-| **Tree-shakeable** | Server and client bundles are fully isolated — importing one never loads the other |
-| **TypeScript** | Strict types throughout |
+| Feature                   | Description                                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------- |
+| **OpenFeature compliant** | Implements the CNCF OpenFeature specification                                      |
+| **Server + client**       | Async per-request evaluation (server) and sync cache-based evaluation (browser)    |
+| **All flag types**        | Boolean, string, number, and object (JSON)                                         |
+| **Authentication**        | `authToken` option adds `Authorization: Bearer` to every request                   |
+| **Logging**               | `logging` option surfaces fetch errors and cache misses (off by default)           |
+| **Retries + timeouts**    | Configurable retry logic with `AbortController`-based timeouts                     |
+| **Hooks**                 | Built-in `LoggingHook` and `TelemetryHook` for observability                       |
+| **Tree-shakeable**        | Server and client bundles are fully isolated — importing one never loads the other |
+| **TypeScript**            | Strict types throughout                                                            |
 
 ## Packages
 
-| Export | Description | Peer dependency |
-| --- | --- | --- |
-| [`@cloudflare/flagship`](packages/flagship) | Core client, types, errors | None |
+| Export                                             | Description                      | Peer dependency           |
+| -------------------------------------------------- | -------------------------------- | ------------------------- |
+| [`@cloudflare/flagship`](packages/flagship)        | Core client, types, errors       | None                      |
 | [`@cloudflare/flagship/server`](packages/flagship) | `FlagshipServerProvider` + hooks | `@openfeature/server-sdk` |
-| [`@cloudflare/flagship/web`](packages/flagship) | `FlagshipClientProvider` | `@openfeature/web-sdk` |
+| [`@cloudflare/flagship/web`](packages/flagship)    | `FlagshipClientProvider`         | `@openfeature/web-sdk`    |
 
 Each sub-path is a separate bundle so importing one never pulls in the other's OpenFeature dependency.
 
@@ -57,12 +59,12 @@ Each sub-path is a separate bundle so importing one never pulls in the other's O
 
 ## Repository Structure
 
-| Directory | Description |
-| --- | --- |
+| Directory                                 | Description                                       |
+| ----------------------------------------- | ------------------------------------------------- |
 | [`packages/flagship/`](packages/flagship) | `@cloudflare/flagship` — OpenFeature provider SDK |
-| [`docs/`](docs) | API reference and documentation |
-| [`.changeset/`](.changeset) | Changeset config and pending changesets |
-| [`.github/`](.github) | CI workflows and issue templates |
+| [`docs/`](docs)                           | API reference and documentation                   |
+| [`.changeset/`](.changeset)               | Changeset config and pending changesets           |
+| [`.github/`](.github)                     | CI workflows and issue templates                  |
 
 ## Development
 

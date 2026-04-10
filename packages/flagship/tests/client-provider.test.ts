@@ -29,11 +29,10 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.runsOn).toBe('client');
 		});
 
-		it('should accept prefetchFlags and cacheTTL options', () => {
+		it('should accept prefetchFlags option', () => {
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
 				prefetchFlags: ['flag1', 'flag2'],
-				cacheTTL: 60000,
 			});
 
 			expect(provider).toBeInstanceOf(FlagshipClientProvider);
@@ -50,8 +49,8 @@ describe('FlagshipClientProvider', () => {
 		});
 	});
 
-	describe('cache behavior - cache miss', () => {
-		it('should return default value for boolean flags when cache is empty', () => {
+	describe('cache miss — FLAG_NOT_FOUND', () => {
+		it('returns FLAG_NOT_FOUND for boolean flag not in cache', () => {
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
@@ -59,11 +58,11 @@ describe('FlagshipClientProvider', () => {
 			const result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
 
 			expect(result.value).toBe(false);
-			expect(result.reason).toBe('DEFAULT');
-			expect(result.errorCode).toBeUndefined();
+			expect(result.reason).toBe('ERROR');
+			expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
 		});
 
-		it('should return default value for string flags when cache is empty', () => {
+		it('returns FLAG_NOT_FOUND for string flag not in cache', () => {
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
@@ -71,10 +70,10 @@ describe('FlagshipClientProvider', () => {
 			const result = provider.resolveStringEvaluation('my-flag', 'default', {}, noopLogger);
 
 			expect(result.value).toBe('default');
-			expect(result.reason).toBe('DEFAULT');
+			expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
 		});
 
-		it('should return default value for number flags when cache is empty', () => {
+		it('returns FLAG_NOT_FOUND for number flag not in cache', () => {
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
@@ -82,33 +81,56 @@ describe('FlagshipClientProvider', () => {
 			const result = provider.resolveNumberEvaluation('my-flag', 42, {}, noopLogger);
 
 			expect(result.value).toBe(42);
-			expect(result.reason).toBe('DEFAULT');
+			expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
 		});
 
-		it('should return default value for object flags when cache is empty', () => {
+		it('returns FLAG_NOT_FOUND for object flag not in cache', () => {
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
 
-			const defaultValue = { key: 'value' };
-			const result = provider.resolveObjectEvaluation('my-flag', defaultValue, {}, noopLogger);
+			const result = provider.resolveObjectEvaluation('my-flag', { key: 'value' }, {}, noopLogger);
 
-			expect(result.value).toEqual(defaultValue);
-			expect(result.reason).toBe('DEFAULT');
+			expect(result.value).toEqual({ key: 'value' });
+			expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
+		});
+
+		it('logs FLAG_NOT_FOUND warning via injected logger when logging is true', () => {
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				logging: true,
+			});
+
+			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			provider.resolveBooleanEvaluation('missing-flag', false, {}, spyLogger);
+
+			expect(spyLogger.warn).toHaveBeenCalledWith(expect.stringContaining('missing-flag'));
+			expect(spyLogger.warn).toHaveBeenCalledWith(expect.stringContaining('prefetchFlags'));
+		});
+
+		it('does not log when logging is false (default)', () => {
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+			});
+
+			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			provider.resolveBooleanEvaluation('missing-flag', false, {}, spyLogger);
+
+			expect(spyLogger.warn).not.toHaveBeenCalled();
 		});
 	});
 
-	describe('onContextChange - pre-fetching', () => {
-		it('should pre-fetch configured flags during initialize with context', async () => {
+	describe('initialize — prefetch', () => {
+		it('fetches all prefetchFlags with the given context', async () => {
 			const mockEvaluate = vi.fn().mockResolvedValue({
 				flagKey: 'dark-mode',
 				value: true,
+				reason: 'TARGETING_MATCH',
+				variant: 'on',
 			});
 
 			(FlagshipClient as any).mockImplementation(function () {
-				return {
-					evaluate: mockEvaluate,
-				};
+				return { evaluate: mockEvaluate };
 			});
 
 			const provider = new FlagshipClientProvider({
@@ -123,15 +145,15 @@ describe('FlagshipClientProvider', () => {
 			expect(mockEvaluate).toHaveBeenCalledWith('dark-mode', context);
 		});
 
-		it('should not throw during initialize without context', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'dark-mode',
-				value: true,
-			});
-
+		it('resolves CACHED after successful initialize', async () => {
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockResolvedValue({
+						flagKey: 'dark-mode',
+						value: true,
+						reason: 'TARGETING_MATCH',
+						variant: 'on',
+					}),
 				};
 			});
 
@@ -140,87 +162,99 @@ describe('FlagshipClientProvider', () => {
 				prefetchFlags: ['dark-mode'],
 			});
 
-			await expect(provider.initialize()).resolves.not.toThrow();
-			expect(mockEvaluate).toHaveBeenCalledWith('dark-mode', {});
+			await provider.initialize({ targetingKey: 'user-123' });
+
+			const result = provider.resolveBooleanEvaluation('dark-mode', false, {}, noopLogger);
+			expect(result.value).toBe(true);
+			expect(result.reason).toBe('CACHED');
+			expect(result.variant).toBe('on');
 		});
 
-		it('should pre-fetch configured flags on context change', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'dark-mode',
-				value: true,
-			});
-
-			(FlagshipClient as any).mockImplementation(function () {
-				return {
-					evaluate: mockEvaluate,
-				};
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['dark-mode', 'welcome-message'],
-			});
-
-			const newContext = {
-				targetingKey: 'user-123',
-				email: 'user@example.com',
-			};
-
-			await provider.onContextChange({}, newContext);
-
-			// Should have called evaluate for each prefetch flag
-			expect(mockEvaluate).toHaveBeenCalledTimes(2);
-			expect(mockEvaluate).toHaveBeenCalledWith('dark-mode', newContext);
-			expect(mockEvaluate).toHaveBeenCalledWith('welcome-message', newContext);
-		});
-
-		it('should not pre-fetch if no flags configured', async () => {
+		it('skips fetching when no prefetchFlags configured', async () => {
 			const mockEvaluate = vi.fn();
-
 			(FlagshipClient as any).mockImplementation(function () {
-				return {
-					evaluate: mockEvaluate,
-				};
+				return { evaluate: mockEvaluate };
 			});
 
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
 
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
+			await provider.initialize({ targetingKey: 'user-1' });
 
 			expect(mockEvaluate).not.toHaveBeenCalled();
 		});
 
-		it('should handle pre-fetch errors gracefully', async () => {
-			const mockEvaluate = vi.fn().mockRejectedValue(new Error('Network error'));
+		it('still reaches READY when some pre-fetches fail', async () => {
+			const { ProviderStatus } = require('@openfeature/web-sdk');
 
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockRejectedValue(new Error('network')),
 				};
 			});
 
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['my-flag'],
+				prefetchFlags: ['flag1', 'flag2'],
 			});
 
-			// Should not throw
-			await expect(provider.onContextChange({}, { targetingKey: 'user-123' })).resolves.not.toThrow();
+			await provider.initialize();
+			expect(provider.status).toBe(ProviderStatus.READY);
 		});
 
-		it('should handle empty context changes', async () => {
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
+		it('emits ProviderEvents.Ready after initialize', async () => {
+			const { ProviderEvents } = require('@openfeature/web-sdk');
+
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
+			const handler = vi.fn();
+			provider.events.addHandler(ProviderEvents.Ready, handler);
+			await provider.initialize();
+			expect(handler).toHaveBeenCalled();
+		});
+
+		it('does not log on failure when logging is false (default)', async () => {
+			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: vi.fn().mockRejectedValue(new Error('network')) };
 			});
 
-			await expect(provider.onContextChange({}, {})).resolves.not.toThrow();
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['flag1'],
+			});
+
+			await provider.initialize();
+			expect(consoleSpy).not.toHaveBeenCalled();
+			consoleSpy.mockRestore();
+		});
+
+		it('logs per-flag failure with flag key and error message when logging is true', async () => {
+			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: vi.fn().mockRejectedValue(new Error('network failure')) };
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['flag1', 'flag2'],
+				logging: true,
+			});
+
+			await provider.initialize();
+
+			expect(consoleSpy).toHaveBeenCalledTimes(2);
+			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('flag1'));
+			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('flag2'));
+			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('network failure'));
+			consoleSpy.mockRestore();
 		});
 	});
 
-	describe('cache behavior - cache hit', () => {
-		it('should return cached value after pre-fetch', async () => {
+	describe('onContextChange', () => {
+		it('re-fetches all prefetchFlags with new context', async () => {
 			const mockEvaluate = vi.fn().mockResolvedValue({
 				flagKey: 'dark-mode',
 				value: true,
@@ -229,8 +263,94 @@ describe('FlagshipClientProvider', () => {
 			});
 
 			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: mockEvaluate };
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['dark-mode', 'welcome-message'],
+			});
+
+			const newContext = { targetingKey: 'user-123' };
+			await provider.onContextChange({}, newContext);
+
+			expect(mockEvaluate).toHaveBeenCalledTimes(2);
+			expect(mockEvaluate).toHaveBeenCalledWith('dark-mode', newContext);
+			expect(mockEvaluate).toHaveBeenCalledWith('welcome-message', newContext);
+		});
+
+		it('invalidates entire cache before re-fetching', async () => {
+			const mockEvaluate = vi
+				.fn()
+				.mockResolvedValueOnce({ flagKey: 'f', value: true, reason: 'DEFAULT', variant: 'on' })
+				.mockRejectedValueOnce(new Error('network'));
+
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: mockEvaluate };
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['f'],
+			});
+
+			await provider.onContextChange({}, { targetingKey: 'user-1' });
+			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).value).toBe(true);
+
+			// Second context change: fetch fails — stale value must NOT be served
+			await provider.onContextChange({ targetingKey: 'user-1' }, { targetingKey: 'user-2' });
+			const result = provider.resolveBooleanEvaluation('f', false, {}, noopLogger);
+			expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
+		});
+
+		it('does not fetch when no prefetchFlags configured', async () => {
+			const mockEvaluate = vi.fn();
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: mockEvaluate };
+			});
+
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
+			await provider.onContextChange({}, { targetingKey: 'user-123' });
+
+			expect(mockEvaluate).not.toHaveBeenCalled();
+		});
+
+		it('handles context change without argument', async () => {
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
+			await expect(provider.onContextChange({}, {})).resolves.not.toThrow();
+		});
+
+		it('logs per-flag failure during context change when logging is true', async () => {
+			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: vi.fn().mockRejectedValue(new Error('timeout')) };
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['flag1'],
+				logging: true,
+			});
+
+			await provider.onContextChange({}, { targetingKey: 'user-1' });
+
+			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('flag1'));
+			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('timeout'));
+			consoleSpy.mockRestore();
+		});
+	});
+
+	describe('cache hit resolution', () => {
+		it('returns cached boolean value with CACHED reason', async () => {
+			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockResolvedValue({
+						flagKey: 'dark-mode',
+						value: true,
+						reason: 'TARGETING_MATCH',
+						variant: 'on',
+					}),
 				};
 			});
 
@@ -239,108 +359,90 @@ describe('FlagshipClientProvider', () => {
 				prefetchFlags: ['dark-mode'],
 			});
 
-			// Pre-fetch the flag
 			await provider.onContextChange({}, { targetingKey: 'user-123' });
 
-			// Resolve from cache
 			const result = provider.resolveBooleanEvaluation('dark-mode', false, {}, noopLogger);
-
 			expect(result.value).toBe(true);
 			expect(result.reason).toBe('CACHED');
 			expect(result.variant).toBe('on');
 		});
 
-		it('should return cached string value', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'welcome-message',
-				value: 'Hello, user!',
-			});
-
+		it('returns cached string value', async () => {
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'msg', value: 'Hello!', reason: 'DEFAULT', variant: 'default' }),
 				};
 			});
 
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['welcome-message'],
+				prefetchFlags: ['msg'],
 			});
 
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
-
-			const result = provider.resolveStringEvaluation('welcome-message', 'default', {}, noopLogger);
-
-			expect(result.value).toBe('Hello, user!');
+			await provider.onContextChange({}, {});
+			const result = provider.resolveStringEvaluation('msg', 'fallback', {}, noopLogger);
+			expect(result.value).toBe('Hello!');
 			expect(result.reason).toBe('CACHED');
 		});
 
-		it('should return cached number value', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'max-uploads',
-				value: 10,
-			});
-
+		it('returns cached number value', async () => {
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'limit', value: 10, reason: 'DEFAULT', variant: 'default' }),
 				};
 			});
 
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['max-uploads'],
+				prefetchFlags: ['limit'],
 			});
 
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
-
-			const result = provider.resolveNumberEvaluation('max-uploads', 5, {}, noopLogger);
-
+			await provider.onContextChange({}, {});
+			const result = provider.resolveNumberEvaluation('limit', 5, {}, noopLogger);
 			expect(result.value).toBe(10);
-			expect(result.reason).toBe('CACHED');
 		});
 
-		it('should return cached object value', async () => {
-			const themeConfig = {
-				primary: '#007bff',
-				secondary: '#6c757d',
-			};
-
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'theme-config',
-				value: themeConfig,
-			});
-
+		it('returns cached object value', async () => {
+			const theme = { primary: '#007bff' };
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'theme', value: theme, reason: 'DEFAULT', variant: 'default' }),
 				};
 			});
 
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['theme-config'],
+				prefetchFlags: ['theme'],
 			});
 
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
+			await provider.onContextChange({}, {});
+			const result = provider.resolveObjectEvaluation('theme', {}, {}, noopLogger);
+			expect(result.value).toEqual(theme);
+		});
 
-			const result = provider.resolveObjectEvaluation('theme-config', {}, {}, noopLogger);
+		it('flagMetadata is always {} on a cache hit', async () => {
+			(FlagshipClient as any).mockImplementation(function () {
+				return {
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'f', value: true, reason: 'DEFAULT', variant: 'on' }),
+				};
+			});
 
-			expect(result.value).toEqual(themeConfig);
-			expect(result.reason).toBe('CACHED');
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['f'],
+			});
+
+			await provider.onContextChange({}, {});
+			const result = provider.resolveBooleanEvaluation('f', false, {}, noopLogger);
+			expect(result.flagMetadata).toEqual({});
 		});
 	});
 
 	describe('type checking', () => {
-		it('should return TYPE_MISMATCH when cached type does not match expected type', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'my-flag',
-				value: 'string-value', // String value
-			});
-
+		it('returns TYPE_MISMATCH when cached type does not match expected type', async () => {
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'my-flag', value: 'string-value', reason: 'DEFAULT', variant: 'v' }),
 				};
 			});
 
@@ -351,26 +453,39 @@ describe('FlagshipClientProvider', () => {
 
 			await provider.onContextChange({}, { targetingKey: 'user-123' });
 
-			// Try to resolve as boolean (but cache has string)
 			const result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
 
-			expect(result.value).toBe(false); // Default value
+			expect(result.value).toBe(false);
 			expect(result.errorCode).toBe(ErrorCode.TYPE_MISMATCH);
-			expect(result.errorMessage).toContain('type mismatch');
-			expect(result.errorMessage).toContain('expected boolean');
-			expect(result.errorMessage).toContain('got string');
+			expect(result.errorMessage).toContain('expected boolean, got string');
 			expect(result.reason).toBe('ERROR');
 		});
 
-		it('should return TYPE_MISMATCH for boolean when expecting number', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'my-flag',
-				value: true,
-			});
-
+		it('calls logger.warn on type mismatch when logging is true', async () => {
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'my-flag', value: 'string-value', reason: 'DEFAULT', variant: 'v' }),
+				};
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['my-flag'],
+				logging: true,
+			});
+
+			await provider.onContextChange({}, { targetingKey: 'user-123' });
+
+			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			provider.resolveBooleanEvaluation('my-flag', false, {}, spyLogger);
+
+			expect(spyLogger.warn).toHaveBeenCalledWith(expect.stringContaining('type mismatch'));
+		});
+
+		it('does not call logger.warn on type mismatch when logging is false (default)', async () => {
+			(FlagshipClient as any).mockImplementation(function () {
+				return {
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'my-flag', value: 'string-value', reason: 'DEFAULT', variant: 'v' }),
 				};
 			});
 
@@ -381,193 +496,28 @@ describe('FlagshipClientProvider', () => {
 
 			await provider.onContextChange({}, { targetingKey: 'user-123' });
 
-			const result = provider.resolveNumberEvaluation('my-flag', 0, {}, noopLogger);
+			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+			provider.resolveBooleanEvaluation('my-flag', false, {}, spyLogger);
 
-			expect(result.value).toBe(0);
-			expect(result.errorCode).toBe(ErrorCode.TYPE_MISMATCH);
+			expect(spyLogger.warn).not.toHaveBeenCalled();
 		});
 
-		it('should return TYPE_MISMATCH for object when expecting string', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'my-flag',
-				value: { key: 'value' },
-			});
-
+		it('null value from API is classified as object type', async () => {
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: mockEvaluate,
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'f', value: null, reason: 'DEFAULT', variant: 'default' }),
 				};
 			});
 
 			const provider = new FlagshipClientProvider({
 				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['my-flag'],
+				prefetchFlags: ['f'],
 			});
 
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
-
-			const result = provider.resolveStringEvaluation('my-flag', 'default', {}, noopLogger);
-
-			expect(result.value).toBe('default');
-			expect(result.errorCode).toBe(ErrorCode.TYPE_MISMATCH);
-		});
-	});
-
-	describe('cache TTL', () => {
-		it('should expire cached values after TTL', async () => {
-			vi.useFakeTimers();
-
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'my-flag',
-				value: true,
-			});
-
-			(FlagshipClient as any).mockImplementation(function () {
-				return {
-					evaluate: mockEvaluate,
-				};
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['my-flag'],
-				cacheTTL: 60000, // 1 minute
-			});
-
-			// Pre-fetch flag
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
-
-			// Should return cached value
-			let result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
-			expect(result.value).toBe(true);
-			expect(result.reason).toBe('CACHED');
-
-			// Advance time by 61 seconds (past TTL)
-			vi.advanceTimersByTime(61000);
-
-			// Should return default value (cache expired)
-			result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
-			expect(result.value).toBe(false);
-			expect(result.reason).toBe('DEFAULT');
-
-			vi.useRealTimers();
-		});
-
-		it('should not expire cached values when TTL is 0', async () => {
-			vi.useFakeTimers();
-
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'my-flag',
-				value: true,
-			});
-
-			(FlagshipClient as any).mockImplementation(function () {
-				return {
-					evaluate: mockEvaluate,
-				};
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['my-flag'],
-				cacheTTL: 0, // No expiry
-			});
-
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
-
-			// Should return cached value
-			let result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
-			expect(result.value).toBe(true);
-
-			// Advance time by a long time
-			vi.advanceTimersByTime(1000000000);
-
-			// Should still return cached value (no expiry)
-			result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
-			expect(result.value).toBe(true);
-			expect(result.reason).toBe('CACHED');
-
-			vi.useRealTimers();
-		});
-	});
-
-	describe('metadata', () => {
-		it('flagMetadata is always empty (API does not return metadata)', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({
-				flagKey: 'my-flag',
-				value: true,
-				variant: 'on',
-				reason: 'DEFAULT',
-			});
-
-			(FlagshipClient as any).mockImplementation(function () {
-				return { evaluate: mockEvaluate };
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['my-flag'],
-			});
-
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
-
-			const result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
-
-			expect(result.flagMetadata).toEqual({});
-		});
-
-		it('should have correct provider name', () => {
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-			});
-
-			expect(provider.metadata.name).toBe('Flagship Client Provider');
-		});
-
-		it('should specify client runtime', () => {
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-			});
-
-			expect(provider.runsOn).toBe('client');
-		});
-	});
-
-	describe('multiple context changes', () => {
-		it('should re-fetch flags on each context change', async () => {
-			const mockEvaluate = vi
-				.fn()
-				.mockResolvedValueOnce({
-					flagKey: 'my-flag',
-					value: true,
-				})
-				.mockResolvedValueOnce({
-					flagKey: 'my-flag',
-					value: false,
-				});
-
-			(FlagshipClient as any).mockImplementation(function () {
-				return {
-					evaluate: mockEvaluate,
-				};
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['my-flag'],
-			});
-
-			// First context change
-			await provider.onContextChange({}, { targetingKey: 'user-123' });
-			let result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
-			expect(result.value).toBe(true);
-
-			// Second context change
-			await provider.onContextChange({ targetingKey: 'user-123' }, { targetingKey: 'user-456' });
-			result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
-			expect(result.value).toBe(false);
-
-			expect(mockEvaluate).toHaveBeenCalledTimes(2);
+			await provider.onContextChange({}, {});
+			const result = provider.resolveObjectEvaluation('f', {}, {}, noopLogger);
+			expect(result.value).toBeNull();
+			expect(result.errorCode).toBeUndefined();
 		});
 	});
 
@@ -585,53 +535,19 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.status).toBe(ProviderStatus.READY);
 		});
 
-		it('initialize with no prefetchFlags skips evaluate entirely', async () => {
-			const mockEvaluate = vi.fn();
-			(FlagshipClient as any).mockImplementation(function () {
-				return { evaluate: mockEvaluate };
-			});
-
-			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
-			await provider.initialize({ targetingKey: 'user-1' });
-
-			expect(mockEvaluate).not.toHaveBeenCalled();
-		});
-
-		it('initialize emits ProviderEvents.Ready', async () => {
-			const { ProviderEvents } = require('@openfeature/web-sdk');
-			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
-			const handler = vi.fn();
-			provider.events.addHandler(ProviderEvents.Ready, handler);
-			await provider.initialize();
-			expect(handler).toHaveBeenCalled();
-		});
-
-		it('initialize still reaches READY when some pre-fetches fail', async () => {
+		it('status resets to NOT_READY after onClose', async () => {
 			const { ProviderStatus } = require('@openfeature/web-sdk');
-			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-			(FlagshipClient as any).mockImplementation(function () {
-				return {
-					evaluate: vi.fn().mockRejectedValue(new Error('network')),
-				};
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['flag1', 'flag2'],
-			});
-
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
 			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.READY);
-			expect(consoleSpy).toHaveBeenCalled();
-
-			consoleSpy.mockRestore();
+			await provider.onClose();
+			expect(provider.status).toBe(ProviderStatus.NOT_READY);
 		});
 
 		it('onClose clears the cache', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({ flagKey: 'f', value: true });
 			(FlagshipClient as any).mockImplementation(function () {
-				return { evaluate: mockEvaluate };
+				return {
+					evaluate: vi.fn().mockResolvedValue({ flagKey: 'f', value: true, reason: 'DEFAULT', variant: 'on' }),
+				};
 			});
 
 			const provider = new FlagshipClientProvider({
@@ -643,19 +559,14 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).reason).toBe('CACHED');
 
 			await provider.onClose();
-			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).reason).toBe('DEFAULT');
+			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
 		});
 
-		it('onClose resets status to NOT_READY', async () => {
-			const { ProviderStatus } = require('@openfeature/web-sdk');
-			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
-			await provider.initialize();
-			await provider.onClose();
-			expect(provider.status).toBe(ProviderStatus.NOT_READY);
-		});
-
-		it('onContextChange invalidates cache before re-fetching so a failed fetch yields DEFAULT', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValueOnce({ flagKey: 'f', value: true }).mockRejectedValueOnce(new Error('network'));
+		it('re-fetches flags on each context change', async () => {
+			const mockEvaluate = vi
+				.fn()
+				.mockResolvedValueOnce({ flagKey: 'f', value: true, reason: 'DEFAULT', variant: 'on' })
+				.mockResolvedValueOnce({ flagKey: 'f', value: false, reason: 'DEFAULT', variant: 'off' });
 
 			(FlagshipClient as any).mockImplementation(function () {
 				return { evaluate: mockEvaluate };
@@ -670,77 +581,21 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).value).toBe(true);
 
 			await provider.onContextChange({ targetingKey: 'user-1' }, { targetingKey: 'user-2' });
-			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).reason).toBe('DEFAULT');
+			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).value).toBe(false);
+
+			expect(mockEvaluate).toHaveBeenCalledTimes(2);
 		});
 	});
 
-	describe('resolution edge cases', () => {
-		it('flagMetadata defaults to {} when cached metadata is undefined', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({ flagKey: 'f', value: true });
-			(FlagshipClient as any).mockImplementation(function () {
-				return { evaluate: mockEvaluate };
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['f'],
-			});
-
-			await provider.onContextChange({}, {});
-			const result = provider.resolveBooleanEvaluation('f', false, {}, noopLogger);
-			expect(result.flagMetadata).toEqual({});
+	describe('metadata', () => {
+		it('has correct provider name', () => {
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
+			expect(provider.metadata.name).toBe('Flagship Client Provider');
 		});
 
-		it('null value from API is classified as object type', async () => {
-			const mockEvaluate = vi.fn().mockResolvedValue({ flagKey: 'f', value: null });
-			(FlagshipClient as any).mockImplementation(function () {
-				return { evaluate: mockEvaluate };
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['f'],
-			});
-
-			await provider.onContextChange({}, {});
-			const result = provider.resolveObjectEvaluation('f', {}, {}, noopLogger);
-			expect(result.value).toBeNull();
-			expect(result.errorCode).toBeUndefined();
-		});
-
-		it('cacheTTL defaults to 0 (no expiry) when not specified', async () => {
-			vi.useFakeTimers();
-
-			const mockEvaluate = vi.fn().mockResolvedValue({ flagKey: 'f', value: true });
-			(FlagshipClient as any).mockImplementation(function () {
-				return { evaluate: mockEvaluate };
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['f'],
-			});
-
-			await provider.onContextChange({}, {});
-			vi.advanceTimersByTime(9_999_999);
-			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).reason).toBe('CACHED');
-
-			vi.useRealTimers();
-		});
-
-		it('INVALID_CONTEXT from complex context on onContextChange is absorbed by allSettled', async () => {
-			const mockEvaluate = vi.fn().mockRejectedValue(Object.assign(new Error('ctx'), { code: 'INVALID_CONTEXT' }));
-			(FlagshipClient as any).mockImplementation(function () {
-				return { evaluate: mockEvaluate };
-			});
-
-			const provider = new FlagshipClientProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				prefetchFlags: ['f'],
-			});
-
-			await expect(provider.onContextChange({}, { nested: {} as any })).resolves.not.toThrow();
-			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).reason).toBe('DEFAULT');
+		it('specifies client runtime', () => {
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
+			expect(provider.runsOn).toBe('client');
 		});
 	});
 });

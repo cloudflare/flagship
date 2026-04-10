@@ -22,7 +22,7 @@ export class FlagshipClient {
 	constructor(options: FlagshipProviderOptions) {
 		this.options = {
 			endpoint: resolveEndpoint(options),
-			fetchOptions: options.fetchOptions || {},
+			fetchOptions: buildFetchOptions(options),
 			timeout: options.timeout || 5000,
 			retries: Math.min(options.retries !== undefined ? options.retries : 1, 10),
 			retryDelay: Math.min(options.retryDelay !== undefined ? options.retryDelay : 1000, 30_000),
@@ -117,6 +117,36 @@ export class FlagshipClient {
 			throw new FlagshipError(`Network error: ${error}`, FlagshipErrorCode.NETWORK_ERROR, error);
 		}
 	}
+}
+
+/**
+ * Merge `authToken` and `fetchOptions` into a single `RequestInit`.
+ *
+ * Precedence for the `Authorization` header (highest → lowest):
+ * 1. An explicit `Authorization` value inside `fetchOptions.headers`
+ * 2. A value derived from `authToken`
+ *
+ * All other `fetchOptions` fields are spread as-is.
+ */
+function buildFetchOptions(options: FlagshipProviderOptions): RequestInit {
+	const { authToken, fetchOptions = {} } = options;
+
+	if (!authToken) {
+		return fetchOptions;
+	}
+
+	const existingHeaders = new Headers(fetchOptions.headers as HeadersInit | undefined);
+
+	// Only inject the Authorization header when the caller hasn't already
+	// provided one explicitly — their value takes precedence.
+	if (!existingHeaders.has('Authorization')) {
+		existingHeaders.set('Authorization', `Bearer ${authToken}`);
+	}
+
+	return {
+		...fetchOptions,
+		headers: existingHeaders,
+	};
 }
 
 function resolveEndpoint(options: FlagshipProviderOptions): string {

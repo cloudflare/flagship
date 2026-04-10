@@ -26,8 +26,8 @@ async function basicClientSetup() {
 		new FlagshipClientProvider({
 			appId: FLAGSHIP_APP_ID,
 			accountId: FLAGSHIP_ACCOUNT_ID,
+			token: 'your-token',
 			prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads', 'theme-config'],
-			cacheTTL: 60000,
 		}),
 	);
 
@@ -89,7 +89,7 @@ async function checkEvaluationDetails() {
 
 	console.log('Evaluation details:');
 	console.log('- Value:', details.value);
-	console.log('- Reason:', details.reason); // 'CACHED', 'DEFAULT', or 'ERROR'
+	console.log('- Reason:', details.reason); // 'CACHED' on success, 'ERROR' on cache miss or type mismatch
 	console.log('- Variant:', details.variant);
 	console.log('- Metadata:', details.flagMetadata);
 
@@ -121,8 +121,8 @@ async function progressiveEnhancement() {
 		new FlagshipClientProvider({
 			appId: FLAGSHIP_APP_ID,
 			accountId: FLAGSHIP_ACCOUNT_ID,
+			token: 'your-token',
 			prefetchFlags: ['premium-features', 'beta-access'],
-			cacheTTL: 300000,
 		}),
 	);
 
@@ -176,8 +176,8 @@ async function cacheMonitoring() {
 	await OpenFeature.setContext({ targetingKey: 'user-123' });
 
 	const client = OpenFeature.getClient();
-	const flags = ['flag1', 'flag2', 'flag3', 'flag4']; // flag4 not pre-fetched
-	const stats = { hits: 0, misses: 0, errors: 0 };
+	const flags = ['flag1', 'flag2', 'flag3', 'flag4']; // flag4 not in prefetchFlags — returns FLAG_NOT_FOUND
+	const stats = { hits: 0, errors: 0 };
 
 	flags.forEach((flagKey) => {
 		const details = client.getBooleanDetails(flagKey, false);
@@ -186,13 +186,9 @@ async function cacheMonitoring() {
 				stats.hits++;
 				console.log(`✓ Cache HIT: ${flagKey}`);
 				break;
-			case 'DEFAULT':
-				stats.misses++;
-				console.warn(`⚠ Cache MISS: ${flagKey}`);
-				break;
 			case 'ERROR':
 				stats.errors++;
-				console.error(`✗ Cache ERROR: ${flagKey} - ${details.errorMessage}`);
+				console.error(`✗ ${details.errorCode}: ${flagKey} - ${details.errorMessage}`);
 				break;
 		}
 	});
@@ -214,8 +210,8 @@ async function productionClientApp() {
 			new FlagshipClientProvider({
 				appId: FLAGSHIP_APP_ID,
 				accountId: FLAGSHIP_ACCOUNT_ID,
+				token: 'your-token',
 				prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads', 'premium-features', 'beta-access', 'theme-config'],
-				cacheTTL: 60000,
 				timeout: 5000,
 				retries: 1,
 			}),

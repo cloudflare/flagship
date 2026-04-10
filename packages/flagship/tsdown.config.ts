@@ -7,6 +7,10 @@ export default defineConfig({
 		web: 'src/web.ts',
 	},
 	format: ['esm', 'cjs'],
-	dts: true,
+	dts: { sourcemap: false },
+	sourcemap: false,
 	clean: true,
+	deps: {
+		onlyBundle: false,
+	},
 });

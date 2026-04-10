@@ -90,6 +90,13 @@ new FlagshipServerProvider({
   // Mutually exclusive with appId.
   // endpoint: 'http://localhost:8787/v1/acct/apps/app-id/evaluate',
 
+  // Authentication
+  token: 'your-token', // adds Authorization: Bearer <token> to every request
+
+  // Logging — controls logs emitted by the Flagship SDK itself (default: false)
+  // Does not affect OpenFeature framework logs (use OpenFeature.setLogger() for those).
+  logging: false,
+
   timeout: 5000, // request timeout in ms (default: 5000)
   retries: 1, // retry attempts on transient errors (default: 1, max: 10)
   retryDelay: 1000, // delay between retries in ms (default: 1000, max: 30000)
@@ -142,8 +149,9 @@ await OpenFeature.setProviderAndWait(
   new FlagshipClientProvider({
     appId: 'your-app-id',
     accountId: 'your-account-id',
+    token: 'your-token',
     prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads'],
-    cacheTTL: 60_000, // expire cached entries after 1 minute (0 = never, default)
+    logging: true, // log fetch errors and cache misses to the console
   }),
 );
 
@@ -164,13 +172,13 @@ const uploads = client.getNumberValue('max-uploads', 5);
 
 ### Cache behavior
 
-| Situation                                       | `reason`  | `errorCode`     | Value returned |
-| ----------------------------------------------- | --------- | --------------- | -------------- |
-| Flag was pre-fetched and cached                 | `CACHED`  | —               | Cached value   |
-| Flag was not in `prefetchFlags`, or TTL expired | `DEFAULT` | —               | Default value  |
-| Cached value's type doesn't match the call      | `ERROR`   | `TYPE_MISMATCH` | Default value  |
+| Situation                                    | `reason` | `errorCode`      | Value returned |
+| -------------------------------------------- | -------- | ---------------- | -------------- |
+| Flag was pre-fetched and cached              | `CACHED` | —                | Cached value   |
+| Flag not in `prefetchFlags`, or fetch failed | `ERROR`  | `FLAG_NOT_FOUND` | Default value  |
+| Cached value's type doesn't match the call   | `ERROR`  | `TYPE_MISMATCH`  | Default value  |
 
-When the context changes, cache entries for all `prefetchFlags` are **invalidated before re-fetching**. A failed re-fetch returns the default value rather than serving values from the previous context.
+When the context changes, the entire cache is **cleared before re-fetching** all `prefetchFlags`. A failed re-fetch returns `FLAG_NOT_FOUND` rather than serving stale values from the previous context.
 
 ### Configuration options
 
@@ -180,8 +188,9 @@ When the context changes, cache entries for all `prefetchFlags` are **invalidate
 | `accountId`     | `string`      | —                                     | Account ID (required with `appId`)                    |
 | `baseUrl`       | `string`      | `https://api.flagship.cloudflare.dev` | Base URL override (only used with `appId`)            |
 | `endpoint`      | `string`      | —                                     | Full evaluation URL (mutually exclusive with `appId`) |
-| `prefetchFlags` | `string[]`    | `[]`                                  | Flag keys to pre-fetch on context changes             |
-| `cacheTTL`      | `number`      | `0`                                   | Cache TTL in ms (0 = no expiry)                       |
+| `authToken`     | `string`      | —                                     | Bearer token — adds `Authorization: Bearer` header    |
+| `logging`       | `boolean`     | `false`                               | Log fetch errors and cache misses to the console      |
+| `prefetchFlags` | `string[]`    | `[]`                                  | Flag keys to fetch on init and every context change   |
 | `timeout`       | `number`      | `5000`                                | Request timeout in ms                                 |
 | `retries`       | `number`      | `1`                                   | Retry attempts (max 10)                               |
 | `retryDelay`    | `number`      | `1000`                                | Delay between retries in ms (max 30 000)              |
@@ -191,13 +200,36 @@ When the context changes, cache entries for all `prefetchFlags` are **invalidate
 
 Context attributes are serialized as URL query parameters and sent with each evaluation request. The following value types are supported:
 
-| Type                          | Serialization                                |
-| ----------------------------- | -------------------------------------------- |
-| `string`, `number`, `boolean` | Passed directly as a string                  |
-| `Date`                        | Converted to ISO 8601                        |
+| Type                          | Serialization                                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `string`, `number`, `boolean` | Passed directly as a string                                                                                                                                    |
+| `Date`                        | Converted to ISO 8601                                                                                                                                          |
 | Objects, arrays               | **Not supported** — the provider throws `INVALID_CONTEXT`. Keys with complex values are dropped with a console warning if using `ContextTransformer` directly. |
 
 `targetingKey` is the standard OpenFeature field for identifying the evaluation subject (user ID, session ID, etc.) and is treated like any other attribute.
+
+## Authentication
+
+All providers support the `authToken` option, which adds an `Authorization: Bearer <token>` header to every request:
+
+```typescript
+new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', authToken: 'your-secret-token' });
+```
+
+If you also provide an `Authorization` header via `fetchOptions.headers`, the explicit header takes precedence and `authToken` is ignored for that slot.
+
+## Logging
+
+The `logging` option controls logs emitted directly by the Flagship SDK. It is `false` by default and applies to both providers.
+
+```typescript
+new FlagshipServerProvider({ ..., logging: true });
+new FlagshipClientProvider({ ..., logging: true });
+```
+
+When enabled, the server provider logs via the OpenFeature-injected `Logger` (debug on evaluation, warn on type mismatch, error on failures). The client provider logs `console.warn` for any flag that fails to fetch and for any cache miss at resolution time.
+
+> Note: `logging` only controls Flagship SDK logs. OpenFeature's own framework-level logs are controlled separately via `OpenFeature.setLogger(myLogger)`.
 
 ## Error handling
 
@@ -214,13 +246,13 @@ if (details.errorCode) {
 
 ### Error codes
 
-| Code              | Cause                                                            |
-| ----------------- | ---------------------------------------------------------------- |
-| `FLAG_NOT_FOUND`  | The flag key does not exist (HTTP 404)                           |
-| `TYPE_MISMATCH`   | The flag's resolved value type does not match the requested type |
-| `INVALID_CONTEXT` | The evaluation context contains objects or arrays                |
-| `PARSE_ERROR`     | The API response was not a valid evaluation response             |
-| `GENERAL`         | Network error, timeout, or any other transient failure           |
+| Code              | Cause                                                                           |
+| ----------------- | ------------------------------------------------------------------------------- |
+| `FLAG_NOT_FOUND`  | Flag key does not exist (HTTP 404), or not in `prefetchFlags` (client provider) |
+| `TYPE_MISMATCH`   | The flag's resolved value type does not match the requested type                |
+| `INVALID_CONTEXT` | The evaluation context contains objects or arrays                               |
+| `PARSE_ERROR`     | The API response was not a valid evaluation response                            |
+| `GENERAL`         | Network error, timeout, or any other transient failure                          |
 
 ## Hooks
 
@@ -292,7 +324,7 @@ await OpenFeature.setProviderAndWait(provider);
 
 **Server provider:** During initialization, the provider probes the evaluation endpoint with a health-check request. A 404 response (flag not found) is treated as success — it means the endpoint is reachable. Any network or timeout error causes `ProviderEvents.Error` to be emitted, but `setProviderAndWait` still resolves (does not reject) — the provider transitions to `ERROR` status silently.
 
-**Client provider:** During initialization, the provider pre-fetches all `prefetchFlags` using `Promise.allSettled`. Even if some or all fetches fail, the provider transitions to `READY` status. Failed flags will return default values when resolved.
+**Client provider:** During initialization, the provider fetches all `prefetchFlags` using `Promise.allSettled`. Even if some or all fetches fail, the provider transitions to `READY` status. Failed flags return `FLAG_NOT_FOUND` when resolved.
 
 To shut down the provider and release resources:
 

@@ -29,7 +29,7 @@ import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '@cloudflare/flagship/server';
 
 await OpenFeature.setProviderAndWait(
-  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id' }),
+  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', token: 'your-token' }),
 );
 
 const client = OpenFeature.getClient();
@@ -48,7 +48,7 @@ export default {
   async fetch(request: Request): Promise<Response> {
     if (!initialized) {
       await OpenFeature.setProviderAndWait(
-        new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id' }),
+        new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', token: 'your-token' }),
       );
       initialized = true;
     }
@@ -73,6 +73,7 @@ await OpenFeature.setProviderAndWait(
   new FlagshipClientProvider({
     appId: 'your-app-id',
     accountId: 'your-account-id',
+    token: 'your-token',
     prefetchFlags: ['dark-mode', 'welcome-message'],
   }),
 );
@@ -85,15 +86,17 @@ const darkMode = client.getBooleanValue('dark-mode', false);
 
 ## Features
 
-| Feature               | Description                                                         |
-| --------------------- | ------------------------------------------------------------------- |
-| OpenFeature compliant | Implements the CNCF OpenFeature specification                       |
-| Server + client       | Async per-request (server) and sync cache-based (browser) providers |
-| All flag types        | Boolean, string, number, and object (JSON)                          |
-| Retries + timeouts    | Configurable retry logic with `AbortController`-based timeouts      |
-| Hooks                 | Built-in `LoggingHook` and `TelemetryHook`                          |
-| Tree-shakeable        | Server and client bundles are fully isolated                        |
-| TypeScript            | Strict types throughout                                             |
+| Feature               | Description                                                              |
+| --------------------- | ------------------------------------------------------------------------ |
+| OpenFeature compliant | Implements the CNCF OpenFeature specification                            |
+| Server + client       | Async per-request (server) and sync cache-based (browser) providers      |
+| All flag types        | Boolean, string, number, and object (JSON)                               |
+| Authentication        | `authToken` option adds `Authorization: Bearer` to every request         |
+| Logging               | `logging` option surfaces fetch errors and cache misses (off by default) |
+| Retries + timeouts    | Configurable retry logic with `AbortController`-based timeouts           |
+| Hooks                 | Built-in `LoggingHook` and `TelemetryHook`                               |
+| Tree-shakeable        | Server and client bundles are fully isolated                             |
+| TypeScript            | Strict types throughout                                                  |
 
 ## Packages
 

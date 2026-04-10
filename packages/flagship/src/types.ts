@@ -40,7 +40,24 @@ export interface FlagshipProviderOptions {
 	endpoint?: string;
 
 	/**
+	 * Bearer token for authenticating requests to the Flagship API.
+	 * When set, an `Authorization: Bearer <token>` header is automatically
+	 * added to every request.
+	 *
+	 * If you also supply an `Authorization` header via `fetchOptions.headers`,
+	 * the explicit header takes precedence and `bearerToken` is ignored for
+	 * that header slot.
+	 *
+	 * @example
+	 * { appId: 'app-abc123', accountId: 'my-account', bearerToken: 'my-secret-token' }
+	 */
+	bearerToken?: string;
+
+	/**
 	 * Custom fetch options applied to every request (e.g. custom headers).
+	 * Headers provided here are merged with any headers derived from other
+	 * options (e.g. `bearerToken`), with values in `fetchOptions.headers`
+	 * taking precedence.
 	 */
 	fetchOptions?: RequestInit;
 

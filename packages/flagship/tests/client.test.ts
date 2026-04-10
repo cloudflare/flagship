@@ -282,6 +282,94 @@ describe('FlagshipClient', () => {
 			});
 		});
 
+		it('should send Authorization header when bearerToken is provided', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true }),
+			});
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				bearerToken: 'my-secret-token',
+			});
+
+			await client.evaluate('my-flag', {});
+
+			const callArgs = (global.fetch as any).mock.calls[0];
+			const headers: Headers = callArgs[1].headers;
+			expect(headers.get('Authorization')).toBe('Bearer my-secret-token');
+		});
+
+		it('should not override an explicit Authorization header with bearerToken', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true }),
+			});
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				bearerToken: 'token-from-bearer-option',
+				fetchOptions: {
+					headers: {
+						Authorization: 'Bearer token-from-fetch-options',
+					},
+				},
+			});
+
+			await client.evaluate('my-flag', {});
+
+			const callArgs = (global.fetch as any).mock.calls[0];
+			const headers: Headers = callArgs[1].headers;
+			// fetchOptions.headers takes precedence over bearerToken
+			expect(headers.get('Authorization')).toBe('Bearer token-from-fetch-options');
+		});
+
+		it('should preserve other fetchOptions headers alongside bearerToken', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true }),
+			});
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				bearerToken: 'my-secret-token',
+				fetchOptions: {
+					headers: {
+						'X-Custom-Header': 'custom-value',
+					},
+				},
+			});
+
+			await client.evaluate('my-flag', {});
+
+			const callArgs = (global.fetch as any).mock.calls[0];
+			const headers: Headers = callArgs[1].headers;
+			expect(headers.get('Authorization')).toBe('Bearer my-secret-token');
+			expect(headers.get('X-Custom-Header')).toBe('custom-value');
+		});
+
+		it('should not add Authorization header when bearerToken is not set', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true }),
+			});
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+			});
+
+			await client.evaluate('my-flag', {});
+
+			const callArgs = (global.fetch as any).mock.calls[0];
+			// No Authorization header expected
+			const fetchInit: RequestInit = callArgs[1];
+			const hasAuthHeader =
+				fetchInit.headers instanceof Headers
+					? fetchInit.headers.has('Authorization')
+					: Object.prototype.hasOwnProperty.call(fetchInit.headers ?? {}, 'Authorization');
+			expect(hasAuthHeader).toBe(false);
+		});
+
 		it('should throw PARSE_ERROR when response is missing required fields', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,

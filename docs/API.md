@@ -191,10 +191,10 @@ When the context changes, cache entries for all `prefetchFlags` are **invalidate
 
 Context attributes are serialized as URL query parameters and sent with each evaluation request. The following value types are supported:
 
-| Type                          | Serialization                                |
-| ----------------------------- | -------------------------------------------- |
-| `string`, `number`, `boolean` | Passed directly as a string                  |
-| `Date`                        | Converted to ISO 8601                        |
+| Type                          | Serialization                                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `string`, `number`, `boolean` | Passed directly as a string                                                                                                                                    |
+| `Date`                        | Converted to ISO 8601                                                                                                                                          |
 | Objects, arrays               | **Not supported** — the provider throws `INVALID_CONTEXT`. Keys with complex values are dropped with a console warning if using `ContextTransformer` directly. |
 
 `targetingKey` is the standard OpenFeature field for identifying the evaluation subject (user ID, session ID, etc.) and is treated like any other attribute.

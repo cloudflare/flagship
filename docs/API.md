@@ -182,19 +182,19 @@ When the context changes, the entire cache is **cleared before re-fetching** all
 
 ### Configuration options
 
-| Option          | Type          | Default                               | Description                                           |
-| --------------- | ------------- | ------------------------------------- | ----------------------------------------------------- |
-| `appId`         | `string`      | —                                     | Flagship app ID (mutually exclusive with `endpoint`)  |
-| `accountId`     | `string`      | —                                     | Account ID (required with `appId`)                    |
-| `baseUrl`       | `string`      | `https://api.flagship.cloudflare.dev` | Base URL override (only used with `appId`)            |
-| `endpoint`      | `string`      | —                                     | Full evaluation URL (mutually exclusive with `appId`) |
-| `authToken`     | `string`      | —                                     | Bearer token — adds `Authorization: Bearer` header    |
-| `logging`       | `boolean`     | `false`                               | Log fetch errors and cache misses to the console      |
-| `prefetchFlags` | `string[]`    | `[]`                                  | Flag keys to fetch on init and every context change   |
-| `timeout`       | `number`      | `5000`                                | Request timeout in ms                                 |
-| `retries`       | `number`      | `1`                                   | Retry attempts (max 10)                               |
-| `retryDelay`    | `number`      | `1000`                                | Delay between retries in ms (max 30 000)              |
-| `fetchOptions`  | `RequestInit` | `{}`                                  | Custom fetch options (headers, credentials, etc.)     |
+| Option          | Type          | Default                      | Description                                           |
+| --------------- | ------------- | ---------------------------- | ----------------------------------------------------- |
+| `appId`         | `string`      | —                            | Flagship app ID (mutually exclusive with `endpoint`)  |
+| `accountId`     | `string`      | —                            | Account ID (required with `appId`)                    |
+| `baseUrl`       | `string`      | `https://api.cloudflare.com` | Base URL override (only used with `appId`)            |
+| `endpoint`      | `string`      | —                            | Full evaluation URL (mutually exclusive with `appId`) |
+| `authToken`     | `string`      | —                            | Bearer token — adds `Authorization: Bearer` header    |
+| `logging`       | `boolean`     | `false`                      | Log fetch errors and cache misses to the console      |
+| `prefetchFlags` | `string[]`    | `[]`                         | Flag keys to fetch on init and every context change   |
+| `timeout`       | `number`      | `5000`                       | Request timeout in ms                                 |
+| `retries`       | `number`      | `1`                          | Retry attempts (max 10)                               |
+| `retryDelay`    | `number`      | `1000`                       | Delay between retries in ms (max 30 000)              |
+| `fetchOptions`  | `RequestInit` | `{}`                         | Custom fetch options (headers, credentials, etc.)     |
 
 ## Evaluation context
 

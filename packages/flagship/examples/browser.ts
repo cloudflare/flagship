@@ -26,7 +26,7 @@ async function basicClientSetup() {
 		new FlagshipClientProvider({
 			appId: FLAGSHIP_APP_ID,
 			accountId: FLAGSHIP_ACCOUNT_ID,
-			token: 'your-token',
+			authToken: 'your-token',
 			prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads', 'theme-config'],
 		}),
 	);
@@ -121,7 +121,7 @@ async function progressiveEnhancement() {
 		new FlagshipClientProvider({
 			appId: FLAGSHIP_APP_ID,
 			accountId: FLAGSHIP_ACCOUNT_ID,
-			token: 'your-token',
+			authToken: 'your-token',
 			prefetchFlags: ['premium-features', 'beta-access'],
 		}),
 	);
@@ -210,7 +210,7 @@ async function productionClientApp() {
 			new FlagshipClientProvider({
 				appId: FLAGSHIP_APP_ID,
 				accountId: FLAGSHIP_ACCOUNT_ID,
-				token: 'your-token',
+				authToken: 'your-token',
 				prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads', 'premium-features', 'beta-access', 'theme-config'],
 				timeout: 5000,
 				retries: 1,

@@ -29,7 +29,7 @@ import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '@cloudflare/flagship/server';
 
 await OpenFeature.setProviderAndWait(
-  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', token: 'your-token' }),
+  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', authToken: 'your-token' }),
 );
 
 const client = OpenFeature.getClient();
@@ -48,7 +48,7 @@ export default {
   async fetch(request: Request): Promise<Response> {
     if (!initialized) {
       await OpenFeature.setProviderAndWait(
-        new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', token: 'your-token' }),
+        new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', authToken: 'your-token' }),
       );
       initialized = true;
     }
@@ -73,7 +73,7 @@ await OpenFeature.setProviderAndWait(
   new FlagshipClientProvider({
     appId: 'your-app-id',
     accountId: 'your-account-id',
-    token: 'your-token',
+    authToken: 'your-token',
     prefetchFlags: ['dark-mode', 'welcome-message'],
   }),
 );

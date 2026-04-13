@@ -91,7 +91,7 @@ new FlagshipServerProvider({
   // endpoint: 'http://localhost:8787/v1/acct/apps/app-id/evaluate',
 
   // Authentication
-  token: 'your-token', // adds Authorization: Bearer <token> to every request
+  authToken: 'your-token', // adds Authorization: Bearer <token> to every request
 
   // Logging — controls logs emitted by the Flagship SDK itself (default: false)
   // Does not affect OpenFeature framework logs (use OpenFeature.setLogger() for those).
@@ -149,7 +149,7 @@ await OpenFeature.setProviderAndWait(
   new FlagshipClientProvider({
     appId: 'your-app-id',
     accountId: 'your-account-id',
-    token: 'your-token',
+    authToken: 'your-token',
     prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads'],
     logging: true, // log fetch errors and cache misses to the console
   }),

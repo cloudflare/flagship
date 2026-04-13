@@ -5,22 +5,37 @@
 	"type": "module",
 	"main": "./dist/index.cjs",
 	"module": "./dist/index.mjs",
-	"types": "./dist/index.d.ts",
+	"types": "./dist/index.d.mts",
 	"exports": {
 		".": {
-			"types": "./dist/index.d.ts",
-			"require": "./dist/index.cjs",
-			"import": "./dist/index.mjs"
+			"import": {
+				"types": "./dist/index.d.mts",
+				"default": "./dist/index.mjs"
+			},
+			"require": {
+				"types": "./dist/index.d.cts",
+				"default": "./dist/index.cjs"
+			}
 		},
 		"./server": {
-			"types": "./dist/server.d.ts",
-			"require": "./dist/server.cjs",
-			"import": "./dist/server.mjs"
+			"import": {
+				"types": "./dist/server.d.mts",
+				"default": "./dist/server.mjs"
+			},
+			"require": {
+				"types": "./dist/server.d.cts",
+				"default": "./dist/server.cjs"
+			}
 		},
 		"./web": {
-			"types": "./dist/web.d.ts",
-			"require": "./dist/web.cjs",
-			"import": "./dist/web.mjs"
+			"import": {
+				"types": "./dist/web.d.mts",
+				"default": "./dist/web.mjs"
+			},
+			"require": {
+				"types": "./dist/web.d.cts",
+				"default": "./dist/web.cjs"
+			}
 		}
 	},
 	"files": [

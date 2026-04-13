@@ -1,5 +1,5 @@
 /** Default base URL for the Flagship API. */
-export const FLAGSHIP_DEFAULT_BASE_URL = 'https://api.flagship.cloudflare.dev';
+export const FLAGSHIP_DEFAULT_BASE_URL = 'https://api.cloudflare.com';
 
 /**
  * Configuration options for Flagship providers.
@@ -24,7 +24,7 @@ export interface FlagshipProviderOptions {
 
 	/**
 	 * Base URL for the Flagship API. Only used with `appId`.
-	 * @default 'https://api.flagship.cloudflare.dev'
+	 * @default 'https://api.cloudflare.com'
 	 */
 	baseUrl?: string;
 

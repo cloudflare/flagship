@@ -464,7 +464,7 @@ describe('FlagshipClient', () => {
 			await client.evaluate('my-flag', {});
 
 			const calledUrl: string = (global.fetch as any).mock.calls[0][0];
-			expect(calledUrl).toContain('flagship.cloudflare.dev');
+			expect(calledUrl).toContain('api.cloudflare.com');
 			expect(calledUrl).toContain('acct-1');
 			expect(calledUrl).toContain('app-1');
 		});
@@ -479,7 +479,8 @@ describe('FlagshipClient', () => {
 			await client.evaluate('my-flag', {});
 
 			const calledUrl: string = (global.fetch as any).mock.calls[0][0];
-			expect(calledUrl).not.toContain('//v1');
+			expect(calledUrl).not.toContain('//client');
+			expect(calledUrl).toContain('/client/v4/accounts/acct-1/flagship/apps/app-1/evaluate');
 		});
 
 		it('encodes special characters in appId and accountId', async () => {

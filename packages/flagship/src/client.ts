@@ -174,7 +174,7 @@ function resolveEndpoint(options: FlagshipProviderOptions): string {
 	}
 
 	const base = (baseUrl || FLAGSHIP_DEFAULT_BASE_URL).replace(/\/+$/, '');
-	const resolved = `${base}/v1/${encodeURIComponent(accountId)}/apps/${encodeURIComponent(appId!)}/evaluate`;
+	const resolved = `${base}/client/v4/accounts/${encodeURIComponent(accountId)}/flagship/apps/${encodeURIComponent(appId!)}/evaluate`;
 
 	try {
 		new URL(resolved);

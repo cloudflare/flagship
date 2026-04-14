@@ -141,6 +141,109 @@ export interface FlagshipEvaluationResponse {
 	reason: 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT';
 }
 
+// ---------------------------------------------------------------------------
+// Flagship Wrangler Binding types
+// ---------------------------------------------------------------------------
+
+/**
+ * Evaluation details returned by the Flagship binding's `*Details` methods.
+ * Contains the resolved value along with metadata about why that value was
+ * chosen.
+ */
+export interface FlagshipBindingEvaluationDetails<T> {
+	flagKey: string;
+	value: T;
+	variant?: string;
+	reason?: string;
+	errorCode?: string;
+	errorMessage?: string;
+}
+
+/**
+ * Shape of the Flagship wrangler binding exposed on `env` in Cloudflare Workers.
+ *
+ * This binding communicates directly with the Flagship service via workerd RPC —
+ * no HTTP overhead, no auth tokens required. Configure it in `wrangler.json`:
+ *
+ * ```jsonc
+ * {
+ *   "flagship": [
+ *     { "binding": "FLAGS", "app_id": "<your-app-id>" }
+ *   ]
+ * }
+ * ```
+ */
+export interface FlagshipBinding {
+	get(flagKey: string, defaultValue?: unknown, context?: Record<string, string | number | boolean>): Promise<unknown>;
+	getBooleanValue(flagKey: string, defaultValue: boolean, context?: Record<string, string | number | boolean>): Promise<boolean>;
+	getStringValue(flagKey: string, defaultValue: string, context?: Record<string, string | number | boolean>): Promise<string>;
+	getNumberValue(flagKey: string, defaultValue: number, context?: Record<string, string | number | boolean>): Promise<number>;
+	getObjectValue<T extends object>(flagKey: string, defaultValue: T, context?: Record<string, string | number | boolean>): Promise<T>;
+	getBooleanDetails(
+		flagKey: string,
+		defaultValue: boolean,
+		context?: Record<string, string | number | boolean>,
+	): Promise<FlagshipBindingEvaluationDetails<boolean>>;
+	getStringDetails(
+		flagKey: string,
+		defaultValue: string,
+		context?: Record<string, string | number | boolean>,
+	): Promise<FlagshipBindingEvaluationDetails<string>>;
+	getNumberDetails(
+		flagKey: string,
+		defaultValue: number,
+		context?: Record<string, string | number | boolean>,
+	): Promise<FlagshipBindingEvaluationDetails<number>>;
+	getObjectDetails<T extends object>(
+		flagKey: string,
+		defaultValue: T,
+		context?: Record<string, string | number | boolean>,
+	): Promise<FlagshipBindingEvaluationDetails<T>>;
+}
+
+/**
+ * Configuration for `FlagshipServerProvider` when using a wrangler binding.
+ *
+ * In this mode the provider delegates all evaluations to the Flagship binding
+ * on `env`, bypassing HTTP entirely. No `appId`, `accountId`, or `authToken`
+ * is required — the binding handles authentication and routing.
+ *
+ * @example
+ * ```typescript
+ * new FlagshipServerProvider({ binding: env.FLAGS })
+ * ```
+ */
+export interface FlagshipBindingProviderOptions {
+	/** The Flagship binding from the Worker's `env` object. */
+	binding: FlagshipBinding;
+
+	/**
+	 * Enable SDK-level logging.
+	 * @default false
+	 */
+	logging?: boolean;
+}
+
+/**
+ * Options accepted by `FlagshipServerProvider`.
+ *
+ * Provide **either** HTTP configuration (`appId`/`endpoint` + credentials) **or**
+ * a wrangler `binding` — never both. The provider detects which mode to use
+ * based on the presence of the `binding` field.
+ */
+export type FlagshipServerProviderOptions = FlagshipProviderOptions | FlagshipBindingProviderOptions;
+
+/**
+ * Type guard: returns `true` when the options use binding mode.
+ */
+export function isBindingOptions(options: FlagshipServerProviderOptions): options is FlagshipBindingProviderOptions {
+	return 'binding' in options && options.binding !== null && options.binding !== undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Error types
+// ---------------------------------------------------------------------------
+
 /**
  * Internal error codes produced by `FlagshipClient`.
  * These are mapped to OpenFeature `ErrorCode` values by the providers.

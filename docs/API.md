@@ -18,9 +18,45 @@ npm install @cloudflare/flagship @openfeature/web-sdk
 
 ## Server-side usage
 
-The `FlagshipServerProvider` evaluates flags by making an HTTP request on each call. It is designed for server environments where the evaluation context changes per request (per-user, per-request targeting).
+`FlagshipServerProvider` supports two modes of operation:
 
-### Quick start
+- **Binding mode** (recommended for Cloudflare Workers) — evaluates flags via a wrangler binding (`env.FLAGS`). No HTTP overhead, no auth tokens.
+- **HTTP mode** — evaluates flags via HTTP requests to the Flagship API. Works in any server environment.
+
+The constructor accepts a discriminated union: provide **either** a `binding` **or** HTTP config (`appId`/`endpoint`, `accountId`, etc.) — never both. Providing both throws immediately.
+
+### Quick start — Cloudflare Workers
+
+Configure the Flagship binding in `wrangler.json`:
+
+```jsonc
+{
+  "flagship": [{ "binding": "FLAGS", "app_id": "<your-app-id>" }]
+}
+```
+
+```typescript
+import { OpenFeature } from '@openfeature/server-sdk';
+import { FlagshipServerProvider } from '@cloudflare/flagship/server';
+import type { FlagshipBinding } from '@cloudflare/flagship/server';
+
+export default {
+  async fetch(request: Request, env: { FLAGS: FlagshipBinding }): Promise<Response> {
+    await OpenFeature.setProviderAndWait(
+      new FlagshipServerProvider({ binding: env.FLAGS }),
+    );
+
+    const client = OpenFeature.getClient();
+    const enabled = await client.getBooleanValue('dark-mode', false, {
+      targetingKey: 'user-123',
+    });
+
+    return Response.json({ enabled });
+  },
+};
+```
+
+### Quick start — HTTP
 
 ```typescript
 import { OpenFeature } from '@openfeature/server-sdk';
@@ -30,6 +66,7 @@ await OpenFeature.setProviderAndWait(
   new FlagshipServerProvider({
     appId: 'your-app-id',
     accountId: 'your-account-id',
+    authToken: 'your-token'
   }),
 );
 
@@ -74,7 +111,21 @@ console.log(details.errorCode); // set on error, e.g. 'FLAG_NOT_FOUND', 'TYPE_MI
 console.log(details.errorMessage); // human-readable description of the error
 ```
 
-### Configuration
+### Configuration — binding mode
+
+```typescript
+// Binding mode: just pass the binding from env. That's it.
+new FlagshipServerProvider({
+  binding: env.FLAGS,
+
+  // Logging — controls logs emitted by the Flagship SDK itself (default: false)
+  logging: false,
+});
+```
+
+No `appId`, `accountId`, `authToken`, timeout, or retry settings are needed — the binding handles all of that internally.
+
+### Configuration — HTTP mode
 
 ```typescript
 new FlagshipServerProvider({
@@ -105,7 +156,33 @@ new FlagshipServerProvider({
 
 404 and 400 responses are never retried. Only transient server errors (5xx) and network failures trigger the retry logic.
 
-### Cloudflare Workers example
+### Cloudflare Workers example (binding)
+
+```typescript
+import { OpenFeature } from '@openfeature/server-sdk';
+import { FlagshipServerProvider } from '@cloudflare/flagship/server';
+import type { FlagshipBinding } from '@cloudflare/flagship/server';
+
+export default {
+  async fetch(request: Request, env: { FLAGS: FlagshipBinding }): Promise<Response> {
+    await OpenFeature.setProviderAndWait(
+      new FlagshipServerProvider({ binding: env.FLAGS }),
+    );
+
+    const client = OpenFeature.getClient();
+    const userId = new URL(request.url).searchParams.get('userId') ?? 'anonymous';
+
+    const darkMode = await client.getBooleanValue('dark-mode', false, {
+      targetingKey: userId,
+      country: request.headers.get('cf-ipcountry') ?? 'unknown',
+    });
+
+    return Response.json({ darkMode });
+  },
+};
+```
+
+### Cloudflare Workers example (HTTP)
 
 ```typescript
 import { OpenFeature } from '@openfeature/server-sdk';
@@ -322,7 +399,9 @@ OpenFeature.addHandler(ProviderEvents.Error, ({ message }) => {
 await OpenFeature.setProviderAndWait(provider);
 ```
 
-**Server provider:** During initialization, the provider probes the evaluation endpoint with a health-check request. A 404 response (flag not found) is treated as success — it means the endpoint is reachable. Any network or timeout error causes `ProviderEvents.Error` to be emitted, but `setProviderAndWait` still resolves (does not reject) — the provider transitions to `ERROR` status silently.
+**Server provider (HTTP mode):** During initialization, the provider probes the evaluation endpoint with a health-check request. A 404 response (flag not found) is treated as success — it means the endpoint is reachable. Any network or timeout error causes `ProviderEvents.Error` to be emitted, but `setProviderAndWait` still resolves (does not reject) — the provider transitions to `ERROR` status silently.
+
+**Server provider (binding mode):** Initialization sets READY immediately — the binding is guaranteed to be available by the Workers runtime. No health-check probe is performed.
 
 **Client provider:** During initialization, the provider fetches all `prefetchFlags` using `Promise.allSettled`. Even if some or all fetches fail, the provider transitions to `READY` status. Failed flags return `FLAG_NOT_FOUND` when resolved.
 
@@ -344,12 +423,13 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 - `ContextTransformer` — converts evaluation context to query parameters
 - `FlagshipError` — error class with `code` and `cause` properties
 - `FlagshipErrorCode` — enum: `NETWORK_ERROR`, `TIMEOUT_ERROR`, `PARSE_ERROR`, `INVALID_CONTEXT`
+- `isBindingOptions()` — type guard for binding options
 - `FLAGSHIP_DEFAULT_BASE_URL` — default base URL constant
-- Types: `FlagshipProviderOptions`, `FlagshipClientProviderOptions`, `FlagshipEvaluationResponse`, `CachedFlag`
+- Types: `FlagshipProviderOptions`, `FlagshipClientProviderOptions`, `FlagshipEvaluationResponse`, `CachedFlag`, `FlagshipBinding`, `FlagshipBindingEvaluationDetails`, `FlagshipBindingProviderOptions`, `FlagshipServerProviderOptions`
 
 **`@cloudflare/flagship/server`** (core value exports + server-relevant types, plus):
 
-- `FlagshipServerProvider` — async per-request provider
+- `FlagshipServerProvider` — dual-mode provider (HTTP or binding)
 - `LoggingHook` — evaluation logging hook
 - `TelemetryHook` — evaluation telemetry hook
 - Type: `TelemetryEvent`
@@ -362,14 +442,17 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 
 ```
 @cloudflare/flagship/server
-  FlagshipServerProvider        — OpenFeature Provider interface (server)
-    FlagshipClient              — HTTP client with retry + timeout
-      ContextTransformer        — EvaluationContext → query parameters
-    LoggingHook / TelemetryHook — OpenFeature hooks
+  FlagshipServerProvider             — OpenFeature Provider interface (server)
+    ├─ Binding mode (Workers)        — delegates to env.FLAGS via RPC
+    │   EvaluationContext → Record<string, string|number|boolean>
+    └─ HTTP mode (Node.js, etc.)     — delegates to FlagshipClient
+        FlagshipClient               — HTTP client with retry + timeout
+          ContextTransformer         — EvaluationContext → query parameters
+    LoggingHook / TelemetryHook      — OpenFeature hooks
 
 @cloudflare/flagship/web
-  FlagshipClientProvider        — OpenFeature Provider interface (client)
-    FlagshipClient              — HTTP client (same as server)
-      ContextTransformer        — EvaluationContext → query parameters
-    In-memory cache             — synchronous resolution layer
+  FlagshipClientProvider             — OpenFeature Provider interface (client)
+    FlagshipClient                   — HTTP client (same as server)
+      ContextTransformer             — EvaluationContext → query parameters
+    In-memory cache                  — synchronous resolution layer
 ```

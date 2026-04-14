@@ -66,6 +66,15 @@ The SDK has **three sub-path exports** to isolate dependencies:
 
 Each sub-path is a separate bundle (built with tsdown) so importing one never pulls in the other's OpenFeature dependency.
 
+### Server providers
+
+`FlagshipServerProvider` supports two modes of operation:
+
+- **HTTP mode** — evaluates flags via HTTP requests to the Flagship API. Requires `appId`/`endpoint`, `accountId`, and optionally `authToken`. Used for Node.js, generic server environments, or Workers without a binding.
+- **Binding mode** — evaluates flags via a Cloudflare Workers wrangler binding (`env.FLAGS`). No HTTP overhead, no auth tokens. This is the recommended approach for Cloudflare Workers.
+
+The constructor accepts a discriminated union: provide **either** HTTP config (`appId`, `accountId`, etc.) **or** a `binding` field — never both. Providing both throws immediately.
+
 ## Code Standards
 
 ### TypeScript

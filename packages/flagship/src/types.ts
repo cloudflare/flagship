@@ -145,24 +145,13 @@ export interface FlagshipEvaluationResponse {
 // Flagship Wrangler Binding types
 // ---------------------------------------------------------------------------
 
-/**
- * Evaluation details returned by the Flagship binding's `*Details` methods.
- * Contains the resolved value along with metadata about why that value was
- * chosen.
- */
-export interface FlagshipBindingEvaluationDetails<T> {
-	flagKey: string;
-	value: T;
-	variant?: string;
-	reason?: string;
-	errorCode?: string;
-	errorMessage?: string;
-}
+import type { Flags, EvaluationDetails as BindingEvaluationDetails } from '@cloudflare/workers-types';
 
 /**
  * Shape of the Flagship wrangler binding exposed on `env` in Cloudflare Workers.
  *
- * This binding communicates directly with the Flagship service via workerd RPC —
+ * This is an alias for the `Flags` class from `@cloudflare/workers-types`.
+ * The binding communicates directly with the Flagship service via workerd RPC —
  * no HTTP overhead, no auth tokens required. Configure it in `wrangler.json`:
  *
  * ```jsonc
@@ -173,33 +162,17 @@ export interface FlagshipBindingEvaluationDetails<T> {
  * }
  * ```
  */
-export interface FlagshipBinding {
-	get(flagKey: string, defaultValue?: unknown, context?: Record<string, string | number | boolean>): Promise<unknown>;
-	getBooleanValue(flagKey: string, defaultValue: boolean, context?: Record<string, string | number | boolean>): Promise<boolean>;
-	getStringValue(flagKey: string, defaultValue: string, context?: Record<string, string | number | boolean>): Promise<string>;
-	getNumberValue(flagKey: string, defaultValue: number, context?: Record<string, string | number | boolean>): Promise<number>;
-	getObjectValue<T extends object>(flagKey: string, defaultValue: T, context?: Record<string, string | number | boolean>): Promise<T>;
-	getBooleanDetails(
-		flagKey: string,
-		defaultValue: boolean,
-		context?: Record<string, string | number | boolean>,
-	): Promise<FlagshipBindingEvaluationDetails<boolean>>;
-	getStringDetails(
-		flagKey: string,
-		defaultValue: string,
-		context?: Record<string, string | number | boolean>,
-	): Promise<FlagshipBindingEvaluationDetails<string>>;
-	getNumberDetails(
-		flagKey: string,
-		defaultValue: number,
-		context?: Record<string, string | number | boolean>,
-	): Promise<FlagshipBindingEvaluationDetails<number>>;
-	getObjectDetails<T extends object>(
-		flagKey: string,
-		defaultValue: T,
-		context?: Record<string, string | number | boolean>,
-	): Promise<FlagshipBindingEvaluationDetails<T>>;
-}
+export type FlagshipBinding = Flags;
+
+/**
+ * Evaluation details returned by the Flagship binding's `*Details` methods.
+ * Contains the resolved value along with metadata about why that value was
+ * chosen.
+ *
+ * This is an alias for the `EvaluationDetails` interface from
+ * `@cloudflare/workers-types`.
+ */
+export type FlagshipBindingEvaluationDetails<T> = BindingEvaluationDetails<T>;
 
 /**
  * Configuration for `FlagshipServerProvider` when using a wrangler binding.

@@ -81,6 +81,14 @@ export class FlagshipServerProvider implements Provider {
 	private readonly logging: boolean;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
 
+	private readonly resolve: <T>(
+		flagKey: string,
+		defaultValue: T,
+		context: EvaluationContext,
+		expectedType: 'boolean' | 'string' | 'number' | 'object',
+		logger: Logger,
+	) => Promise<ResolutionDetails<T>>;
+
 	constructor(options: FlagshipServerProviderOptions) {
 		this.metadata = { name: 'Flagship Server Provider' };
 		this.logging = options.logging ?? false;
@@ -96,9 +104,11 @@ export class FlagshipServerProvider implements Provider {
 			}
 			this.binding = options.binding;
 			this.client = undefined;
+			this.resolve = this.resolveViaBinding.bind(this);
 		} else {
 			this.client = new FlagshipClient(options);
 			this.binding = undefined;
+			this.resolve = this.resolveViaHttp.bind(this);
 		}
 	}
 
@@ -160,10 +170,7 @@ export class FlagshipServerProvider implements Provider {
 		context: EvaluationContext,
 		logger: Logger,
 	): Promise<ResolutionDetails<boolean>> {
-		if (this.binding) {
-			return this.resolveViaBinding(flagKey, defaultValue, context, 'boolean', logger);
-		}
-		return this.resolveViaHttp(flagKey, defaultValue, context, 'boolean', logger);
+		return this.resolve(flagKey, defaultValue, context, 'boolean', logger);
 	}
 
 	async resolveStringEvaluation(
@@ -172,10 +179,7 @@ export class FlagshipServerProvider implements Provider {
 		context: EvaluationContext,
 		logger: Logger,
 	): Promise<ResolutionDetails<string>> {
-		if (this.binding) {
-			return this.resolveViaBinding(flagKey, defaultValue, context, 'string', logger);
-		}
-		return this.resolveViaHttp(flagKey, defaultValue, context, 'string', logger);
+		return this.resolve(flagKey, defaultValue, context, 'string', logger);
 	}
 
 	async resolveNumberEvaluation(
@@ -184,10 +188,7 @@ export class FlagshipServerProvider implements Provider {
 		context: EvaluationContext,
 		logger: Logger,
 	): Promise<ResolutionDetails<number>> {
-		if (this.binding) {
-			return this.resolveViaBinding(flagKey, defaultValue, context, 'number', logger);
-		}
-		return this.resolveViaHttp(flagKey, defaultValue, context, 'number', logger);
+		return this.resolve(flagKey, defaultValue, context, 'number', logger);
 	}
 
 	async resolveObjectEvaluation<T extends JsonValue>(
@@ -196,10 +197,7 @@ export class FlagshipServerProvider implements Provider {
 		context: EvaluationContext,
 		logger: Logger,
 	): Promise<ResolutionDetails<T>> {
-		if (this.binding) {
-			return this.resolveViaBinding(flagKey, defaultValue, context, 'object', logger);
-		}
-		return this.resolveViaHttp(flagKey, defaultValue, context, 'object', logger);
+		return this.resolve(flagKey, defaultValue, context, 'object', logger);
 	}
 
 	// ---------------------------------------------------------------------------

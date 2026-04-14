@@ -1,6 +1,6 @@
 {
 	"name": "@cloudflare/flagship",
-	"version": "0.1.0",
+	"version": "0.0.1",
 	"description": "OpenFeature provider for Flagship feature flags",
 	"type": "module",
 	"main": "./dist/index.cjs",
@@ -69,10 +69,15 @@
 		"access": "public"
 	},
 	"keywords": [
+		"cloudflare",
 		"openfeature",
 		"feature-flags",
 		"flagship",
-		"provider"
+		"provider",
+		"workers",
+		"pages",
+		"api",
+		"edge"
 	],
 	"peerDependencies": {
 		"@openfeature/server-sdk": "^1.20.2",

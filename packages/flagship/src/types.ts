@@ -1,3 +1,5 @@
+/// <reference types="@cloudflare/workers-types" />
+
 /** Default base URL for the Flagship API. */
 export const FLAGSHIP_DEFAULT_BASE_URL = 'https://api.cloudflare.com';
 
@@ -143,9 +145,10 @@ export interface FlagshipEvaluationResponse {
 
 // ---------------------------------------------------------------------------
 // Flagship Wrangler Binding types
+//
+// Re-exported from @cloudflare/workers-types so consumers don't need to
+// install the full workers-types package just for typing `env.FLAGS`.
 // ---------------------------------------------------------------------------
-
-import type { Flags, EvaluationDetails as BindingEvaluationDetails } from '@cloudflare/workers-types';
 
 /**
  * Shape of the Flagship wrangler binding exposed on `env` in Cloudflare Workers.
@@ -172,7 +175,7 @@ export type FlagshipBinding = Flags;
  * This is an alias for the `EvaluationDetails` interface from
  * `@cloudflare/workers-types`.
  */
-export type FlagshipBindingEvaluationDetails<T> = BindingEvaluationDetails<T>;
+export type FlagshipBindingEvaluationDetails<T> = EvaluationDetails<T>;
 
 /**
  * Configuration for `FlagshipServerProvider` when using a wrangler binding.

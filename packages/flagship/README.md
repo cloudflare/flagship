@@ -119,19 +119,19 @@ const darkMode = client.getBooleanValue('dark-mode', false);
 
 ## Features
 
-| Feature               | Description                                                                      |
-| --------------------- | -------------------------------------------------------------------------------- |
-| OpenFeature compliant | Implements the CNCF OpenFeature specification                                    |
-| Workers binding       | Native wrangler binding support — zero HTTP overhead, no auth tokens             |
-| Server + client       | Async per-request (server) and sync cache-based (browser) providers              |
-| Server providers      | `FlagshipServerProvider` works via HTTP or wrangler binding                      |
-| All flag types        | Boolean, string, number, and object (JSON)                                       |
-| Authentication        | `authToken` option adds `Authorization: Bearer` to every request (HTTP only)     |
-| Logging               | `logging` option surfaces fetch errors and cache misses (off by default)         |
-| Retries + timeouts    | Configurable retry logic with `AbortController`-based timeouts (HTTP only)       |
-| Hooks                 | Built-in `LoggingHook` and `TelemetryHook`                                       |
-| Tree-shakeable        | Server and client bundles are fully isolated                                     |
-| TypeScript            | Strict types throughout                                                          |
+| Feature               | Description                                                                  |
+| --------------------- | ---------------------------------------------------------------------------- |
+| OpenFeature compliant | Implements the CNCF OpenFeature specification                                |
+| Workers binding       | Native wrangler binding support — zero HTTP overhead, no auth tokens         |
+| Server + client       | Async per-request (server) and sync cache-based (browser) providers          |
+| Server providers      | `FlagshipServerProvider` works via HTTP or wrangler binding                  |
+| All flag types        | Boolean, string, number, and object (JSON)                                   |
+| Authentication        | `authToken` option adds `Authorization: Bearer` to every request (HTTP only) |
+| Logging               | `logging` option surfaces fetch errors and cache misses (off by default)     |
+| Retries + timeouts    | Configurable retry logic with `AbortController`-based timeouts (HTTP only)   |
+| Hooks                 | Built-in `LoggingHook` and `TelemetryHook`                                   |
+| Tree-shakeable        | Server and client bundles are fully isolated                                 |
+| TypeScript            | Strict types throughout                                                      |
 
 ## Packages
 

@@ -9,6 +9,7 @@ export default defineConfig({
 	format: ['esm', 'cjs'],
 	dts: { sourcemap: false },
 	sourcemap: false,
+	minify: true,
 	clean: true,
 	deps: {
 		onlyBundle: false,

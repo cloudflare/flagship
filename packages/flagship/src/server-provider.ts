@@ -35,7 +35,7 @@ const HTTP_ONLY_FIELDS = [
  * Requires `appId`/`endpoint`, `accountId`, and optionally `authToken`.
  *
  * **Binding mode** — evaluates flags via a Cloudflare Workers wrangler binding.
- * Only requires the `binding` field (the `Flags` object from `env`). No HTTP
+ * Only requires the `binding` field (the `Flagship` object from `env`). No HTTP
  * overhead, no auth tokens. This is the recommended approach for Workers.
  *
  * @example HTTP mode

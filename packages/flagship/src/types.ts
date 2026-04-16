@@ -153,7 +153,7 @@ export interface FlagshipEvaluationResponse {
 /**
  * Shape of the Flagship wrangler binding exposed on `env` in Cloudflare Workers.
  *
- * This is an alias for the `Flags` class from `@cloudflare/workers-types`.
+ * This is an alias for the `Flagship` class from `@cloudflare/workers-types`.
  * The binding communicates directly with the Flagship service via workerd RPC —
  * no HTTP overhead, no auth tokens required. Configure it in `wrangler.json`:
  *
@@ -165,17 +165,17 @@ export interface FlagshipEvaluationResponse {
  * }
  * ```
  */
-export type FlagshipBinding = Flags;
+export type FlagshipBinding = Flagship;
 
 /**
  * Evaluation details returned by the Flagship binding's `*Details` methods.
  * Contains the resolved value along with metadata about why that value was
  * chosen.
  *
- * This is an alias for the `EvaluationDetails` interface from
+ * This is an alias for the `FlagshipEvaluationDetails` interface from
  * `@cloudflare/workers-types`.
  */
-export type FlagshipBindingEvaluationDetails<T> = EvaluationDetails<T>;
+export type FlagshipBindingEvaluationDetails<T> = FlagshipEvaluationDetails<T>;
 
 /**
  * Configuration for `FlagshipServerProvider` when using a wrangler binding.

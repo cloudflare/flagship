@@ -46,7 +46,7 @@ export class FlagshipClientProvider implements Provider {
 
 	constructor(options: FlagshipClientProviderOptions) {
 		this.metadata = { name: 'Flagship Client Provider' };
-		this.client = new FlagshipClient(options);
+		this.client = new FlagshipClient(resolveRelativeEndpoint(options));
 		this.prefetchFlags = options.prefetchFlags || [];
 		this.logging = options.logging ?? false;
 	}
@@ -179,4 +179,15 @@ export class FlagshipClientProvider implements Provider {
 		if (typeof value === 'number') return 'number';
 		return 'object';
 	}
+}
+
+function resolveRelativeEndpoint(options: FlagshipClientProviderOptions): FlagshipClientProviderOptions {
+	const { endpoint } = options;
+	if (!endpoint || !endpoint.startsWith('/')) return options;
+
+	if (typeof window === 'undefined' || !window.location?.origin) {
+		throw new Error(`Flagship: relative endpoint "${endpoint}" requires a browser context with window.location.origin`);
+	}
+
+	return { ...options, endpoint: `${window.location.origin}${endpoint}` };
 }

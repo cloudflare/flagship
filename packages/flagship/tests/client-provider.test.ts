@@ -47,6 +47,34 @@ describe('FlagshipClientProvider', () => {
 
 			expect(provider).toBeInstanceOf(FlagshipClientProvider);
 		});
+
+		it('resolves a relative endpoint against window.location.origin', () => {
+			vi.stubGlobal('window', { location: { origin: 'https://app.example.com' } });
+
+			new FlagshipClientProvider({ endpoint: '/api/flagship/evaluate' });
+
+			expect(FlagshipClient).toHaveBeenCalledWith(expect.objectContaining({ endpoint: 'https://app.example.com/api/flagship/evaluate' }));
+
+			vi.unstubAllGlobals();
+		});
+
+		it('leaves an absolute endpoint untouched', () => {
+			vi.stubGlobal('window', { location: { origin: 'https://app.example.com' } });
+
+			new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
+
+			expect(FlagshipClient).toHaveBeenCalledWith(expect.objectContaining({ endpoint: 'https://api.example.com/evaluate' }));
+
+			vi.unstubAllGlobals();
+		});
+
+		it('throws when a relative endpoint is used without a browser context', () => {
+			vi.stubGlobal('window', undefined);
+
+			expect(() => new FlagshipClientProvider({ endpoint: '/api/flagship/evaluate' })).toThrow(/requires a browser context/);
+
+			vi.unstubAllGlobals();
+		});
 	});
 
 	describe('cache miss — FLAG_NOT_FOUND', () => {

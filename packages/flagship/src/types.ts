@@ -36,8 +36,10 @@ export interface FlagshipProviderOptions {
 	accountId?: string;
 
 	/**
-	 * Full evaluation endpoint URL. Mutually exclusive with `appId`.
-	 * Use this for local development or custom deployments.
+	 * Evaluation endpoint. Mutually exclusive with `appId`.
+	 * Accepts an absolute URL or a root-relative path. Relative paths are
+	 * only supported by `FlagshipClientProvider` and are resolved against
+	 * `window.location.origin`.
 	 */
 	endpoint?: string;
 

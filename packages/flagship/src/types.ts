@@ -1,3 +1,5 @@
+/// <reference types="@cloudflare/workers-types" />
+
 /** Default base URL for the Flagship API. */
 export const FLAGSHIP_DEFAULT_BASE_URL = 'https://api.cloudflare.com';
 
@@ -140,6 +142,83 @@ export interface FlagshipEvaluationResponse {
 	 */
 	reason: 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT';
 }
+
+// ---------------------------------------------------------------------------
+// Flagship Wrangler Binding types
+//
+// Re-exported from @cloudflare/workers-types so consumers don't need to
+// install the full workers-types package just for typing `env.FLAGS`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape of the Flagship wrangler binding exposed on `env` in Cloudflare Workers.
+ *
+ * This is an alias for the `Flagship` class from `@cloudflare/workers-types`.
+ * The binding communicates directly with the Flagship service via workerd RPC —
+ * no HTTP overhead, no auth tokens required. Configure it in `wrangler.json`:
+ *
+ * ```jsonc
+ * {
+ *   "flagship": [
+ *     { "binding": "FLAGS", "app_id": "<your-app-id>" }
+ *   ]
+ * }
+ * ```
+ */
+export type FlagshipBinding = Flagship;
+
+/**
+ * Evaluation details returned by the Flagship binding's `*Details` methods.
+ * Contains the resolved value along with metadata about why that value was
+ * chosen.
+ *
+ * This is an alias for the `FlagshipEvaluationDetails` interface from
+ * `@cloudflare/workers-types`.
+ */
+export type FlagshipBindingEvaluationDetails<T> = FlagshipEvaluationDetails<T>;
+
+/**
+ * Configuration for `FlagshipServerProvider` when using a wrangler binding.
+ *
+ * In this mode the provider delegates all evaluations to the Flagship binding
+ * on `env`, bypassing HTTP entirely. No `appId`, `accountId`, or `authToken`
+ * is required — the binding handles authentication and routing.
+ *
+ * @example
+ * ```typescript
+ * new FlagshipServerProvider({ binding: env.FLAGS })
+ * ```
+ */
+export interface FlagshipBindingProviderOptions {
+	/** The Flagship binding from the Worker's `env` object. */
+	binding: FlagshipBinding;
+
+	/**
+	 * Enable SDK-level logging.
+	 * @default false
+	 */
+	logging?: boolean;
+}
+
+/**
+ * Options accepted by `FlagshipServerProvider`.
+ *
+ * Provide **either** HTTP configuration (`appId`/`endpoint` + credentials) **or**
+ * a wrangler `binding` — never both. The provider detects which mode to use
+ * based on the presence of the `binding` field.
+ */
+export type FlagshipServerProviderOptions = FlagshipProviderOptions | FlagshipBindingProviderOptions;
+
+/**
+ * Type guard: returns `true` when the options use binding mode.
+ */
+export function isBindingOptions(options: FlagshipServerProviderOptions): options is FlagshipBindingProviderOptions {
+	return 'binding' in options && options.binding !== null && options.binding !== undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Error types
+// ---------------------------------------------------------------------------
 
 /**
  * Internal error codes produced by `FlagshipClient`.

@@ -151,6 +151,10 @@ export class FlagshipClientProvider implements Provider {
 			};
 		}
 
+		if (cached.reason === 'DISABLED') {
+			return { value: defaultValue, reason: 'DISABLED', flagMetadata: {} };
+		}
+
 		const actualType = this.getValueType(cached.value);
 		if (actualType !== expectedType) {
 			const msg = `Flag "${flagKey}" type mismatch: expected ${expectedType}, got ${actualType}`;

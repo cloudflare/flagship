@@ -626,4 +626,57 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.runsOn).toBe('client');
 		});
 	});
+
+	describe('DISABLED flag — falls back to SDK default', () => {
+		async function buildProviderWithDisabledFlag(flagKey: string, flagValue: unknown, variant: string): Promise<FlagshipClientProvider> {
+			(FlagshipClient as any).mockImplementation(function () {
+				return {
+					evaluate: vi.fn().mockResolvedValue({ flagKey, value: flagValue, variant, reason: 'DISABLED' }),
+				};
+			});
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: [flagKey],
+			});
+			await provider.initialize({});
+			return provider;
+		}
+
+		it('returns SDK defaultValue (not the flag variation) for a boolean flag', async () => {
+			const provider = await buildProviderWithDisabledFlag('my-flag', true, 'on');
+			const result = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
+
+			expect(result.value).toBe(false); // SDK caller's default, not the flag's stored 'on' variation
+			expect(result.reason).toBe('DISABLED');
+			expect(result.errorCode).toBeUndefined();
+			expect(result.variant).toBeUndefined();
+		});
+
+		it('returns SDK defaultValue for a string flag', async () => {
+			const provider = await buildProviderWithDisabledFlag('my-flag', 'flag-default', 'flag-variant');
+			const result = provider.resolveStringEvaluation('my-flag', 'sdk-default', {}, noopLogger);
+
+			expect(result.value).toBe('sdk-default');
+			expect(result.reason).toBe('DISABLED');
+			expect(result.errorCode).toBeUndefined();
+		});
+
+		it('returns SDK defaultValue for a number flag', async () => {
+			const provider = await buildProviderWithDisabledFlag('my-flag', 99, 'high');
+			const result = provider.resolveNumberEvaluation('my-flag', 0, {}, noopLogger);
+
+			expect(result.value).toBe(0);
+			expect(result.reason).toBe('DISABLED');
+			expect(result.errorCode).toBeUndefined();
+		});
+
+		it('returns SDK defaultValue for an object flag', async () => {
+			const provider = await buildProviderWithDisabledFlag('my-flag', { stored: true }, 'stored-variant');
+			const result = provider.resolveObjectEvaluation('my-flag', { sdk: true }, {}, noopLogger);
+
+			expect(result.value).toEqual({ sdk: true });
+			expect(result.reason).toBe('DISABLED');
+			expect(result.errorCode).toBeUndefined();
+		});
+	});
 });

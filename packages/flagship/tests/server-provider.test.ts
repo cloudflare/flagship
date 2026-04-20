@@ -837,4 +837,63 @@ describe('FlagshipServerProvider', () => {
 			expect(result.errorCode).toBe(ErrorCode.PARSE_ERROR);
 		});
 	});
+
+	describe('DISABLED flag — falls back to SDK default', () => {
+		it('returns SDK defaultValue (not the flag variation) for a boolean flag', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true, variant: 'on', reason: 'DISABLED' }),
+			});
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
+			const result = await provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
+
+			expect(result.value).toBe(false); // SDK caller's default, not the flag's 'on' variation
+			expect(result.reason).toBe('DISABLED');
+			expect(result.errorCode).toBeUndefined();
+			expect(result.variant).toBeUndefined();
+		});
+
+		it('returns SDK defaultValue for a string flag', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: 'flag-default', variant: 'flag-variant', reason: 'DISABLED' }),
+			});
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
+			const result = await provider.resolveStringEvaluation('my-flag', 'sdk-default', {}, noopLogger);
+
+			expect(result.value).toBe('sdk-default');
+			expect(result.reason).toBe('DISABLED');
+			expect(result.errorCode).toBeUndefined();
+		});
+
+		it('returns SDK defaultValue for a number flag', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: 99, variant: 'high', reason: 'DISABLED' }),
+			});
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
+			const result = await provider.resolveNumberEvaluation('my-flag', 0, {}, noopLogger);
+
+			expect(result.value).toBe(0);
+			expect(result.reason).toBe('DISABLED');
+			expect(result.errorCode).toBeUndefined();
+		});
+
+		it('returns SDK defaultValue for an object flag', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: { stored: true }, variant: 'stored-variant', reason: 'DISABLED' }),
+			});
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
+			const result = await provider.resolveObjectEvaluation('my-flag', { sdk: true }, {}, noopLogger);
+
+			expect(result.value).toEqual({ sdk: true });
+			expect(result.reason).toBe('DISABLED');
+			expect(result.errorCode).toBeUndefined();
+		});
+	});
 });

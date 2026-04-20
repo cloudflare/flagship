@@ -201,7 +201,7 @@ export class FlagshipServerProvider implements Provider {
 	}
 
 	// ---------------------------------------------------------------------------
-	// HTTP mode resolution (existing behaviour)
+	// HTTP mode resolution
 	// ---------------------------------------------------------------------------
 
 	private async resolveViaHttp<T>(
@@ -216,6 +216,10 @@ export class FlagshipServerProvider implements Provider {
 			log.debug(`[Flagship] Evaluating flag "${flagKey}" (expected: ${expectedType})`);
 
 			const result = await this.client!.evaluate(flagKey, context);
+
+			if (result.reason === 'DISABLED') {
+				return { value: defaultValue, reason: 'DISABLED', flagMetadata: {} };
+			}
 
 			const actualType = getValueType(result.value);
 			if (actualType !== expectedType) {
@@ -291,6 +295,10 @@ export class FlagshipServerProvider implements Provider {
 				const errorMessage = details.errorMessage ?? `Binding error: ${details.errorCode}`;
 				log.error(`[Flagship] Flag "${flagKey}" evaluation failed (${errorCode}): ${errorMessage}`);
 				return { value: defaultValue, errorCode, errorMessage, reason: details.reason ?? 'ERROR' };
+			}
+
+			if (details.reason === 'DISABLED') {
+				return { value: defaultValue, reason: 'DISABLED', flagMetadata: {} };
 			}
 
 			// Type-check the resolved value.

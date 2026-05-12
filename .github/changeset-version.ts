@@ -134,10 +134,19 @@ export function validatePendingChangesets(): void {
 			errors.push(`Changeset ${relative(root, file)} references unknown package(s): ${unknownPackageNames.join(', ')}.`);
 		}
 
-		const touchesSdk = parsed.entries.some((entry) => sdkPackageNameSet.has(entry.name));
+		const sdkEntries = parsed.entries.filter((entry) => sdkPackageNameSet.has(entry.name));
+		const touchesSdk = sdkEntries.length > 0;
 
 		if (!touchesSdk) {
 			errors.push(`Changeset ${relative(root, file)} does not bump any SDK package. Every release changeset must target at least one SDK.`);
+		}
+
+		const noneSDKNames = sdkEntries.filter((entry) => entry.bump === 'none').map((entry) => entry.name);
+
+		if (noneSDKNames.length > 0) {
+			errors.push(
+				`Changeset ${relative(root, file)} sets bump 'none' for SDK package(s): ${noneSDKNames.join(', ')}. Use 'patch', 'minor', or 'major' for SDK entries.`,
+			);
 		}
 	}
 

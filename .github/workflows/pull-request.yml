@@ -59,6 +59,7 @@ jobs:
           node-version: 24
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm changeset status --since=origin/main
       - run: pnpm run changeset:validate
 
   build:

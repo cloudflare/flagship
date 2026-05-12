@@ -57,7 +57,7 @@
 	"license": "Apache-2.0",
 	"author": "Cloudflare Inc.",
 	"repository": {
-		"directory": "packages/flagship",
+		"directory": "packages/typescript",
 		"type": "git",
 		"url": "git+https://github.com/cloudflare/flagship.git"
 	},
@@ -67,6 +67,9 @@
 	},
 	"publishConfig": {
 		"access": "public"
+	},
+	"flagship": {
+		"language": "typescript"
 	},
 	"keywords": [
 		"openfeature",

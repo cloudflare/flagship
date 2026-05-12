@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@cloudflare/flagship.svg)](https://www.npmjs.com/package/@cloudflare/flagship)
 [![license](https://img.shields.io/npm/l/@cloudflare/flagship.svg)](https://github.com/cloudflare/flagship/blob/main/LICENSE)
 
-Flagship is a globally distributed, low-latency feature flag platform built entirely on Cloudflare. This repository contains the TypeScript SDK — an [OpenFeature](https://openfeature.dev)-compliant provider for evaluating feature flags from server-side (Node.js, Cloudflare Workers) and client-side (browser) environments.
+Flagship is a globally distributed, low-latency feature flag platform built entirely on Cloudflare. This repository is the monorepo for Flagship SDKs. Today it contains the TypeScript SDK — an [OpenFeature](https://openfeature.dev)-compliant provider for evaluating feature flags from server-side (Node.js, Cloudflare Workers) and client-side (browser) environments.
 
 ```sh
 npm install @cloudflare/flagship @openfeature/server-sdk
@@ -62,28 +62,28 @@ const enabled = await client.getBooleanValue('dark-mode', false, {
 
 ## Packages
 
-| Export                                             | Description                      | Peer dependency           |
-| -------------------------------------------------- | -------------------------------- | ------------------------- |
-| [`@cloudflare/flagship`](packages/flagship)        | Core client, types, errors       | None                      |
-| [`@cloudflare/flagship/server`](packages/flagship) | `FlagshipServerProvider` + hooks | `@openfeature/server-sdk` |
-| [`@cloudflare/flagship/web`](packages/flagship)    | `FlagshipClientProvider`         | `@openfeature/web-sdk`    |
+| Export                                               | Description                      | Peer dependency           |
+| ---------------------------------------------------- | -------------------------------- | ------------------------- |
+| [`@cloudflare/flagship`](packages/typescript)        | Core client, types, errors       | None                      |
+| [`@cloudflare/flagship/server`](packages/typescript) | `FlagshipServerProvider` + hooks | `@openfeature/server-sdk` |
+| [`@cloudflare/flagship/web`](packages/typescript)    | `FlagshipClientProvider`         | `@openfeature/web-sdk`    |
 
 Each sub-path is a separate bundle so importing one never pulls in the other's OpenFeature dependency.
 
 ## Documentation
 
-- [API reference](docs/API.md)
+- [API reference](packages/typescript/API.md)
 - [OpenFeature specification](https://openfeature.dev/specification/)
-- [Examples](packages/flagship/examples/)
+- [Examples](packages/typescript/examples/)
 
 ## Repository Structure
 
-| Directory                                 | Description                                       |
-| ----------------------------------------- | ------------------------------------------------- |
-| [`packages/flagship/`](packages/flagship) | `@cloudflare/flagship` — OpenFeature provider SDK |
-| [`docs/`](docs)                           | API reference and documentation                   |
-| [`.changeset/`](.changeset)               | Changeset config and pending changesets           |
-| [`.github/`](.github)                     | CI workflows and issue templates                  |
+| Directory                                     | Description                                       |
+| --------------------------------------------- | ------------------------------------------------- |
+| [`packages/typescript/`](packages/typescript) | `@cloudflare/flagship` — OpenFeature provider SDK |
+| `packages/<language>/`                        | SDK package by implementation language            |
+| [`.changeset/`](.changeset)                   | Changeset config and pending changesets           |
+| [`.github/`](.github)                         | CI workflows and issue templates                  |
 
 ## Development
 
@@ -101,6 +101,8 @@ Changes to published packages need a changeset:
 ```sh
 pnpm changeset
 ```
+
+Release automation opens one SDK version PR. Any changeset that touches one SDK is expanded to version all SDK languages together.
 
 See [`AGENTS.md`](AGENTS.md) for deeper contributor guidance.
 

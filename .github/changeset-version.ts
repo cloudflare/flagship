@@ -32,7 +32,8 @@ const bumpOrder = new Map<ChangesetEntry['bump'], number>([
 	['minor', 2],
 	['major', 3],
 ]);
-const nativeManifestFiles = ['Cargo.toml', 'pyproject.toml'] as const;
+const versionSyncedManifestFiles = ['Cargo.toml', 'pyproject.toml'] as const;
+const tagOnlyManifestFiles = ['go.mod'] as const;
 
 function readJson(path: string): PackageJson {
 	return JSON.parse(readFileSync(path, 'utf8')) as PackageJson;
@@ -205,7 +206,7 @@ export function syncNativeManifests(): void {
 			continue;
 		}
 
-		for (const manifest of nativeManifestFiles) {
+		for (const manifest of versionSyncedManifestFiles) {
 			const manifestPath = join(packageInfo.directory, manifest);
 
 			if (!existsSync(manifestPath)) {
@@ -213,24 +214,37 @@ export function syncNativeManifests(): void {
 			}
 
 			const original = readFileSync(manifestPath, 'utf8');
-			const versionLinePattern = /^(\s*version\s*=\s*")([^"]+)(")/m;
-			const match = versionLinePattern.exec(original);
+			const versionLinePattern = /^(\s*version\s*=\s*")([^"]+)(")/gm;
+			const firstMatch = versionLinePattern.exec(original);
 
-			if (match === null) {
+			if (firstMatch === null) {
 				errors.push(
 					`Could not find a top-level 'version = "..."' line in ${relative(root, manifestPath)}. Add one so release automation can sync it.`,
 				);
 				continue;
 			}
 
-			if (match[2] === targetVersion) {
+			if (firstMatch[2] === targetVersion) {
 				console.log(`${relative(root, manifestPath)} already at ${targetVersion}.`);
 				continue;
 			}
 
+			const previousVersion = firstMatch[2];
 			const updated = original.replace(versionLinePattern, `$1${targetVersion}$3`);
 			writeFileSync(manifestPath, updated);
-			console.log(`Synced ${relative(root, manifestPath)} ${match[2]} -> ${targetVersion}.`);
+			console.log(`Synced ${relative(root, manifestPath)} ${previousVersion} -> ${targetVersion}.`);
+		}
+
+		for (const manifest of tagOnlyManifestFiles) {
+			const manifestPath = join(packageInfo.directory, manifest);
+
+			if (!existsSync(manifestPath)) {
+				continue;
+			}
+
+			console.log(
+				`${relative(root, manifestPath)} detected — Go modules are versioned via git tags only; no file sync needed for ${packageInfo.name}@${targetVersion}.`,
+			);
 		}
 	}
 

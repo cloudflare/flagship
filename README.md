@@ -102,8 +102,6 @@ Changes to published packages need a changeset:
 pnpm changeset
 ```
 
-Release automation opens one SDK version PR. Any changeset that touches one SDK is expanded to version all SDK languages together.
-
 See [`AGENTS.md`](AGENTS.md) for deeper contributor guidance.
 
 ## Contributing

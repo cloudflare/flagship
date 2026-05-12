@@ -9,6 +9,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   format:
     name: Format
@@ -59,7 +62,6 @@ jobs:
           node-version: 24
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm changeset status --since=origin/main
       - run: pnpm run changeset:validate
 
   build:

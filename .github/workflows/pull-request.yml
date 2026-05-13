@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   format:
     name: Format
@@ -101,6 +104,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [format, lint, typecheck, test]
+    permissions:
+      contents: read
+      pull-requests: write   # pkg-pr-new comments on the PR with the preview URL
     steps:
       - uses: actions/checkout@v6
 

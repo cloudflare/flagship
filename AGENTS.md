@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-`@cloudflare/flagship` — a TypeScript SDK for Cloudflare's Flagship feature flag platform. Provides OpenFeature-compatible providers for both server and browser environments.
+`@cloudflare/flagship` — the TypeScript SDK for Cloudflare's Flagship feature flag platform. Provides OpenFeature-compatible providers for both server and browser environments.
 
-This is a **pnpm monorepo** with a single published package today. More packages may be added under `packages/`.
+This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The current published SDK is the TypeScript package in `sdks/typescript`.
 
 ## Repository Structure
 
 ```
-packages/
-  flagship/          # @cloudflare/flagship — OpenFeature provider SDK
+sdks/
+  typescript/        # @cloudflare/flagship — OpenFeature provider SDK
     src/
       index.ts       # Core exports (FlagshipClient, types, errors)
       server.ts      # Re-exports core + FlagshipServerProvider + hooks
@@ -21,7 +21,7 @@ packages/
       client-provider.ts  # Sync cache-based provider (browser)
       hooks/         # LoggingHook, TelemetryHook
       types.ts       # Shared types and error codes
-    test/            # Vitest unit and integration tests
+    tests/           # Vitest unit and integration tests
 
 .changeset/          # Changeset config and pending changesets
 .github/             # CI workflows (release, pull-request, bonk), issue templates
@@ -48,7 +48,7 @@ Run from the repo root:
 | `pnpm run format`    | Format all files with oxfmt                        |
 | `pnpm run typecheck` | TypeScript type checking across packages           |
 
-Package-level (run from `packages/flagship/`):
+Package-level (run from `sdks/typescript/`):
 
 | Command          | What it does                  |
 | ---------------- | ----------------------------- |
@@ -96,7 +96,7 @@ Config in `.oxfmtrc.json`: tabs, single quotes, semicolons, 140 print width.
 
 ## Testing
 
-Tests use **vitest** in Node environment. Test files live in `packages/flagship/test/` mirroring the source structure.
+Tests use **vitest** in Node environment. Test files live in `sdks/typescript/tests/` mirroring the source structure.
 
 ```bash
 pnpm run test                    # all tests
@@ -113,9 +113,39 @@ Changes to published packages need a changeset:
 pnpm changeset      # interactive prompt — pick packages, semver bump, description
 ```
 
+Pick only the SDK package(s) you actually changed. The release workflow expands every release-bound changeset so all SDK packages are bumped to the same version. The highest bump in the changeset (`patch` < `minor` < `major`) becomes the bump for the rest.
+
+The release pipeline runs `.github/changeset-version.ts`, which:
+
+1. Validates every pending changeset — fails fast on unknown packages, non-SDK-only changesets, or SDK entries with a `none` bump.
+2. Expands the changeset to include every SDK package so they share the bump.
+3. Runs `pnpm changeset version`, producing one PR titled `chore(release): version SDK packages` with all SDK `package.json` and `CHANGELOG.md` updates.
+4. Syncs the new version into native manifests beside each SDK:
+   - `pyproject.toml` — updates `[project].version` (PEP 621, used by uv/hatch/flit/pdm and Poetry 2.0+) and/or `[tool.poetry].version` (legacy Poetry 1.x), whichever fields are present. Fails if neither exists.
+   - `Cargo.toml` — updates `[package].version` only. Dependency `version` fields are left untouched.
+   - `go.mod` — no file sync. Go modules are versioned exclusively via git tags.
+5. Re-runs `pnpm install` to refresh the lockfile.
+
+After merge the same workflow runs `pnpm changeset publish` and:
+
+- Publishes public npm SDKs (currently `@cloudflare/flagship`).
+- Skips npm publish for `private: true` SDKs but still creates a git tag (`privatePackages.tag: true`). Language-specific publish workflows (PyPI, crates.io, etc.) should subscribe to those tags. For Go, the git tag is the version — no additional file sync is needed.
+
+Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Non-npm SDK packages should use `private: true` and keep their native manifest beside it:
+
+| Language | Native manifest  | Version sync                                                              |
+| -------- | ---------------- | ------------------------------------------------------------------------- |
+| Python   | `pyproject.toml` | `[project].version` and/or `[tool.poetry].version`, whichever are present |
+| Rust     | `Cargo.toml`     | `[package].version` only — dependency versions are not touched            |
+| Go       | `go.mod`         | No file sync — version is the git tag only                                |
+
+PR CI runs `pnpm run changeset:validate` (the `Changesets` job) so malformed, non-SDK, or `none`-bumped SDK changesets fail before merge.
+
+Changesets should remain the only release intent file. Do not add release-please, semantic-release, or language-specific release manifests unless the release workflow is explicitly changed to derive them from Changesets.
+
 ### Pull Request Process
 
-CI runs on every PR: `pnpm install → build → check → test`. All checks must pass.
+CI runs on every PR: `pnpm install → build → check → test → changeset:validate`. All checks must pass.
 
 ## Boundaries
 

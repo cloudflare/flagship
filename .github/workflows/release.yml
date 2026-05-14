@@ -9,6 +9,9 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Pre-release Checks
@@ -40,7 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v5
 
@@ -56,6 +59,8 @@ jobs:
         with:
           version: pnpm tsx .github/changeset-version.ts
           publish: pnpm changeset publish
+          title: 'chore(release): version SDK packages'
+          commit: 'chore(release): version SDK packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

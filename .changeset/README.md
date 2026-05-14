@@ -5,3 +5,9 @@ with multi-package repos, or single-package repos to help you version and publis
 
 We have a quick list of common questions to get you started engaging with this project in
 [our documentation](https://github.com/changesets/changesets/blob/main/docs/common-questions.md)
+
+## Flagship SDK releases
+
+This repo uses Changesets for every SDK language. Release automation opens one SDK version PR and expands any SDK changeset so all SDK packages are versioned together.
+
+Use `pnpm changeset` for any published SDK change. You only need to select the SDK package you changed; the release workflow adds the other SDK packages during versioning.

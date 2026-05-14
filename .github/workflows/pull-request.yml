@@ -3,13 +3,14 @@ name: Pull Request
 on:
   pull_request:
     paths-ignore:
-      - 'docs/**'
       - '*.md'
-      - '.changeset/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   format:
@@ -44,6 +45,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm dlx sherif
       - run: pnpm run lint
+
+  changesets:
+    name: Changesets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run changeset:validate
 
   build:
     name: Build
@@ -112,4 +131,4 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm dlx pkg-pr-new publish './packages/*'
+      - run: pnpm dlx pkg-pr-new publish './sdks/typescript'

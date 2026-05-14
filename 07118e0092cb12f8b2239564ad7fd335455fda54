@@ -1,0 +1,65 @@
+sdks/python/src/flagship/__init__.py
+  b2dd745b6b1647ee 1-14
+.github/workflows/publish-pypi.yml
+  b2dd745b6b1647ee 1-29
+sdks/python/README.md
+  b2dd745b6b1647ee 1-168
+sdks/python/.gitignore
+  b2dd745b6b1647ee 1-10
+.changeset/add-python-sdk.md
+  b2dd745b6b1647ee 1-5
+sdks/python/src/flagship/client.py
+  b2dd745b6b1647ee 1-161
+sdks/python/.python-version
+  b2dd745b6b1647ee 1
+sdks/python/src/flagship/hooks/telemetry_hook.py
+  b2dd745b6b1647ee 1-105
+sdks/python/tests/hooks/test_logging_hook.py
+  b2dd745b6b1647ee 1-37
+sdks/python/tests/test_context.py
+  b2dd745b6b1647ee 1-61
+sdks/python/tests/test_integration.py
+  b2dd745b6b1647ee 1-51
+sdks/python/src/flagship/context.py
+  b2dd745b6b1647ee 1-44
+sdks/python/src/flagship/hooks/__init__.py
+  b2dd745b6b1647ee 1-4
+sdks/python/src/flagship/hooks/logging_hook.py
+  b2dd745b6b1647ee 1-55
+sdks/python/tests/test_client.py
+  b2dd745b6b1647ee 1-220
+sdks/python/tests/test_provider.py
+  b2dd745b6b1647ee 1-200
+sdks/python/src/flagship/provider.py
+  b2dd745b6b1647ee 1-262
+sdks/python/tests/conftest.py
+  b2dd745b6b1647ee 1-13
+sdks/python/tests/hooks/test_telemetry_hook.py
+  b2dd745b6b1647ee 1-94
+sdks/python/pyproject.toml
+  b2dd745b6b1647ee 1-53
+sdks/python/src/flagship/_types.py
+  b2dd745b6b1647ee 1-12
+sdks/python/package.json
+  b2dd745b6b1647ee 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "07118e0092cb12f8b2239564ad7fd335455fda54",
+  "prompts": {
+    "b2dd745b6b1647ee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1e55902dfffeQBiGY3nl3KSi8s",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Akshit Sinha",
+      "messages": [],
+      "total_additions": 1611,
+      "total_deletions": 0,
+      "accepted_lines": 1611,
+      "overriden_lines": 0
+    }
+  }
+}

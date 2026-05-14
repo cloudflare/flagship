@@ -1,0 +1,31 @@
+README.md
+  b2dd745b6b1647ee 65-69,75,77,81-86
+pnpm-workspace.yaml
+  b2dd745b6b1647ee 2
+AGENTS.md
+  b2dd745b6b1647ee 7,12,51,99,120,134,142
+.github/workflows/pull-request.yml
+  b2dd745b6b1647ee 134
+.github/changeset-version.ts
+  b2dd745b6b1647ee 6,9,13,25,41-43,47-50,64,139,164-173,179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0963354feaad2f9e3a104d299db2c2f96ea6af37",
+  "prompts": {
+    "b2dd745b6b1647ee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1e55902dfffeQBiGY3nl3KSi8s",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Akshit Sinha",
+      "messages": [],
+      "total_additions": 47,
+      "total_deletions": 65,
+      "accepted_lines": 47,
+      "overriden_lines": 0
+    }
+  }
+}

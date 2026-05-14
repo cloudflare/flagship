@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "068d498bb08f638f36af8caf975ca4cb7be0a9a4",
+  "prompts": {
+    "b2dd745b6b1647ee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1e55902dfffeQBiGY3nl3KSi8s",
+        "model": "openai/gpt-5.5"
+      },
+      "human_author": "Akshit Sinha",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}

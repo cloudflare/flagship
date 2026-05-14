@@ -17,7 +17,7 @@
 		"format": "oxfmt --write .",
 		"format:check": "oxfmt --check .",
 		"lint": "oxlint .",
-		"typecheck": "pnpm -r run typecheck",
+		"typecheck": "tsc --noEmit && pnpm -r run typecheck",
 		"check": "sherif && oxfmt --check . && oxlint . && pnpm run typecheck",
 		"test": "pnpm -r run test",
 		"prepare": "husky"
@@ -25,13 +25,19 @@
 	"devDependencies": {
 		"@changesets/changelog-github": "^0.7.0",
 		"@changesets/cli": "^2.31.0",
+		"@changesets/read": "^0.6.7",
+		"@changesets/types": "^6.1.0",
+		"@decimalturn/toml-patch": "^1.3.0",
+		"@manypkg/get-packages": "^3.1.0",
+		"@types/node": "^24.12.2",
 		"husky": "^9.1.7",
 		"lint-staged": "^17.0.4",
 		"oxfmt": "^0.49.0",
 		"oxlint": "^1.64.0",
 		"pkg-pr-new": "^0.0.71",
 		"sherif": "^1.11.1",
-		"tsx": "^4.21.0"
+		"tsx": "^4.21.0",
+		"typescript": "^5.9.3"
 	},
 	"packageManager": "pnpm@10.8.1",
 	"overrides": {},

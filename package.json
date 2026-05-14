@@ -27,6 +27,7 @@
 		"@changesets/cli": "^2.31.0",
 		"@changesets/read": "^0.6.7",
 		"@changesets/types": "^6.1.0",
+		"@decimalturn/toml-patch": "^1.3.0",
 		"@manypkg/get-packages": "^3.1.0",
 		"@types/node": "^24.12.2",
 		"husky": "^9.1.7",

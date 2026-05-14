@@ -1,12 +1,12 @@
 /**
  * Release automation for the Flagship multi-language SDK monorepo.
  *
- * Two modes:
- *   - `validate`: Run in PR CI. Fails on malformed, non-SDK, or `none`-bumped SDK changesets.
- *   - `release`:  Run by changesets/action. Validates, expands every changeset to all SDKs,
- *                 calls `changeset version`, syncs native manifests, and refreshes the lockfile.
+ * Modes:
+ *   - `validate`: rejects malformed, non-SDK, or `none`-bumped SDK changesets. Run in PR CI.
+ *   - `release`:  validates, expands every changeset to all SDKs, runs `changeset version`,
+ *                 syncs native manifests, refreshes the lockfile. Run by changesets/action.
  *
- * An "SDK" is any direct subdirectory of `packages/` containing a `package.json`.
+ * An SDK is any direct subdirectory of `packages/` containing a `package.json`.
  */
 
 import { execSync } from 'node:child_process';
@@ -14,19 +14,16 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import readChangesets from '@changesets/read';
 import type { NewChangeset, Release, VersionType } from '@changesets/types';
+import { parse as parseToml, patch as patchToml } from '@decimalturn/toml-patch';
 import { getPackagesSync, type Package } from '@manypkg/get-packages';
 
 const ROOT = process.cwd();
 const BUMP_RANK: Record<VersionType, number> = { none: 0, patch: 1, minor: 2, major: 3 };
 
-// ---------- Workspace discovery ----------
-
 function readSdkPackages(): Package[] {
 	const { packages } = getPackagesSync(ROOT);
 	return packages.filter((pkg) => pkg.relativeDir.startsWith('packages/') && !pkg.relativeDir.slice('packages/'.length).includes('/'));
 }
-
-// ---------- Validation ----------
 
 export async function validatePendingChangesets(): Promise<void> {
 	const sdkNames = new Set(readSdkPackages().map((pkg) => pkg.packageJson.name));
@@ -64,12 +61,7 @@ export async function validatePendingChangesets(): Promise<void> {
 	console.log(changesets.length === 0 ? 'No pending changesets to validate.' : `Validated ${changesets.length} pending changeset(s).`);
 }
 
-// ---------- Expansion ----------
-
-/**
- * Ensures every changeset that touches any SDK bumps *all* SDKs to the same level.
- * All SDKs share a version line, so any release moves them together.
- */
+/** Every release-bound changeset is rewritten to bump every SDK at the highest bump present. */
 export async function expandChangesetsToAllSdks(): Promise<void> {
 	const allSdkNames = readSdkPackages()
 		.map((pkg) => pkg.packageJson.name)
@@ -97,20 +89,14 @@ function writeChangesetFile({ id, summary, releases }: NewChangeset): void {
 	writeFileSync(join(ROOT, '.changeset', `${id}.md`), `---\n${frontmatter}\n---\n\n${summary}\n`);
 }
 
-// ---------- Native manifest sync ----------
-
-/**
- * After `changeset version` updates each SDK's `package.json`, mirror the new version
- * into the native manifest beside it. Go modules are tag-only — no file sync.
- */
+/** Mirrors each SDK's `package.json` version into the native manifest beside it, if present. */
 export function syncNativeManifests(): void {
 	const errors: string[] = [];
 
 	for (const pkg of readSdkPackages()) {
 		const targetVersion = pkg.packageJson.version;
-		syncTomlManifest(join(pkg.dir, 'pyproject.toml'), targetVersion, errors);
-		syncTomlManifest(join(pkg.dir, 'Cargo.toml'), targetVersion, errors);
-		noteGoModule(join(pkg.dir, 'go.mod'), pkg.packageJson.name, targetVersion);
+		syncPythonPackageVersion(pkg.dir, targetVersion, errors);
+		syncRustPackageVersion(pkg.dir, targetVersion, errors);
 	}
 
 	if (errors.length > 0) {
@@ -118,37 +104,55 @@ export function syncNativeManifests(): void {
 	}
 }
 
-function syncTomlManifest(manifestPath: string, targetVersion: string, errors: string[]): void {
+type PyProjectToml = { project?: { version?: string }; tool?: { poetry?: { version?: string } } };
+type CargoToml = { package?: { version?: string } };
+
+/**
+ * Syncs the version for any PEP 621 pyproject (uv, hatch, flit, pdm, setuptools, Poetry 2.0+)
+ * via `[project].version`, and also `[tool.poetry].version` for legacy Poetry 1.x layouts.
+ */
+function syncPythonPackageVersion(packageDir: string, targetVersion: string, errors: string[]): void {
+	patchTomlField(join(packageDir, 'pyproject.toml'), targetVersion, errors, (parsed: PyProjectToml) => {
+		const hasProjectVersion = parsed.project?.version !== undefined;
+		const hasPoetryVersion = parsed.tool?.poetry?.version !== undefined;
+		if (!hasProjectVersion && !hasPoetryVersion) {
+			return '[project].version (PEP 621) or [tool.poetry].version (legacy Poetry)';
+		}
+		if (hasProjectVersion) parsed.project!.version = targetVersion;
+		if (hasPoetryVersion) parsed.tool!.poetry!.version = targetVersion;
+		return undefined;
+	});
+}
+
+function syncRustPackageVersion(packageDir: string, targetVersion: string, errors: string[]): void {
+	patchTomlField(join(packageDir, 'Cargo.toml'), targetVersion, errors, (parsed: CargoToml) => {
+		if (parsed.package?.version === undefined) return '[package].version';
+		parsed.package.version = targetVersion;
+		return undefined;
+	});
+}
+
+function patchTomlField<T>(manifestPath: string, targetVersion: string, errors: string[], mutate: (parsed: T) => string | undefined): void {
 	if (!existsSync(manifestPath)) return;
-
-	const original = readFileSync(manifestPath, 'utf8');
-	const versionLine = /^(\s*version\s*=\s*")([^"]+)(")/gm;
-	const firstMatch = versionLine.exec(original);
 	const relativePath = relative(ROOT, manifestPath);
+	const original = readFileSync(manifestPath, 'utf8');
+	const parsed = parseToml(original) as T;
 
-	if (firstMatch === null) {
-		errors.push(`${relativePath}: no top-level 'version = "..."' line found. Add one so release automation can sync it.`);
+	const missingField = mutate(parsed);
+	if (missingField !== undefined) {
+		errors.push(`${relativePath}: no ${missingField} field found. Add one so release automation can sync it.`);
 		return;
 	}
 
-	const previousVersion = firstMatch[2];
-	if (previousVersion === targetVersion) {
+	const updated = patchToml(original, parsed);
+	if (updated === original) {
 		console.log(`${relativePath} already at ${targetVersion}.`);
 		return;
 	}
 
-	writeFileSync(manifestPath, original.replace(versionLine, `$1${targetVersion}$3`));
-	console.log(`Synced ${relativePath} ${previousVersion} -> ${targetVersion}.`);
+	writeFileSync(manifestPath, updated);
+	console.log(`Synced ${relativePath} -> ${targetVersion}.`);
 }
-
-function noteGoModule(manifestPath: string, packageName: string, version: string): void {
-	if (!existsSync(manifestPath)) return;
-	console.log(
-		`${relative(ROOT, manifestPath)}: Go modules are versioned via git tags only; ${packageName}@${version} requires no file sync.`,
-	);
-}
-
-// ---------- Entry points ----------
 
 async function runRelease(): Promise<void> {
 	await validatePendingChangesets();

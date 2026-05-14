@@ -57,7 +57,7 @@
 	"license": "Apache-2.0",
 	"author": "Cloudflare Inc.",
 	"repository": {
-		"directory": "packages/typescript",
+		"directory": "sdks/typescript",
 		"type": "git",
 		"url": "git+https://github.com/cloudflare/flagship.git"
 	},

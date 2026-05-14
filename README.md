@@ -62,28 +62,28 @@ const enabled = await client.getBooleanValue('dark-mode', false, {
 
 ## Packages
 
-| Export                                               | Description                      | Peer dependency           |
-| ---------------------------------------------------- | -------------------------------- | ------------------------- |
-| [`@cloudflare/flagship`](packages/typescript)        | Core client, types, errors       | None                      |
-| [`@cloudflare/flagship/server`](packages/typescript) | `FlagshipServerProvider` + hooks | `@openfeature/server-sdk` |
-| [`@cloudflare/flagship/web`](packages/typescript)    | `FlagshipClientProvider`         | `@openfeature/web-sdk`    |
+| Export                                           | Description                      | Peer dependency           |
+| ------------------------------------------------ | -------------------------------- | ------------------------- |
+| [`@cloudflare/flagship`](sdks/typescript)        | Core client, types, errors       | None                      |
+| [`@cloudflare/flagship/server`](sdks/typescript) | `FlagshipServerProvider` + hooks | `@openfeature/server-sdk` |
+| [`@cloudflare/flagship/web`](sdks/typescript)    | `FlagshipClientProvider`         | `@openfeature/web-sdk`    |
 
 Each sub-path is a separate bundle so importing one never pulls in the other's OpenFeature dependency.
 
 ## Documentation
 
-- [API reference](packages/typescript/API.md)
+- [API reference](sdks/typescript/API.md)
 - [OpenFeature specification](https://openfeature.dev/specification/)
-- [Examples](packages/typescript/examples/)
+- [Examples](sdks/typescript/examples/)
 
 ## Repository Structure
 
-| Directory                                     | Description                                       |
-| --------------------------------------------- | ------------------------------------------------- |
-| [`packages/typescript/`](packages/typescript) | `@cloudflare/flagship` — OpenFeature provider SDK |
-| `packages/<language>/`                        | SDK package by implementation language            |
-| [`.changeset/`](.changeset)                   | Changeset config and pending changesets           |
-| [`.github/`](.github)                         | CI workflows and issue templates                  |
+| Directory                             | Description                                       |
+| ------------------------------------- | ------------------------------------------------- |
+| [`sdks/typescript/`](sdks/typescript) | `@cloudflare/flagship` — OpenFeature provider SDK |
+| `sdks/<language>/`                    | SDK package by implementation language            |
+| [`.changeset/`](.changeset)           | Changeset config and pending changesets           |
+| [`.github/`](.github)                 | CI workflows and issue templates                  |
 
 ## Development
 

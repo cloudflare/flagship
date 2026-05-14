@@ -1,0 +1,12 @@
+{
+	"name": "@cloudflare/flagship-python",
+	"version": "0.2.1",
+	"description": "OpenFeature provider for Cloudflare Flagship feature flags (Python)",
+	"private": true,
+	"license": "Apache-2.0",
+	"repository": {
+		"directory": "sdks/python",
+		"type": "git",
+		"url": "git+https://github.com/cloudflare/flagship.git"
+	}
+}

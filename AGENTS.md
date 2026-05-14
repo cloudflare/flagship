@@ -121,8 +121,9 @@ The release pipeline runs `.github/changeset-version.ts`, which:
 2. Expands the changeset to include every SDK package so they share the bump.
 3. Runs `pnpm changeset version`, producing one PR titled `chore(release): version SDK packages` with all SDK `package.json` and `CHANGELOG.md` updates.
 4. Syncs the new version into native manifests beside each SDK:
-   - `pyproject.toml` / `Cargo.toml` — all `version = "..."` lines in the file are updated in-place. The manifest must contain at least one such line or the release fails.
-   - `go.mod` — no file sync. Go modules are versioned exclusively via git tags; the script logs this and moves on.
+   - `pyproject.toml` — updates `[project].version` (PEP 621, used by uv/hatch/flit/pdm and Poetry 2.0+) and/or `[tool.poetry].version` (legacy Poetry 1.x), whichever fields are present. Fails if neither exists.
+   - `Cargo.toml` — updates `[package].version` only. Dependency `version` fields are left untouched.
+   - `go.mod` — no file sync. Go modules are versioned exclusively via git tags.
 5. Re-runs `pnpm install` to refresh the lockfile.
 
 After merge the same workflow runs `pnpm changeset publish` and:
@@ -130,13 +131,13 @@ After merge the same workflow runs `pnpm changeset publish` and:
 - Publishes public npm SDKs (currently `@cloudflare/flagship`).
 - Skips npm publish for `private: true` SDKs but still creates a git tag (`privatePackages.tag: true`). Language-specific publish workflows (PyPI, crates.io, etc.) should subscribe to those tags. For Go, the git tag is the version — no additional file sync is needed.
 
-Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Non-npm SDK packages should use `private: true` plus `flagship.language` and keep their native manifest beside it:
+Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Non-npm SDK packages should use `private: true` and keep their native manifest beside it:
 
-| Language | Native manifest  | Version sync                                          |
-| -------- | ---------------- | ----------------------------------------------------- |
-| Python   | `pyproject.toml` | All `version = "..."` lines updated by release script |
-| Rust     | `Cargo.toml`     | All `version = "..."` lines updated by release script |
-| Go       | `go.mod`         | No file sync — version is the git tag only            |
+| Language | Native manifest  | Version sync                                                              |
+| -------- | ---------------- | ------------------------------------------------------------------------- |
+| Python   | `pyproject.toml` | `[project].version` and/or `[tool.poetry].version`, whichever are present |
+| Rust     | `Cargo.toml`     | `[package].version` only — dependency versions are not touched            |
+| Go       | `go.mod`         | No file sync — version is the git tag only                                |
 
 PR CI runs `pnpm run changeset:validate` (the `Changesets` job) so malformed, non-SDK, or `none`-bumped SDK changesets fail before merge.
 

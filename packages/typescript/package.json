@@ -68,9 +68,6 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"flagship": {
-		"language": "typescript"
-	},
 	"keywords": [
 		"openfeature",
 		"feature-flags",

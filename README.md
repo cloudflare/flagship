@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@cloudflare/flagship.svg)](https://www.npmjs.com/package/@cloudflare/flagship)
 [![license](https://img.shields.io/npm/l/@cloudflare/flagship.svg)](https://github.com/cloudflare/flagship/blob/main/LICENSE)
 
-Flagship is a globally distributed, low-latency feature flag platform built entirely on Cloudflare. This repository is the monorepo for Flagship SDKs. Today it contains the TypeScript SDK — an [OpenFeature](https://openfeature.dev)-compliant provider for evaluating feature flags from server-side (Node.js, Cloudflare Workers) and client-side (browser) environments.
+Flagship is a globally distributed, low-latency feature flag platform built entirely on Cloudflare. This repository is the monorepo for Flagship SDKs. It contains the TypeScript SDK — an [OpenFeature](https://openfeature.dev)-compliant provider for evaluating feature flags from server-side (Node.js, Cloudflare Workers) and client-side (browser) environments.
 
 ```sh
 npm install @cloudflare/flagship @openfeature/server-sdk

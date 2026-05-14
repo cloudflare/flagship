@@ -1,153 +1,59 @@
+/**
+ * Release automation for the Flagship multi-language SDK monorepo.
+ *
+ * Two modes:
+ *   - `validate`: Run in PR CI. Fails on malformed, non-SDK, or `none`-bumped SDK changesets.
+ *   - `release`:  Run by changesets/action. Validates, expands every changeset to all SDKs,
+ *                 calls `changeset version`, syncs native manifests, and refreshes the lockfile.
+ *
+ * An "SDK" is any direct subdirectory of `packages/` containing a `package.json`.
+ */
+
 import { execSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import readChangesets from '@changesets/read';
+import type { NewChangeset, Release, VersionType } from '@changesets/types';
+import { getPackagesSync, type Package } from '@manypkg/get-packages';
 
-type PackageJson = {
-	name?: string;
-	version?: string;
-	private?: boolean;
-	flagship?: {
-		language?: string;
-	};
-};
+const ROOT = process.cwd();
+const BUMP_RANK: Record<VersionType, number> = { none: 0, patch: 1, minor: 2, major: 3 };
 
-type WorkspacePackage = {
-	name: string;
-	directory: string;
-	version: string;
-	isSdk: boolean;
-};
+// ---------- Workspace discovery ----------
 
-type ChangesetEntry = {
-	name: string;
-	bump: 'major' | 'minor' | 'patch' | 'none';
-};
-
-const root = process.cwd();
-const changesetDirectory = join(root, '.changeset');
-const ignoredDirectories = new Set(['.git', '.husky', 'node_modules', 'dist', 'coverage', '.wrangler']);
-const bumpOrder = new Map<ChangesetEntry['bump'], number>([
-	['none', 0],
-	['patch', 1],
-	['minor', 2],
-	['major', 3],
-]);
-const versionSyncedManifestFiles = ['Cargo.toml', 'pyproject.toml'] as const;
-const tagOnlyManifestFiles = ['go.mod'] as const;
-
-function readJson(path: string): PackageJson {
-	return JSON.parse(readFileSync(path, 'utf8')) as PackageJson;
+function readSdkPackages(): Package[] {
+	const { packages } = getPackagesSync(ROOT);
+	return packages.filter((pkg) => pkg.relativeDir.startsWith('packages/') && !pkg.relativeDir.slice('packages/'.length).includes('/'));
 }
 
-function isSdkDirectory(directory: string): boolean {
-	const parts = relative(root, directory).split('/');
-	return parts[0] === 'packages' && parts.length === 2;
-}
+// ---------- Validation ----------
 
-function readWorkspacePackages(directory = root): WorkspacePackage[] {
-	const packageJsonPath = join(directory, 'package.json');
-	const packages: WorkspacePackage[] = [];
-
-	if (directory !== root && existsSync(packageJsonPath)) {
-		const packageJson = readJson(packageJsonPath);
-
-		if (packageJson.name !== undefined && packageJson.version !== undefined) {
-			packages.push({
-				name: packageJson.name,
-				directory,
-				version: packageJson.version,
-				isSdk: isSdkDirectory(directory),
-			});
-		}
-	}
-
-	for (const entry of readdirSync(directory, { withFileTypes: true })) {
-		if (!entry.isDirectory() || ignoredDirectories.has(entry.name)) {
-			continue;
-		}
-
-		packages.push(...readWorkspacePackages(join(directory, entry.name)));
-	}
-
-	return packages;
-}
-
-function readSdkPackages(): WorkspacePackage[] {
-	return readWorkspacePackages().filter((packageInfo) => packageInfo.isSdk);
-}
-
-function parseChangesetEntries(frontmatter: string): ChangesetEntry[] {
-	return frontmatter
-		.split('\n')
-		.map((line) => /^['"]?([^'":]+)['"]?\s*:\s*(major|minor|patch|none)\s*$/.exec(line.trim()))
-		.filter((match): match is RegExpExecArray => match !== null)
-		.map((match) => ({ name: match[1], bump: match[2] as ChangesetEntry['bump'] }));
-}
-
-function highestBump(entries: ChangesetEntry[]): ChangesetEntry['bump'] {
-	return entries.reduce<ChangesetEntry['bump']>((highest, entry) => {
-		return (bumpOrder.get(entry.bump) ?? 0) > (bumpOrder.get(highest) ?? 0) ? entry.bump : highest;
-	}, 'none');
-}
-
-function readChangesetFiles(): string[] {
-	return readdirSync(changesetDirectory)
-		.filter((file) => file.endsWith('.md') && file !== 'README.md')
-		.map((file) => join(changesetDirectory, file));
-}
-
-function parseChangeset(file: string): { entries: ChangesetEntry[]; frontmatter: string; body: string } | undefined {
-	const content = readFileSync(file, 'utf8');
-	const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(content);
-
-	if (match === null) {
-		return undefined;
-	}
-
-	return { entries: parseChangesetEntries(match[1]), frontmatter: match[1], body: match[2] };
-}
-
-export function validatePendingChangesets(): void {
-	const workspacePackages = readWorkspacePackages();
-	const workspacePackagesByName = new Map(workspacePackages.map((packageInfo) => [packageInfo.name, packageInfo]));
-	const sdkPackageNameSet = new Set(workspacePackages.filter((packageInfo) => packageInfo.isSdk).map((packageInfo) => packageInfo.name));
-
+export async function validatePendingChangesets(): Promise<void> {
+	const sdkNames = new Set(readSdkPackages().map((pkg) => pkg.packageJson.name));
+	const changesets = await readChangesets(ROOT);
 	const errors: string[] = [];
 
-	for (const file of readChangesetFiles()) {
-		const parsed = parseChangeset(file);
+	for (const { id, releases } of changesets) {
+		const path = `.changeset/${id}.md`;
 
-		if (parsed === undefined) {
-			errors.push(`Changeset ${relative(root, file)} has no valid frontmatter.`);
+		if (releases.length === 0) {
+			errors.push(`${path}: declares no package bumps.`);
 			continue;
 		}
 
-		if (parsed.entries.length === 0) {
-			errors.push(`Changeset ${relative(root, file)} declares no package bumps.`);
-			continue;
+		const nonSdkNames = releases.filter((release) => !sdkNames.has(release.name)).map((release) => release.name);
+		if (nonSdkNames.length > 0) {
+			errors.push(`${path}: references non-SDK package(s): ${nonSdkNames.join(', ')}. Every changeset must target SDK packages only.`);
 		}
 
-		const unknownPackageNames = parsed.entries
-			.map((entry) => entry.name)
-			.filter((packageName) => !workspacePackagesByName.has(packageName));
-
-		if (unknownPackageNames.length > 0) {
-			errors.push(`Changeset ${relative(root, file)} references unknown package(s): ${unknownPackageNames.join(', ')}.`);
+		const sdkReleases = releases.filter((release) => sdkNames.has(release.name));
+		if (sdkReleases.length === 0) {
+			errors.push(`${path}: does not bump any SDK package.`);
 		}
 
-		const sdkEntries = parsed.entries.filter((entry) => sdkPackageNameSet.has(entry.name));
-		const touchesSdk = sdkEntries.length > 0;
-
-		if (!touchesSdk) {
-			errors.push(`Changeset ${relative(root, file)} does not bump any SDK package. Every release changeset must target at least one SDK.`);
-		}
-
-		const noneSDKNames = sdkEntries.filter((entry) => entry.bump === 'none').map((entry) => entry.name);
-
-		if (noneSDKNames.length > 0) {
-			errors.push(
-				`Changeset ${relative(root, file)} sets bump 'none' for SDK package(s): ${noneSDKNames.join(', ')}. Use 'patch', 'minor', or 'major' for SDK entries.`,
-			);
+		const noneBumps = sdkReleases.filter((release) => release.type === 'none').map((release) => release.name);
+		if (noneBumps.length > 0) {
+			errors.push(`${path}: SDK package(s) bumped as 'none': ${noneBumps.join(', ')}. Use 'patch', 'minor', or 'major'.`);
 		}
 	}
 
@@ -155,97 +61,56 @@ export function validatePendingChangesets(): void {
 		throw new Error(`Changeset validation failed:\n  - ${errors.join('\n  - ')}`);
 	}
 
-	const count = readChangesetFiles().length;
-	console.log(count === 0 ? 'No pending changesets to validate.' : `Validated ${count} pending changeset(s).`);
+	console.log(changesets.length === 0 ? 'No pending changesets to validate.' : `Validated ${changesets.length} pending changeset(s).`);
 }
 
-export function expandChangesetsToAllSdks(): void {
-	const sdkPackages = readSdkPackages();
-	const sdkPackageNames = sdkPackages.map((packageInfo) => packageInfo.name).sort();
-	const sdkPackageNameSet = new Set(sdkPackageNames);
+// ---------- Expansion ----------
 
-	for (const file of readChangesetFiles()) {
-		const parsed = parseChangeset(file);
+/**
+ * Ensures every changeset that touches any SDK bumps *all* SDKs to the same level.
+ * All SDKs share a version line, so any release moves them together.
+ */
+export async function expandChangesetsToAllSdks(): Promise<void> {
+	const allSdkNames = readSdkPackages()
+		.map((pkg) => pkg.packageJson.name)
+		.sort();
 
-		if (parsed === undefined) {
-			continue;
-		}
+	for (const changeset of await readChangesets(ROOT)) {
+		const present = new Set(changeset.releases.map((release) => release.name));
+		const missing = allSdkNames.filter((name) => !present.has(name));
+		if (missing.length === 0) continue;
 
-		const touchesSdk = parsed.entries.some((entry) => sdkPackageNameSet.has(entry.name));
+		const bump = highestBump(changeset.releases.map((release) => release.type));
+		const expanded: Release[] = [...changeset.releases, ...missing.map((name) => ({ name, type: bump }))];
 
-		if (!touchesSdk) {
-			continue;
-		}
-
-		const existingPackageNames = new Set(parsed.entries.map((entry) => entry.name));
-		const missingSdkPackageNames = sdkPackageNames.filter((packageName) => !existingPackageNames.has(packageName));
-
-		if (missingSdkPackageNames.length === 0) {
-			continue;
-		}
-
-		const bump = highestBump(parsed.entries.filter((entry) => sdkPackageNameSet.has(entry.name)));
-		const expandedFrontmatter = [
-			parsed.frontmatter.trimEnd(),
-			...missingSdkPackageNames.map((packageName) => `"${packageName}": ${bump}`),
-		].join('\n');
-		writeFileSync(file, `---\n${expandedFrontmatter}\n---\n${parsed.body}`);
-		console.log(`Expanded ${relative(root, file)} to version all SDK packages with bump '${bump}'.`);
+		writeChangesetFile({ id: changeset.id, summary: changeset.summary, releases: expanded });
+		console.log(`Expanded .changeset/${changeset.id}.md to all SDKs at bump '${bump}'.`);
 	}
 }
 
+function highestBump(bumps: VersionType[]): VersionType {
+	return bumps.reduce<VersionType>((highest, bump) => (BUMP_RANK[bump] > BUMP_RANK[highest] ? bump : highest), 'none');
+}
+
+function writeChangesetFile({ id, summary, releases }: NewChangeset): void {
+	const frontmatter = releases.map((release) => `"${release.name}": ${release.type}`).join('\n');
+	writeFileSync(join(ROOT, '.changeset', `${id}.md`), `---\n${frontmatter}\n---\n\n${summary}\n`);
+}
+
+// ---------- Native manifest sync ----------
+
+/**
+ * After `changeset version` updates each SDK's `package.json`, mirror the new version
+ * into the native manifest beside it. Go modules are tag-only — no file sync.
+ */
 export function syncNativeManifests(): void {
 	const errors: string[] = [];
 
-	for (const packageInfo of readSdkPackages()) {
-		const packageJson = readJson(join(packageInfo.directory, 'package.json'));
-		const targetVersion = packageJson.version;
-
-		if (targetVersion === undefined) {
-			errors.push(`Package ${packageInfo.name} has no version in package.json.`);
-			continue;
-		}
-
-		for (const manifest of versionSyncedManifestFiles) {
-			const manifestPath = join(packageInfo.directory, manifest);
-
-			if (!existsSync(manifestPath)) {
-				continue;
-			}
-
-			const original = readFileSync(manifestPath, 'utf8');
-			const versionLinePattern = /^(\s*version\s*=\s*")([^"]+)(")/gm;
-			const firstMatch = versionLinePattern.exec(original);
-
-			if (firstMatch === null) {
-				errors.push(
-					`Could not find a top-level 'version = "..."' line in ${relative(root, manifestPath)}. Add one so release automation can sync it.`,
-				);
-				continue;
-			}
-
-			if (firstMatch[2] === targetVersion) {
-				console.log(`${relative(root, manifestPath)} already at ${targetVersion}.`);
-				continue;
-			}
-
-			const previousVersion = firstMatch[2];
-			const updated = original.replace(versionLinePattern, `$1${targetVersion}$3`);
-			writeFileSync(manifestPath, updated);
-			console.log(`Synced ${relative(root, manifestPath)} ${previousVersion} -> ${targetVersion}.`);
-		}
-
-		for (const manifest of tagOnlyManifestFiles) {
-			const manifestPath = join(packageInfo.directory, manifest);
-
-			if (!existsSync(manifestPath)) {
-				continue;
-			}
-
-			console.log(
-				`${relative(root, manifestPath)} detected — Go modules are versioned via git tags only; no file sync needed for ${packageInfo.name}@${targetVersion}.`,
-			);
-		}
+	for (const pkg of readSdkPackages()) {
+		const targetVersion = pkg.packageJson.version;
+		syncTomlManifest(join(pkg.dir, 'pyproject.toml'), targetVersion, errors);
+		syncTomlManifest(join(pkg.dir, 'Cargo.toml'), targetVersion, errors);
+		noteGoModule(join(pkg.dir, 'go.mod'), pkg.packageJson.name, targetVersion);
 	}
 
 	if (errors.length > 0) {
@@ -253,28 +118,51 @@ export function syncNativeManifests(): void {
 	}
 }
 
-function runRelease(): void {
-	validatePendingChangesets();
-	expandChangesetsToAllSdks();
-	execSync('pnpm changeset version', {
-		stdio: 'inherit',
-	});
-	syncNativeManifests();
-	execSync('pnpm install --no-frozen-lockfile', {
-		stdio: 'inherit',
-	});
+function syncTomlManifest(manifestPath: string, targetVersion: string, errors: string[]): void {
+	if (!existsSync(manifestPath)) return;
+
+	const original = readFileSync(manifestPath, 'utf8');
+	const versionLine = /^(\s*version\s*=\s*")([^"]+)(")/gm;
+	const firstMatch = versionLine.exec(original);
+	const relativePath = relative(ROOT, manifestPath);
+
+	if (firstMatch === null) {
+		errors.push(`${relativePath}: no top-level 'version = "..."' line found. Add one so release automation can sync it.`);
+		return;
+	}
+
+	const previousVersion = firstMatch[2];
+	if (previousVersion === targetVersion) {
+		console.log(`${relativePath} already at ${targetVersion}.`);
+		return;
+	}
+
+	writeFileSync(manifestPath, original.replace(versionLine, `$1${targetVersion}$3`));
+	console.log(`Synced ${relativePath} ${previousVersion} -> ${targetVersion}.`);
 }
 
-function runValidate(): void {
-	validatePendingChangesets();
+function noteGoModule(manifestPath: string, packageName: string, version: string): void {
+	if (!existsSync(manifestPath)) return;
+	console.log(
+		`${relative(ROOT, manifestPath)}: Go modules are versioned via git tags only; ${packageName}@${version} requires no file sync.`,
+	);
+}
+
+// ---------- Entry points ----------
+
+async function runRelease(): Promise<void> {
+	await validatePendingChangesets();
+	await expandChangesetsToAllSdks();
+	execSync('pnpm changeset version', { stdio: 'inherit' });
+	syncNativeManifests();
+	execSync('pnpm install --no-frozen-lockfile', { stdio: 'inherit' });
 }
 
 const mode = process.argv[2] ?? 'release';
-
-if (mode === 'validate') {
-	runValidate();
-} else if (mode === 'release') {
-	runRelease();
+if (mode === 'release') {
+	await runRelease();
+} else if (mode === 'validate') {
+	await validatePendingChangesets();
 } else {
 	throw new Error(`Unknown mode: ${mode}. Expected 'release' or 'validate'.`);
 }

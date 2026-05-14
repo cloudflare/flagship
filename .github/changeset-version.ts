@@ -18,6 +18,12 @@ type WorkspacePackage = {
 	isSdk: boolean;
 };
 
+type PnpmListPackage = {
+	name?: string;
+	version?: string;
+	path?: string;
+};
+
 type ChangesetEntry = {
 	name: string;
 	bump: 'major' | 'minor' | 'patch' | 'none';
@@ -25,7 +31,6 @@ type ChangesetEntry = {
 
 const root = process.cwd();
 const changesetDirectory = join(root, '.changeset');
-const ignoredDirectories = new Set(['.git', '.husky', 'node_modules', 'dist', 'coverage', '.wrangler']);
 const bumpOrder = new Map<ChangesetEntry['bump'], number>([
 	['none', 0],
 	['patch', 1],
@@ -39,37 +44,39 @@ function readJson(path: string): PackageJson {
 	return JSON.parse(readFileSync(path, 'utf8')) as PackageJson;
 }
 
-function isSdkDirectory(directory: string): boolean {
-	const parts = relative(root, directory).split('/');
-	return parts[0] === 'packages' && parts.length === 2;
-}
+function readWorkspacePackages(): WorkspacePackage[] {
+	const output = execSync('pnpm list --recursive --depth -1 --json', { encoding: 'utf8' });
+	let packages: PnpmListPackage[];
 
-function readWorkspacePackages(directory = root): WorkspacePackage[] {
-	const packageJsonPath = join(directory, 'package.json');
-	const packages: WorkspacePackage[] = [];
-
-	if (directory !== root && existsSync(packageJsonPath)) {
-		const packageJson = readJson(packageJsonPath);
-
-		if (packageJson.name !== undefined && packageJson.version !== undefined) {
-			packages.push({
-				name: packageJson.name,
-				directory,
-				version: packageJson.version,
-				isSdk: isSdkDirectory(directory),
-			});
-		}
+	try {
+		packages = JSON.parse(output) as PnpmListPackage[];
+	} catch (cause) {
+		throw new Error('Could not parse pnpm workspace package list. Run `pnpm list --recursive --depth -1 --json` to inspect the output.', {
+			cause,
+		});
 	}
 
-	for (const entry of readdirSync(directory, { withFileTypes: true })) {
-		if (!entry.isDirectory() || ignoredDirectories.has(entry.name)) {
-			continue;
+	return packages.flatMap((packageInfo) => {
+		if (
+			packageInfo.path === undefined ||
+			packageInfo.path === root ||
+			packageInfo.name === undefined ||
+			packageInfo.version === undefined
+		) {
+			return [];
 		}
 
-		packages.push(...readWorkspacePackages(join(directory, entry.name)));
-	}
+		const packageJson = readJson(join(packageInfo.path, 'package.json'));
 
-	return packages;
+		return [
+			{
+				name: packageInfo.name,
+				directory: packageInfo.path,
+				version: packageInfo.version,
+				isSdk: packageJson.flagship?.language !== undefined,
+			},
+		];
+	});
 }
 
 function readSdkPackages(): WorkspacePackage[] {
@@ -78,7 +85,8 @@ function readSdkPackages(): WorkspacePackage[] {
 
 function parseChangesetEntries(frontmatter: string): ChangesetEntry[] {
 	return frontmatter
-		.split('\n')
+		.split(/\r?\n/)
+		.map((line) => line.replace(/\s+#.*$/, ''))
 		.map((line) => /^['"]?([^'":]+)['"]?\s*:\s*(major|minor|patch|none)\s*$/.exec(line.trim()))
 		.filter((match): match is RegExpExecArray => match !== null)
 		.map((match) => ({ name: match[1], bump: match[2] as ChangesetEntry['bump'] }));
@@ -98,13 +106,27 @@ function readChangesetFiles(): string[] {
 
 function parseChangeset(file: string): { entries: ChangesetEntry[]; frontmatter: string; body: string } | undefined {
 	const content = readFileSync(file, 'utf8');
-	const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(content);
+	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(content);
 
 	if (match === null) {
 		return undefined;
 	}
 
 	return { entries: parseChangesetEntries(match[1]), frontmatter: match[1], body: match[2] };
+}
+
+function replaceFirstVersionLine(content: string, targetVersion: string): { content: string; previousVersion: string } | undefined {
+	const versionLinePattern = /^(\s*version\s*=\s*")([^"]+)(")/m;
+	const match = versionLinePattern.exec(content);
+
+	if (match === null) {
+		return undefined;
+	}
+
+	return {
+		content: `${content.slice(0, match.index)}${match[1]}${targetVersion}${match[3]}${content.slice(match.index + match[0].length)}`,
+		previousVersion: match[2],
+	};
 }
 
 export function validatePendingChangesets(): void {
@@ -136,12 +158,6 @@ export function validatePendingChangesets(): void {
 		}
 
 		const sdkEntries = parsed.entries.filter((entry) => sdkPackageNameSet.has(entry.name));
-		const touchesSdk = sdkEntries.length > 0;
-
-		if (!touchesSdk) {
-			errors.push(`Changeset ${relative(root, file)} does not bump any SDK package. Every release changeset must target at least one SDK.`);
-		}
-
 		const noneSDKNames = sdkEntries.filter((entry) => entry.bump === 'none').map((entry) => entry.name);
 
 		if (noneSDKNames.length > 0) {
@@ -214,25 +230,22 @@ export function syncNativeManifests(): void {
 			}
 
 			const original = readFileSync(manifestPath, 'utf8');
-			const versionLinePattern = /^(\s*version\s*=\s*")([^"]+)(")/gm;
-			const firstMatch = versionLinePattern.exec(original);
+			const updated = replaceFirstVersionLine(original, targetVersion);
 
-			if (firstMatch === null) {
+			if (updated === undefined) {
 				errors.push(
 					`Could not find a top-level 'version = "..."' line in ${relative(root, manifestPath)}. Add one so release automation can sync it.`,
 				);
 				continue;
 			}
 
-			if (firstMatch[2] === targetVersion) {
+			if (updated.previousVersion === targetVersion) {
 				console.log(`${relative(root, manifestPath)} already at ${targetVersion}.`);
 				continue;
 			}
 
-			const previousVersion = firstMatch[2];
-			const updated = original.replace(versionLinePattern, `$1${targetVersion}$3`);
-			writeFileSync(manifestPath, updated);
-			console.log(`Synced ${relative(root, manifestPath)} ${previousVersion} -> ${targetVersion}.`);
+			writeFileSync(manifestPath, updated.content);
+			console.log(`Synced ${relative(root, manifestPath)} ${updated.previousVersion} -> ${targetVersion}.`);
 		}
 
 		for (const manifest of tagOnlyManifestFiles) {
@@ -255,10 +268,21 @@ export function syncNativeManifests(): void {
 
 function runRelease(): void {
 	validatePendingChangesets();
-	expandChangesetsToAllSdks();
-	execSync('pnpm changeset version', {
-		stdio: 'inherit',
-	});
+	const changesetSnapshot = new Map(readChangesetFiles().map((file) => [file, readFileSync(file, 'utf8')]));
+
+	try {
+		expandChangesetsToAllSdks();
+		execSync('pnpm changeset version', {
+			stdio: 'inherit',
+		});
+	} catch (error) {
+		for (const [file, content] of changesetSnapshot) {
+			writeFileSync(file, content);
+		}
+
+		throw error;
+	}
+
 	syncNativeManifests();
 	execSync('pnpm install --no-frozen-lockfile', {
 		stdio: 'inherit',

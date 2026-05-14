@@ -117,11 +117,11 @@ Pick only the SDK package(s) you actually changed. The release workflow expands 
 
 The release pipeline runs `.github/changeset-version.ts`, which:
 
-1. Validates every pending changeset — fails fast on unknown packages, non-SDK-only changesets, or SDK entries with a `none` bump.
+1. Validates every pending changeset — fails fast on unknown packages or SDK entries with a `none` bump.
 2. Expands the changeset to include every SDK package so they share the bump.
 3. Runs `pnpm changeset version`, producing one PR titled `chore(release): version SDK packages` with all SDK `package.json` and `CHANGELOG.md` updates.
 4. Syncs the new version into native manifests beside each SDK:
-   - `pyproject.toml` / `Cargo.toml` — all `version = "..."` lines in the file are updated in-place. The manifest must contain at least one such line or the release fails.
+   - `pyproject.toml` / `Cargo.toml` — the first package `version = "..."` line in the file is updated in-place. The manifest must contain at least one such line or the release fails.
    - `go.mod` — no file sync. Go modules are versioned exclusively via git tags; the script logs this and moves on.
 5. Re-runs `pnpm install` to refresh the lockfile.
 
@@ -130,15 +130,15 @@ After merge the same workflow runs `pnpm changeset publish` and:
 - Publishes public npm SDKs (currently `@cloudflare/flagship`).
 - Skips npm publish for `private: true` SDKs but still creates a git tag (`privatePackages.tag: true`). Language-specific publish workflows (PyPI, crates.io, etc.) should subscribe to those tags. For Go, the git tag is the version — no additional file sync is needed.
 
-Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Non-npm SDK packages should use `private: true` plus `flagship.language` and keep their native manifest beside it:
+Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Release automation treats workspace packages with `flagship.language` as SDKs. Non-npm SDK packages should use `private: true` plus `flagship.language` and keep their native manifest beside it:
 
-| Language | Native manifest  | Version sync                                          |
-| -------- | ---------------- | ----------------------------------------------------- |
-| Python   | `pyproject.toml` | All `version = "..."` lines updated by release script |
-| Rust     | `Cargo.toml`     | All `version = "..."` lines updated by release script |
-| Go       | `go.mod`         | No file sync — version is the git tag only            |
+| Language | Native manifest  | Version sync                                                   |
+| -------- | ---------------- | -------------------------------------------------------------- |
+| Python   | `pyproject.toml` | First package `version = "..."` line updated by release script |
+| Rust     | `Cargo.toml`     | First package `version = "..."` line updated by release script |
+| Go       | `go.mod`         | No file sync — version is the git tag only                     |
 
-PR CI runs `pnpm run changeset:validate` (the `Changesets` job) so malformed, non-SDK, or `none`-bumped SDK changesets fail before merge.
+PR CI runs `pnpm run changeset:validate` (the `Changesets` job) so malformed changesets and `none`-bumped SDK changesets fail before merge.
 
 Changesets should remain the only release intent file. Do not add release-please, semantic-release, or language-specific release manifests unless the release workflow is explicitly changed to derive them from Changesets.
 

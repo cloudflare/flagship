@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-`@cloudflare/flagship` — the TypeScript SDK for Cloudflare's Flagship feature flag platform. Provides OpenFeature-compatible providers for both server and browser environments.
+Cloudflare Flagship SDKs — OpenFeature-compatible SDKs for Cloudflare's Flagship feature flag platform.
 
-This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The current published SDK is the TypeScript package in `sdks/typescript`.
+This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The TypeScript SDK is the recommended SDK, especially for Cloudflare Workers because it supports the native Flagship Workers binding. The Python SDK supports HTTP evaluation only.
 
 ## Repository Structure
 
@@ -22,9 +22,17 @@ sdks/
       hooks/         # LoggingHook, TelemetryHook
       types.ts       # Shared types and error codes
     tests/           # Vitest unit and integration tests
+    examples/        # Node.js, browser, and Cloudflare Workers examples
+
+  python/            # cloudflare-flagship — OpenFeature provider SDK (HTTP only)
+    src/flagship/    # Client, provider, context serialization, hooks
+    tests/           # pytest unit and integration tests
+    examples/        # Sync and async OpenFeature examples
+    pyproject.toml   # Python package metadata and uv build config
+    uv.lock          # Python dependency lockfile
 
 .changeset/          # Changeset config and pending changesets
-.github/             # CI workflows (release, pull-request, bonk), issue templates
+.github/             # CI workflows (pull-request, release/npm publish, PyPI publish, bonk), issue templates
 ```
 
 ## Setup
@@ -48,6 +56,8 @@ Run from the repo root:
 | `pnpm run format`    | Format all files with oxfmt                        |
 | `pnpm run typecheck` | TypeScript type checking across packages           |
 
+Root pnpm commands cover the repo-level TypeScript/JavaScript workspace. Python checks are run separately from `sdks/python/`.
+
 Package-level (run from `sdks/typescript/`):
 
 | Command          | What it does                  |
@@ -56,9 +66,22 @@ Package-level (run from `sdks/typescript/`):
 | `pnpm run test`  | Run vitest                    |
 | `pnpm run dev`   | Watch mode                    |
 
+Python SDK (run from `sdks/python/`):
+
+| Command                        | What it does               |
+| ------------------------------ | -------------------------- |
+| `uv sync --group dev`          | Install Python dev deps    |
+| `uv run ruff format --check .` | Check Python formatting    |
+| `uv run ruff check .`          | Run Python linting         |
+| `uv run --group dev mypy`      | Run Python type checking   |
+| `uv run --group dev pytest`    | Run Python tests           |
+| `uv build`                     | Build Python wheel + sdist |
+
 ## SDK Architecture
 
-The SDK has **three sub-path exports** to isolate dependencies:
+### TypeScript
+
+The TypeScript SDK has **three sub-path exports** to isolate dependencies:
 
 - `@cloudflare/flagship` — core client, types, errors. Zero OpenFeature dependency.
 - `@cloudflare/flagship/server` — `FlagshipServerProvider` + hooks. Requires `@openfeature/server-sdk`.
@@ -66,7 +89,7 @@ The SDK has **three sub-path exports** to isolate dependencies:
 
 Each sub-path is a separate bundle (built with tsdown) so importing one never pulls in the other's OpenFeature dependency.
 
-### Server providers
+#### Server providers
 
 `FlagshipServerProvider` supports two modes of operation:
 
@@ -74,6 +97,15 @@ Each sub-path is a separate bundle (built with tsdown) so importing one never pu
 - **Binding mode** — evaluates flags via a Cloudflare Workers wrangler binding (`env.FLAGS`). No HTTP overhead, no auth tokens. This is the recommended approach for Cloudflare Workers.
 
 The constructor accepts a discriminated union: provide **either** HTTP config (`appId`, `accountId`, etc.) **or** a `binding` field — never both. Providing both throws immediately.
+
+### Python
+
+The Python SDK is published as `cloudflare-flagship` and supports HTTP evaluation only.
+
+- `FlagshipClient` handles endpoint construction, auth headers, retries, timeouts, and response parsing.
+- `FlagshipServerProvider` implements the OpenFeature Python provider interface.
+- Sync and async evaluation APIs are supported.
+- Native Cloudflare Workers binding mode is not available in Python.
 
 ## Code Standards
 
@@ -94,13 +126,28 @@ Config in `.oxlintrc.json`. Plugins: `typescript`, `import`, `unicorn`. Key rule
 
 Config in `.oxfmtrc.json`: tabs, single quotes, semicolons, 140 print width.
 
+Python files under `sdks/python/**` are excluded from oxfmt and formatted with Ruff.
+
+### Python
+
+- Package metadata and build backend live in `sdks/python/pyproject.toml`.
+- Python source is typed (`py.typed`) and checked with mypy in strict mode.
+- Python requires `>=3.10`.
+
 ## Testing
 
-Tests use **vitest** in Node environment. Test files live in `sdks/typescript/tests/` mirroring the source structure.
+TypeScript tests use **vitest** in Node environment. Test files live in `sdks/typescript/tests/` mirroring the source structure.
 
 ```bash
 pnpm run test                    # all tests
 pnpm --filter @cloudflare/flagship run test   # SDK tests only
+```
+
+Python tests use **pytest**:
+
+```bash
+cd sdks/python
+uv run --group dev pytest
 ```
 
 ## Contributing
@@ -119,7 +166,7 @@ The release pipeline runs `.github/changeset-version.ts`, which:
 
 1. Validates every pending changeset — fails fast on unknown packages, non-SDK-only changesets, or SDK entries with a `none` bump.
 2. Expands the changeset to include every SDK package so they share the bump.
-3. Runs `pnpm changeset version`, producing one PR titled `chore(release): version SDK packages` with all SDK `package.json` and `CHANGELOG.md` updates.
+3. Runs `pnpm changeset version`, producing one PR titled `chore(release): version SDK packages` with all SDK `package.json` updates and the TypeScript SDK changelog update.
 4. Syncs the new version into native manifests beside each SDK:
    - `pyproject.toml` — updates `[project].version` (PEP 621, used by uv/hatch/flit/pdm and Poetry 2.0+) and/or `[tool.poetry].version` (legacy Poetry 1.x), whichever fields are present. Fails if neither exists.
    - `Cargo.toml` — updates `[package].version` only. Dependency `version` fields are left untouched.
@@ -129,7 +176,7 @@ The release pipeline runs `.github/changeset-version.ts`, which:
 After merge the same workflow runs `pnpm changeset publish` and:
 
 - Publishes public npm SDKs (currently `@cloudflare/flagship`).
-- Skips npm publish for `private: true` SDKs but still creates a git tag (`privatePackages.tag: true`). Language-specific publish workflows (PyPI, crates.io, etc.) should subscribe to those tags. For Go, the git tag is the version — no additional file sync is needed.
+- Skips npm publish for `private: true` SDKs but still creates a git tag (`privatePackages.tag: true`). The Python PyPI workflow subscribes to `@cloudflare/flagship-python@*` tags and publishes via PyPI trusted publishing (OIDC, no PyPI token). For Go, the git tag is the version — no additional file sync is needed.
 
 Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Non-npm SDK packages should use `private: true` and keep their native manifest beside it:
 
@@ -147,11 +194,23 @@ Changesets should remain the only release intent file. Do not add release-please
 
 CI runs on every PR: `pnpm install → build → check → test → changeset:validate`. All checks must pass.
 
+The PR workflow is split by SDK:
+
+- Repo-wide changeset validation.
+- TypeScript format, lint, build, typecheck, test, and publish preview.
+- Python format, lint, build, typecheck, and test.
+
+Publishing workflows are language-specific:
+
+- `release.yml` (`Publish npm`) runs on pushes to `main`; Changesets creates release PRs and publishes npm packages after the release PR is merged.
+- `publish-pypi.yml` runs on `@cloudflare/flagship-python@*` tags; it runs Python checks, builds the Python package, and publishes to PyPI with trusted publishing.
+
 ## Boundaries
 
 **Always:**
 
 - Run `pnpm run check` before considering work done
+- For Python SDK changes, also run `uv run ruff format --check .`, `uv run ruff check .`, `uv run --group dev mypy`, and `uv run --group dev pytest` from `sdks/python/`
 - Keep OpenFeature peer dependencies optional
 - Use `import type` for type-only imports
 

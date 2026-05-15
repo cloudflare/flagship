@@ -217,4 +217,44 @@ async def test_async_evaluate_raises_flag_not_found() -> None:
     c = _client()
     with pytest.raises(FlagNotFoundError):
         await c.evaluate_async("k")
-    await c.aclose()
+
+
+# --- retry ------------------------------------------------------------------
+
+
+@respx.mock
+def test_retries_on_transient_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Transient 500 should be retried; second call succeeds."""
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    route = respx.get(url__regex=ENDPOINT_REGEX).mock(side_effect=[httpx.Response(500), _ok()])
+    result = _client(retries=1, retry_delay=0).evaluate("k")
+    assert result.value is True
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_404_is_not_retried() -> None:
+    """404 is terminal and must not be retried."""
+    route = respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=httpx.Response(404))
+    with pytest.raises(FlagNotFoundError):
+        _client(retries=2, retry_delay=0).evaluate("k")
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_400_is_not_retried() -> None:
+    """400 is terminal and must not be retried."""
+    route = respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=httpx.Response(400))
+    with pytest.raises(GeneralError):
+        _client(retries=2, retry_delay=0).evaluate("k")
+    assert route.call_count == 1
+
+
+def test_retries_capped_at_max() -> None:
+    c = FlagshipClient(app_id="a", account_id="b", retries=999)
+    assert c.retries == 10
+
+
+def test_retry_delay_capped_at_max() -> None:
+    c = FlagshipClient(app_id="a", account_id="b", retry_delay=999.0)
+    assert c.retry_delay == 30.0

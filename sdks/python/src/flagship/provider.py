@@ -22,7 +22,7 @@ from .client import FLAGSHIP_DEFAULT_BASE_URL, FlagshipClient
 
 __all__ = ["FlagshipServerProvider"]
 
-logger = logging.getLogger("flagship")
+_logger = logging.getLogger("flagship")
 
 _HEALTH_CHECK_FLAG = "_flagship_health_check"
 
@@ -36,7 +36,7 @@ _TYPE_MAP: dict[FlagType, type | tuple[type, ...]] = {
 
 
 class FlagshipServerProvider(AbstractProvider):
-    """OpenFeature server-side provider for Cloudflare Flagship.
+    """OpenFeature server-side provider for Cloudflare Flagship (HTTP mode).
 
     Provide either ``app_id`` + ``account_id`` or ``endpoint``::
 
@@ -48,6 +48,9 @@ class FlagshipServerProvider(AbstractProvider):
 
     For dynamic credentials (e.g. rotating JWTs), pass ``headers_factory``
     instead of ``auth_token``; it is invoked once per request.
+
+    Set ``logging=True`` to enable SDK-level debug output. When ``False``
+    (the default) the SDK produces no log output of its own.
     """
 
     def __init__(
@@ -60,6 +63,9 @@ class FlagshipServerProvider(AbstractProvider):
         auth_token: str | None = None,
         headers_factory: Callable[[], dict[str, str]] | None = None,
         timeout: float = 5.0,
+        retries: int = 1,
+        retry_delay: float = 1.0,
+        logging: bool = False,
     ) -> None:
         self._client = FlagshipClient(
             app_id=app_id,
@@ -69,7 +75,10 @@ class FlagshipServerProvider(AbstractProvider):
             auth_token=auth_token,
             headers_factory=headers_factory,
             timeout=timeout,
+            retries=retries,
+            retry_delay=retry_delay,
         )
+        self._logging = logging
         self._status: ProviderStatus = ProviderStatus.NOT_READY
 
     def get_metadata(self) -> Metadata:
@@ -83,13 +92,18 @@ class FlagshipServerProvider(AbstractProvider):
         return self._status
 
     def initialize(self, evaluation_context: EvaluationContext) -> None:
+        """Probe the evaluation endpoint.
+
+        A 404 response is treated as success — it means the endpoint is reachable
+        but the health-check flag simply doesn't exist, which is expected.
+        """
         try:
             self._client.evaluate(_HEALTH_CHECK_FLAG, EvaluationContext())
         except FlagNotFoundError:
             pass
         except Exception as e:
             self._status = ProviderStatus.ERROR
-            logger.error("Flagship initialization failed: %s", e)
+            self._log_error("Flagship initialization failed: %s", e)
             self.emit_provider_error(ProviderEventDetails(message=str(e)))
             return
         self._status = ProviderStatus.READY
@@ -98,6 +112,10 @@ class FlagshipServerProvider(AbstractProvider):
     def shutdown(self) -> None:
         self._status = ProviderStatus.NOT_READY
         self._client.close()
+
+    async def shutdown_async(self) -> None:
+        self._status = ProviderStatus.NOT_READY
+        await self._client.aclose()
 
     def resolve_boolean_details(
         self,
@@ -186,8 +204,17 @@ class FlagshipServerProvider(AbstractProvider):
         default_value: FlagValueType,
         evaluation_context: EvaluationContext | None,
     ) -> FlagResolutionDetails[Any]:
+        self._log_debug("[Flagship] Evaluating flag %r", flag_key)
         result = self._client.evaluate(flag_key, evaluation_context)
-        return _build_details(flag_type, default_value, result)
+        details = _build_details(flag_type, default_value, result)
+        self._log_debug(
+            "[Flagship] Flag %r resolved: value=%r reason=%s variant=%s",
+            flag_key,
+            details.value,
+            details.reason,
+            details.variant,
+        )
+        return details
 
     async def _resolve_async(
         self,
@@ -196,8 +223,25 @@ class FlagshipServerProvider(AbstractProvider):
         default_value: FlagValueType,
         evaluation_context: EvaluationContext | None,
     ) -> FlagResolutionDetails[Any]:
+        self._log_debug("[Flagship] Evaluating flag %r", flag_key)
         result = await self._client.evaluate_async(flag_key, evaluation_context)
-        return _build_details(flag_type, default_value, result)
+        details = _build_details(flag_type, default_value, result)
+        self._log_debug(
+            "[Flagship] Flag %r resolved: value=%r reason=%s variant=%s",
+            flag_key,
+            details.value,
+            details.reason,
+            details.variant,
+        )
+        return details
+
+    def _log_debug(self, msg: str, *args: Any) -> None:
+        if self._logging:
+            _logger.debug(msg, *args)
+
+    def _log_error(self, msg: str, *args: Any) -> None:
+        if self._logging:
+            _logger.error(msg, *args)
 
 
 def _build_details(
@@ -224,13 +268,9 @@ def _build_details(
 def _typecheck_flag_value(value: Any, flag_type: FlagType) -> Any:
     """Validate the resolved value matches the requested flag type.
 
-    Raises ``TypeMismatchError`` on mismatch. Returns the value, possibly
-    coerced (``int`` -> ``float`` for FLOAT flags).
+    Raises :class:`openfeature.exception.TypeMismatchError` on mismatch.
+    Coerces ``int`` to ``float`` for FLOAT flags.
     """
-    expected = _TYPE_MAP.get(flag_type)
-    if expected is None:
-        raise GeneralError(f"Unknown flag type: {flag_type}")
-
     if flag_type == FlagType.BOOLEAN:
         if not isinstance(value, bool):
             raise TypeMismatchError(f"Expected bool, got {type(value).__name__}")
@@ -250,6 +290,9 @@ def _typecheck_flag_value(value: Any, flag_type: FlagType) -> Any:
             raise TypeMismatchError(f"Expected float, got {type(value).__name__}")
         return value
 
+    expected = _TYPE_MAP.get(flag_type)
+    if expected is None:
+        raise GeneralError(f"Unknown flag type: {flag_type}")
     if not isinstance(value, expected):
         raise TypeMismatchError(f"Expected {flag_type.name.lower()}, got {type(value).__name__}")
     return value

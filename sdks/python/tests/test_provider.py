@@ -183,6 +183,28 @@ def test_invalid_context(provider: FlagshipServerProvider) -> None:
         provider.resolve_boolean_details("k", False, ctx)
 
 
+# --- logging ----------------------------------------------------------------
+
+
+@respx.mock
+def test_logging_disabled_by_default_produces_no_output(
+    provider: FlagshipServerProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=_resp(True))
+    with caplog.at_level("DEBUG", logger="flagship"):
+        provider.resolve_boolean_details("k", False)
+    assert caplog.records == []
+
+
+@respx.mock
+def test_logging_enabled_emits_debug_records(caplog: pytest.LogCaptureFixture) -> None:
+    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=_resp(True))
+    p = FlagshipServerProvider(app_id="app-123", account_id="acct-456", logging=True)
+    with caplog.at_level("DEBUG", logger="flagship"):
+        p.resolve_boolean_details("k", False)
+    assert any("k" in r.message for r in caplog.records)
+
+
 # --- async ------------------------------------------------------------------
 
 

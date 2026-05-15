@@ -4,26 +4,26 @@ on:
   push:
     tags:
       - '@cloudflare/flagship-python@*'
-  workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   publish:
     name: Publish
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v8.1.0
-        with:
-          working-directory: sdks/python
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 
-      - name: Build and publish to PyPI
+      - name: Build
         working-directory: sdks/python
-        run: |
-          uv build
-          uv publish --token "$PYPI_TOKEN"
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv build
+
+      - name: Publish
+        working-directory: sdks/python
+        run: uv publish

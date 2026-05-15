@@ -8,7 +8,13 @@ Flagship is a globally distributed, low-latency feature flag platform built enti
 
 > **Note:** The Python SDK supports HTTP mode only. The Cloudflare Workers binding mode (`env.FLAGS`) is exclusive to the TypeScript SDK and is not available in Python.
 
+## Installation
+
 ```sh
+# uv
+uv add cloudflare-flagship
+
+# pip
 pip install cloudflare-flagship
 ```
 
@@ -35,16 +41,18 @@ enabled = client.get_boolean_value(
 )
 ```
 
+See [`examples/server.py`](examples/server.py) for a full synchronous example and [`examples/async_server.py`](examples/async_server.py) for async usage with `asyncio`.
+
 ## Flag types
 
 All four OpenFeature flag types are supported. Python's OpenFeature SDK splits the TypeScript `number` type into `integer` and `float`.
 
 ```python
-enabled  = client.get_boolean_value("new-checkout", False, context)
-variant  = client.get_string_value("homepage-hero", "control", context)
-limit    = client.get_integer_value("upload-limit", 10, context)
-rate     = client.get_float_value("sample-rate", 0.1, context)
-config   = client.get_object_value("ui-config", {"theme": "light"}, context)
+enabled = client.get_boolean_value("new-checkout", False, context)
+variant = client.get_string_value("homepage-hero", "control", context)
+limit   = client.get_integer_value("upload-limit", 10, context)
+rate    = client.get_float_value("sample-rate", 0.1, context)
+config  = client.get_object_value("ui-config", {"theme": "light"}, context)
 ```
 
 Use the `*_details` variants when you need the full resolution result:
@@ -52,10 +60,10 @@ Use the `*_details` variants when you need the full resolution result:
 ```python
 details = client.get_boolean_details("my-flag", False, context)
 
-print(details.value)         # resolved value (or default on error)
-print(details.reason)        # TARGETING_MATCH | SPLIT | DEFAULT | DISABLED | ERROR
-print(details.variant)       # variation key, e.g. "on", "off", "v2"
-print(details.error_code)    # set on error, e.g. FLAG_NOT_FOUND, TYPE_MISMATCH
+print(details.value)          # resolved value (or default on error)
+print(details.reason)         # TARGETING_MATCH | SPLIT | DEFAULT | DISABLED | ERROR
+print(details.variant)        # variation key, e.g. "on", "off", "v2"
+print(details.error_code)     # set on error, e.g. FLAG_NOT_FOUND, TYPE_MISMATCH
 print(details.error_message)
 ```
 
@@ -81,19 +89,25 @@ FlagshipServerProvider(
     # Override the base URL for local dev
     # base_url="http://localhost:8787",
 
-    timeout=5.0,  # seconds (default: 5.0)
+    timeout=5.0,      # seconds (default: 5.0)
+    retries=1,        # retry attempts on transient errors, capped at 10 (default: 1)
+    retry_delay=1.0,  # seconds between retries, capped at 30.0 (default: 1.0)
+    logging=False,    # set True to enable SDK debug output (default: False)
 )
 ```
 
-| Option            | Type                           | Default                      | Description                                            |
-| ----------------- | ------------------------------ | ---------------------------- | ------------------------------------------------------ |
-| `app_id`          | `str`                          | —                            | Flagship app ID (mutually exclusive with `endpoint`)   |
-| `account_id`      | `str`                          | —                            | Required with `app_id`                                 |
-| `base_url`        | `str`                          | `https://api.cloudflare.com` | Base URL override (only used with `app_id`)            |
-| `endpoint`        | `str`                          | —                            | Full evaluation URL (mutually exclusive with `app_id`) |
-| `auth_token`      | `str`                          | —                            | Bearer token added to every request                    |
-| `headers_factory` | `Callable[[], dict[str, str]]` | —                            | Called per request; takes precedence over `auth_token` |
-| `timeout`         | `float`                        | `5.0`                        | Request timeout in seconds                             |
+| Option            | Type                           | Default                      | Description                                              |
+| ----------------- | ------------------------------ | ---------------------------- | -------------------------------------------------------- |
+| `app_id`          | `str`                          | —                            | Flagship app ID (mutually exclusive with `endpoint`)     |
+| `account_id`      | `str`                          | —                            | Required with `app_id`                                   |
+| `base_url`        | `str`                          | `https://api.cloudflare.com` | Base URL override (only used with `app_id`)              |
+| `endpoint`        | `str`                          | —                            | Full evaluation URL (mutually exclusive with `app_id`)   |
+| `auth_token`      | `str`                          | —                            | Bearer token added to every request                      |
+| `headers_factory` | `Callable[[], dict[str, str]]` | —                            | Called per request; takes precedence over `auth_token`   |
+| `timeout`         | `float`                        | `5.0`                        | Request timeout in seconds                               |
+| `retries`         | `int`                          | `1`                          | Retry attempts on transient errors; capped at `10`       |
+| `retry_delay`     | `float`                        | `1.0`                        | Delay between retries in seconds; capped at `30.0`       |
+| `logging`         | `bool`                         | `False`                      | Enable SDK-level debug output via the `flagship` logger  |
 
 ## Evaluation context
 
@@ -108,9 +122,24 @@ Context attributes are sent as URL query parameters. Supported types:
 
 ## Async
 
+The async API mirrors the sync API — just `await` the `*_async` variants:
+
 ```python
 enabled = await client.get_boolean_value_async("dark-mode", False, context)
 details = await client.get_boolean_details_async("dark-mode", False, context)
+
+# Evaluate multiple flags concurrently
+import asyncio
+dark_mode, beta_access = await asyncio.gather(
+    client.get_boolean_value_async("dark-mode", False, context),
+    client.get_boolean_value_async("beta-access", False, context),
+)
+```
+
+When shutting down in an async context, use `shutdown_async()` to properly close the HTTP client:
+
+```python
+await api.shutdown_async()
 ```
 
 ## Error handling
@@ -124,6 +153,8 @@ The provider never throws from a resolution method. On error the OpenFeature SDK
 | `INVALID_CONTEXT` | The evaluation context contains unsupported types (dict, list) |
 | `PARSE_ERROR`     | The API response was not a valid evaluation response           |
 | `GENERAL`         | Network error, timeout, or any other transient failure         |
+
+404 and 400 responses are never retried. All other failures are retried up to `retries` times.
 
 ## Hooks
 
@@ -153,15 +184,11 @@ During initialisation the provider probes the endpoint with a health-check reque
 ## Development
 
 ```sh
-uv sync          # install dependencies
-uv run pytest    # run tests
-uv run mypy      # type check
-uv build         # build wheel and sdist
+uv sync --group dev        # install dependencies
+uv run pytest              # run tests
+uv run mypy src            # type check
+uv build                   # build wheel and sdist
 ```
-
-## Contributing
-
-We welcome contributions. Please open an issue first to discuss what you'd like to change.
 
 ## License
 

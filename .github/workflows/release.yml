@@ -104,3 +104,6 @@ jobs:
     needs: publish
     if: ${{ needs.publish.outputs.published == 'true' }}
     uses: ./.github/workflows/publish-pypi.yml
+    permissions:
+      contents: read
+      id-token: write

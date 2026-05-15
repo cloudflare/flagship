@@ -88,7 +88,6 @@ jobs:
     name: TypeScript Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: typescript-build
     steps:
       - uses: actions/checkout@v6
 
@@ -99,14 +98,12 @@ jobs:
           node-version: 24
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
       - run: pnpm run typecheck
 
   typescript-test:
     name: TypeScript Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: typescript-build
     steps:
       - uses: actions/checkout@v6
 
@@ -146,9 +143,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           working-directory: sdks/python
+
+      - run: uv sync --group dev --locked
+        working-directory: sdks/python
 
       - run: uv run ruff format --check .
         working-directory: sdks/python
@@ -160,9 +160,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           working-directory: sdks/python
+
+      - run: uv sync --group dev --locked
+        working-directory: sdks/python
 
       - run: uv run ruff check .
         working-directory: sdks/python
@@ -174,7 +177,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           working-directory: sdks/python
 
@@ -185,28 +188,32 @@ jobs:
     name: Python Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: python-build
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           working-directory: sdks/python
 
-      - run: uv run --group dev mypy
+      - run: uv sync --group dev --locked
+        working-directory: sdks/python
+
+      - run: uv run mypy
         working-directory: sdks/python
 
   python-test:
     name: Python Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: python-build
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           working-directory: sdks/python
 
-      - run: uv run --group dev pytest
+      - run: uv sync --group dev --locked
+        working-directory: sdks/python
+
+      - run: uv run pytest
         working-directory: sdks/python

@@ -1,4 +1,4 @@
-name: Release
+name: Publish npm
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   check:
-    name: Pre-release Checks
+    name: Check
     if: ${{ github.repository_owner == 'cloudflare' }}
     runs-on: ubuntu-latest
     steps:
@@ -31,8 +31,8 @@ jobs:
       - run: pnpm run check
       - run: pnpm run test
 
-  release:
-    name: Release
+  publish:
+    name: Publish
     needs: check
     if: ${{ github.repository_owner == 'cloudflare' }}
     runs-on: ubuntu-latest

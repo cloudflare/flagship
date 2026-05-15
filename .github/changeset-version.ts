@@ -11,7 +11,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import readChangesets from '@changesets/read';
 import type { NewChangeset, Release, VersionType } from '@changesets/types';
@@ -207,17 +207,22 @@ function patchTomlField<T>(manifestPath: string, targetVersion: string, errors: 
 }
 
 /**
- * Changesets generates a CHANGELOG.md for every versioned package, including private ones.
- * Private SDK changelogs are duplicates of the TypeScript SDK changelog — delete them so
- * they don't appear in the release PR diff or clutter the repository.
+ * `changesets/action` reads every changed package's `CHANGELOG.md` to build the
+ * release PR body — including private packages whose version we bumped manually.
+ * If the file is missing the action crashes with `ENOENT`.
+ *
+ * Write a minimal stub for every private SDK so the action can parse it. The
+ * stub contains only the version header, so the parser returns empty release
+ * content and the PR body has no per-language duplicate section.
  */
-function deletePrivateSdkChangelogs(): void {
+function stubPrivateSdkChangelogs(): void {
+	const targetVersion = readCanonicalPackage().packageJson.version;
 	for (const pkg of readSdkPackages()) {
 		if (pkg.packageJson.private !== true) continue;
 		const changelog = join(pkg.dir, 'CHANGELOG.md');
-		if (!existsSync(changelog)) continue;
-		rmSync(changelog);
-		console.log(`Deleted ${relative(ROOT, changelog)} (private SDK — changelog not needed).`);
+		const content = `# ${pkg.packageJson.name}\n\n## ${targetVersion}\n`;
+		writeFileSync(changelog, content);
+		console.log(`Stubbed ${relative(ROOT, changelog)} for ${pkg.packageJson.name}@${targetVersion}.`);
 	}
 }
 
@@ -247,7 +252,7 @@ async function runRelease(): Promise<void> {
 	syncPrivateSdkPackageVersions();
 	syncNativeManifests();
 	refreshNativeLockfiles();
-	deletePrivateSdkChangelogs();
+	stubPrivateSdkChangelogs();
 	execSync('pnpm install --no-frozen-lockfile', { stdio: 'inherit' });
 }
 

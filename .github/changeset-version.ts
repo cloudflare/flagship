@@ -10,7 +10,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import readChangesets from '@changesets/read';
 import type { NewChangeset, Release, VersionType } from '@changesets/types';
@@ -159,6 +159,21 @@ function patchTomlField<T>(manifestPath: string, targetVersion: string, errors: 
 	console.log(`Synced ${relativePath} -> ${targetVersion}.`);
 }
 
+/**
+ * Changesets generates a CHANGELOG.md for every versioned package, including private ones.
+ * Private SDK changelogs are duplicates of the TypeScript SDK changelog — delete them so
+ * they don't appear in the release PR diff or clutter the repository.
+ */
+function deletePrivateSdkChangelogs(): void {
+	for (const pkg of readSdkPackages()) {
+		if (pkg.packageJson.private !== true) continue;
+		const changelog = join(pkg.dir, 'CHANGELOG.md');
+		if (!existsSync(changelog)) continue;
+		rmSync(changelog);
+		console.log(`Deleted ${relative(ROOT, changelog)} (private SDK — changelog not needed).`);
+	}
+}
+
 async function runRelease(): Promise<void> {
 	await validatePendingChangesets();
 
@@ -183,6 +198,7 @@ async function runRelease(): Promise<void> {
 	}
 
 	syncNativeManifests();
+	deletePrivateSdkChangelogs();
 	execSync('pnpm install --no-frozen-lockfile', { stdio: 'inherit' });
 }
 

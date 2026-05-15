@@ -3,7 +3,7 @@ name: Publish PyPI
 on:
   push:
     tags:
-      - '@cloudflare/flagship-python@*'
+      - '**/flagship@*'
 
 permissions:
   contents: read

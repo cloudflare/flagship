@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: Check
+  check-typescript:
+    name: Check (TypeScript)
     if: ${{ github.repository_owner == 'cloudflare' }}
     runs-on: ubuntu-latest
     steps:
@@ -31,9 +31,30 @@ jobs:
       - run: pnpm run check
       - run: pnpm run test
 
+  check-python:
+    name: Check (Python)
+    if: ${{ github.repository_owner == 'cloudflare' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - run: uv run ruff format --check .
+        working-directory: sdks/python
+
+      - run: uv run ruff check .
+        working-directory: sdks/python
+
+      - run: uv run --group dev mypy
+        working-directory: sdks/python
+
+      - run: uv run --group dev pytest
+        working-directory: sdks/python
+
   publish:
     name: Publish
-    needs: check
+    needs: [check-typescript, check-python]
     if: ${{ github.repository_owner == 'cloudflare' }}
     runs-on: ubuntu-latest
     permissions:

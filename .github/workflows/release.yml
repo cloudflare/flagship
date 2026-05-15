@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: Check
+  check-typescript:
+    name: Check (TypeScript)
     if: ${{ github.repository_owner == 'cloudflare' }}
     runs-on: ubuntu-latest
     steps:
@@ -31,11 +31,39 @@ jobs:
       - run: pnpm run check
       - run: pnpm run test
 
-  publish:
-    name: Publish
-    needs: check
+  check-python:
+    name: Check (Python)
     if: ${{ github.repository_owner == 'cloudflare' }}
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          working-directory: sdks/python
+
+      - run: uv sync --group dev --locked
+        working-directory: sdks/python
+
+      - run: uv run ruff format --check .
+        working-directory: sdks/python
+
+      - run: uv run ruff check .
+        working-directory: sdks/python
+
+      - run: uv run mypy
+        working-directory: sdks/python
+
+      - run: uv run pytest
+        working-directory: sdks/python
+
+  publish:
+    name: Publish
+    needs: [check-typescript, check-python]
+    if: ${{ github.repository_owner == 'cloudflare' }}
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
     permissions:
       id-token: write
       contents: write
@@ -52,10 +80,15 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          working-directory: sdks/python
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
 
-      - uses: changesets/action@v1.7.0
+      - id: changesets
+        uses: changesets/action@v1.7.0
         with:
           version: pnpm tsx .github/changeset-version.ts
           publish: pnpm changeset publish
@@ -65,3 +98,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
+
+  publish-pypi:
+    name: Publish PyPI
+    needs: publish
+    if: ${{ needs.publish.outputs.published == 'true' }}
+    uses: ./.github/workflows/publish-pypi.yml
+    permissions:
+      contents: read
+      id-token: write

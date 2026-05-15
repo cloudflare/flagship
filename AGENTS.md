@@ -160,23 +160,24 @@ Changes to published packages need a changeset:
 pnpm changeset      # interactive prompt — pick packages, semver bump, description
 ```
 
-Pick only the SDK package(s) you actually changed. The release workflow expands every release-bound changeset so all SDK packages are bumped to the same version. The highest bump in the changeset (`patch` < `minor` < `major`) becomes the bump for the rest.
+Pick the SDK package you changed. During release, SDK changesets are rewritten to the canonical public package (`@cloudflare/flagship`) so the release PR has one changelog section and one tag. Private SDK versions are then synchronized to the same version.
 
 The release pipeline runs `.github/changeset-version.ts`, which:
 
 1. Validates every pending changeset — fails fast on unknown packages, non-SDK-only changesets, or SDK entries with a `none` bump.
-2. Expands the changeset to include every SDK package so they share the bump.
-3. Runs `pnpm changeset version`, producing one PR titled `chore(release): version SDK packages` with all SDK `package.json` updates and the TypeScript SDK changelog update.
-4. Syncs the new version into native manifests beside each SDK:
+2. Rewrites SDK changesets to `@cloudflare/flagship` using the highest SDK bump in each changeset.
+3. Runs `pnpm changeset version`, producing one PR titled `chore(release): version SDK packages` with the TypeScript SDK changelog update.
+4. Syncs the canonical version into private SDK `package.json` files and native manifests beside each SDK:
    - `pyproject.toml` — updates `[project].version` (PEP 621, used by uv/hatch/flit/pdm and Poetry 2.0+) and/or `[tool.poetry].version` (legacy Poetry 1.x), whichever fields are present. Fails if neither exists.
    - `Cargo.toml` — updates `[package].version` only. Dependency `version` fields are left untouched.
    - `go.mod` — no file sync. Go modules are versioned exclusively via git tags.
-5. Re-runs `pnpm install` to refresh the lockfile.
+5. Deletes duplicate changelogs generated for private SDK packages.
+6. Re-runs `pnpm install` to refresh the lockfile.
 
 After merge the same workflow runs `pnpm changeset publish` and:
 
-- Publishes public npm SDKs (currently `@cloudflare/flagship`).
-- Skips npm publish for `private: true` SDKs but still creates a git tag (`privatePackages.tag: true`). The Python PyPI workflow subscribes to `@cloudflare/flagship-python@*` tags and publishes via PyPI trusted publishing (OIDC, no PyPI token). For Go, the git tag is the version — no additional file sync is needed.
+- Publishes public npm SDKs (currently `@cloudflare/flagship`) and creates the canonical `@cloudflare/flagship@*` git tag.
+- Skips npm publish and tag creation for `private: true` SDKs (`privatePackages.tag: false`). The Python PyPI workflow subscribes to the canonical `@cloudflare/flagship@*` tag and publishes via PyPI trusted publishing (OIDC, no PyPI token). For Go, the canonical release tag is the version signal — no additional file sync is needed.
 
 Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Non-npm SDK packages should use `private: true` and keep their native manifest beside it:
 
@@ -203,7 +204,7 @@ The PR workflow is split by SDK:
 Publishing workflows are language-specific:
 
 - `release.yml` (`Publish npm`) runs on pushes to `main`; Changesets creates release PRs and publishes npm packages after the release PR is merged.
-- `publish-pypi.yml` runs on `@cloudflare/flagship-python@*` tags; it runs Python checks, builds the Python package, and publishes to PyPI with trusted publishing.
+- `publish-pypi.yml` runs on canonical `@cloudflare/flagship@*` tags; it runs Python checks, builds the Python package, and publishes to PyPI with trusted publishing.
 
 ## Boundaries
 

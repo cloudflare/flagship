@@ -13,38 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  format:
-    name: Format
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v5
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run format:check
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v5
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm dlx sherif
-      - run: pnpm run lint
+  # ── Repo-wide ─────────────────────────────────────────────────────────────
 
   changesets:
     name: Changesets
@@ -64,8 +33,43 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run changeset:validate
 
-  build:
-    name: Build
+  # ── TypeScript SDK ────────────────────────────────────────────────────────
+
+  typescript-format:
+    name: TypeScript Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check
+
+  typescript-lint:
+    name: TypeScript Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm dlx sherif
+      - run: pnpm run lint
+
+  typescript-build:
+    name: TypeScript Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -80,11 +84,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
 
-  typecheck:
-    name: Typecheck
+  typescript-typecheck:
+    name: TypeScript Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: build
+    needs: typescript-build
     steps:
       - uses: actions/checkout@v6
 
@@ -98,11 +102,11 @@ jobs:
       - run: pnpm run build
       - run: pnpm run typecheck
 
-  test:
-    name: Test
+  typescript-test:
+    name: TypeScript Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: build
+    needs: typescript-build
     steps:
       - uses: actions/checkout@v6
 
@@ -115,11 +119,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test
 
-  preview:
-    name: Publish Preview
+  typescript-preview:
+    name: TypeScript Publish Preview
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [format, lint, typecheck, test]
+    needs: [typescript-format, typescript-lint, typescript-typecheck, typescript-test]
     steps:
       - uses: actions/checkout@v6
 
@@ -132,3 +136,77 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm dlx pkg-pr-new publish './sdks/typescript'
+
+  # ── Python SDK ────────────────────────────────────────────────────────────
+
+  python-format:
+    name: Python Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          working-directory: sdks/python
+
+      - run: uv run ruff format --check .
+        working-directory: sdks/python
+
+  python-lint:
+    name: Python Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          working-directory: sdks/python
+
+      - run: uv run ruff check .
+        working-directory: sdks/python
+
+  python-build:
+    name: Python Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          working-directory: sdks/python
+
+      - run: uv build
+        working-directory: sdks/python
+
+  python-typecheck:
+    name: Python Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: python-build
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          working-directory: sdks/python
+
+      - run: uv run --group dev mypy
+        working-directory: sdks/python
+
+  python-test:
+    name: Python Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: python-build
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          working-directory: sdks/python
+
+      - run: uv run --group dev pytest
+        working-directory: sdks/python

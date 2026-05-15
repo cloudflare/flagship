@@ -1,0 +1,53 @@
+name: Publish PyPI
+
+on:
+  push:
+    tags:
+      - '@cloudflare/flagship-python@*'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - run: uv run ruff format --check .
+        working-directory: sdks/python
+
+      - run: uv run ruff check .
+        working-directory: sdks/python
+
+      - run: uv run --group dev mypy
+        working-directory: sdks/python
+
+      - run: uv run --group dev pytest
+        working-directory: sdks/python
+
+  publish:
+    name: Publish
+    needs: check
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write # required for OIDC trusted publishing
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Build
+        working-directory: sdks/python
+        run: uv build
+
+      - name: Publish
+        working-directory: sdks/python
+        run: uv publish

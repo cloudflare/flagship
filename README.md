@@ -1,114 +1,126 @@
 # Cloudflare Flagship
 
 [![npm version](https://img.shields.io/npm/v/@cloudflare/flagship.svg)](https://www.npmjs.com/package/@cloudflare/flagship)
-[![npm downloads](https://img.shields.io/npm/dm/@cloudflare/flagship.svg)](https://www.npmjs.com/package/@cloudflare/flagship)
-[![license](https://img.shields.io/npm/l/@cloudflare/flagship.svg)](https://github.com/cloudflare/flagship/blob/main/LICENSE)
+[![PyPI version](https://img.shields.io/pypi/v/cloudflare-flagship.svg)](https://pypi.org/project/cloudflare-flagship/)
+[![license](https://img.shields.io/npm/l/@cloudflare/flagship.svg)](LICENSE)
 
-Flagship is a globally distributed, low-latency feature flag platform built entirely on Cloudflare. This repository is the monorepo for Flagship SDKs. It contains the TypeScript SDK — an [OpenFeature](https://openfeature.dev)-compliant provider for evaluating feature flags from server-side (Node.js, Cloudflare Workers) and client-side (browser) environments.
+Flagship is Cloudflare's feature flag platform. This repository contains the official Flagship SDKs for application developers who want to evaluate feature flags through [OpenFeature](https://openfeature.dev/).
+
+The TypeScript SDK is recommended for most use cases. It supports HTTP evaluation, browser-side caching, and the native Flagship Workers binding — which skips HTTP entirely and requires no auth token configuration. If you are building on Cloudflare Workers, use the TypeScript SDK with the Workers binding. The Python SDK is available for server-side Python applications and supports HTTP evaluation only.
+
+## SDKs
+
+| SDK        | Package                                                                      | Runtime                               | Evaluation modes                              | Docs                                 |
+| ---------- | ---------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------- | ------------------------------------ |
+| TypeScript | [`@cloudflare/flagship`](https://www.npmjs.com/package/@cloudflare/flagship) | Node.js, Cloudflare Workers, browsers | Workers binding, HTTP, browser prefetch cache | [`sdks/typescript`](sdks/typescript) |
+| Python     | [`cloudflare-flagship`](https://pypi.org/project/cloudflare-flagship/)       | Python server applications            | HTTP                                          | [`sdks/python`](sdks/python)         |
+
+## TypeScript
+
+Install the SDK with the OpenFeature package for your runtime:
 
 ```sh
 npm install @cloudflare/flagship @openfeature/server-sdk
 ```
 
-## Quick Example — Cloudflare Workers (binding, recommended)
+Cloudflare Workers should use the Flagship binding when possible. It avoids HTTP overhead and does not require application-managed auth tokens.
 
-```typescript
+```ts
 import { OpenFeature } from '@openfeature/server-sdk';
-import { FlagshipServerProvider } from '@cloudflare/flagship/server';
-import type { FlagshipBinding } from '@cloudflare/flagship/server';
+import { FlagshipServerProvider, type FlagshipBinding } from '@cloudflare/flagship/server';
 
 export default {
-  async fetch(request: Request, env: { FLAGS: FlagshipBinding }) {
-    await OpenFeature.setProviderAndWait(new FlagshipServerProvider({ binding: env.FLAGS }));
-    const client = OpenFeature.getClient();
-    const enabled = await client.getBooleanValue('dark-mode', false, { targetingKey: 'user-123' });
-    return Response.json({ enabled });
-  },
+	async fetch(request: Request, env: { FLAGS: FlagshipBinding }) {
+		await OpenFeature.setProviderAndWait(new FlagshipServerProvider({ binding: env.FLAGS }));
+
+		const client = OpenFeature.getClient();
+		const enabled = await client.getBooleanValue('dark-mode', false, {
+			targetingKey: 'user-123',
+		});
+
+		return Response.json({ enabled });
+	},
 };
 ```
 
-## Quick Example — HTTP
+For Node.js or other server environments, use HTTP mode:
 
-```typescript
+```ts
 import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '@cloudflare/flagship/server';
 
 await OpenFeature.setProviderAndWait(
-  new FlagshipServerProvider({ appId: 'your-app-id', accountId: 'your-account-id', authToken: 'your-token' }),
+	new FlagshipServerProvider({
+		appId: 'your-app-id',
+		accountId: 'your-account-id',
+		authToken: 'your-token',
+	}),
 );
 
 const client = OpenFeature.getClient();
 const enabled = await client.getBooleanValue('dark-mode', false, {
-  userId: 'user-123',
-  plan: 'premium',
+	targetingKey: 'user-123',
+	plan: 'premium',
 });
 ```
 
-## Features
+## Python
 
-| Feature                   | Description                                                                        |
-| ------------------------- | ---------------------------------------------------------------------------------- |
-| **OpenFeature compliant** | Implements the CNCF OpenFeature specification                                      |
-| **Workers binding**       | Native wrangler binding support — zero HTTP overhead, no auth tokens               |
-| **Server providers**      | `FlagshipServerProvider` works via both wrangler binding or HTTP.                  |
-| **Server + client**       | Async per-request evaluation (server) and sync cache-based evaluation (browser)    |
-| **All flag types**        | Boolean, string, number, and object (JSON)                                         |
-| **Authentication**        | `authToken` option adds `Authorization: Bearer` to every request (HTTP only)       |
-| **Logging**               | `logging` option surfaces fetch errors and cache misses (off by default)           |
-| **Retries + timeouts**    | Configurable retry logic with `AbortController`-based timeouts (HTTP only)         |
-| **Hooks**                 | Built-in `LoggingHook` and `TelemetryHook` for observability                       |
-| **Tree-shakeable**        | Server and client bundles are fully isolated — importing one never loads the other |
-| **TypeScript**            | Strict types throughout                                                            |
+Install with uv or pip:
 
-## Packages
+```sh
+uv add cloudflare-flagship
+# or
+pip install cloudflare-flagship
+```
 
-| Export                                           | Description                      | Peer dependency           |
-| ------------------------------------------------ | -------------------------------- | ------------------------- |
-| [`@cloudflare/flagship`](sdks/typescript)        | Core client, types, errors       | None                      |
-| [`@cloudflare/flagship/server`](sdks/typescript) | `FlagshipServerProvider` + hooks | `@openfeature/server-sdk` |
-| [`@cloudflare/flagship/web`](sdks/typescript)    | `FlagshipClientProvider`         | `@openfeature/web-sdk`    |
+```py
+from openfeature import api
+from openfeature.evaluation_context import EvaluationContext
+from flagship import FlagshipServerProvider
 
-Each sub-path is a separate bundle so importing one never pulls in the other's OpenFeature dependency.
+api.set_provider(
+	FlagshipServerProvider(
+		app_id='your-app-id',
+		account_id='your-account-id',
+		auth_token='your-token',
+	)
+)
 
-## Documentation
+client = api.get_client()
+enabled = client.get_boolean_value(
+	'dark-mode',
+	False,
+	EvaluationContext(targeting_key='user-123', attributes={'plan': 'premium'}),
+)
+```
 
-- [API reference](sdks/typescript/API.md)
-- [OpenFeature specification](https://openfeature.dev/specification/)
-- [Examples](sdks/typescript/examples/)
+The Python SDK supports HTTP evaluation only. It does not support the Cloudflare Workers binding.
 
-## Repository Structure
+## Repository Layout
 
-| Directory                             | Description                                       |
-| ------------------------------------- | ------------------------------------------------- |
-| [`sdks/typescript/`](sdks/typescript) | `@cloudflare/flagship` — OpenFeature provider SDK |
-| `sdks/<language>/`                    | SDK package by implementation language            |
-| [`.changeset/`](.changeset)           | Changeset config and pending changesets           |
-| [`.github/`](.github)                 | CI workflows and issue templates                  |
+| Path                                     | Description                                                  |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| [`sdks/typescript`](sdks/typescript)     | TypeScript SDK source, tests, examples, and package metadata |
+| [`sdks/python`](sdks/python)             | Python SDK source, tests, examples, and package metadata     |
+| [`.changeset`](.changeset)               | Release intent files and Changesets configuration            |
+| [`.github/workflows`](.github/workflows) | Pull request checks and publish workflows                    |
 
 ## Development
 
-Node 22+ and pnpm 10+ required.
+This is a pnpm monorepo. Node.js 22+ and pnpm 10+ are required.
 
 ```sh
-pnpm install         # install all workspace dependencies
-pnpm run build       # build all packages
-pnpm run check       # full CI check (sherif, format, lint, typecheck)
-pnpm run test        # run all tests
+pnpm install
+pnpm run check
 ```
 
-Changes to published packages need a changeset:
+## Links
 
-```sh
-pnpm changeset
-```
-
-See [`AGENTS.md`](AGENTS.md) for deeper contributor guidance.
-
-## Contributing
-
-We welcome contributions. Please open an issue first to discuss what you'd like to change.
-
-- **Bug reports & feature requests** — [open an issue](https://github.com/cloudflare/flagship/issues)
+- [TypeScript examples](sdks/typescript/examples)
+- [Python examples](sdks/python/examples)
+- [OpenFeature specification](https://openfeature.dev/specification/)
+- [Issues](https://github.com/cloudflare/flagship/issues)
 
 ## License
 

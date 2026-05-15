@@ -1,5 +1,11 @@
 # @cloudflare/flagship
 
+## 0.3.1
+
+### Patch Changes
+
+- [#18](https://github.com/cloudflare/flagship/pull/18) [`52c04ed`](https://github.com/cloudflare/flagship/commit/52c04eda5dde01aa905bd260b96945fcf45f1e61) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Fix release pipeline: Python checks on push to main, canonical single-package release notes, no private SDK tags, and reliable PyPI publish trigger.
+
 ## 0.3.0
 
 ### Minor Changes

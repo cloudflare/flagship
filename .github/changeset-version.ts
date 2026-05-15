@@ -3,8 +3,9 @@
  *
  * Modes:
  *   - `validate`: rejects malformed changesets and `none`-bumped SDK changesets. Run in PR CI.
- *   - `release`:  validates, expands every changeset to all SDKs, runs `changeset version`,
- *                 syncs native manifests, refreshes the lockfile. Run by changesets/action.
+ *   - `release`:  validates, rewrites SDK changesets to the canonical npm package,
+ *                 runs `changeset version`, syncs private SDK versions and native
+ *                 manifests, refreshes native and pnpm lockfiles. Run by changesets/action.
  *
  * An SDK is any direct subdirectory of `sdks/` containing a `package.json`.
  */
@@ -18,6 +19,7 @@ import { parse as parseToml, patch as patchToml } from '@decimalturn/toml-patch'
 import { getPackagesSync, type Package } from '@manypkg/get-packages';
 
 const ROOT = process.cwd();
+const CANONICAL_PACKAGE_NAME = '@cloudflare/flagship';
 const BUMP_RANK: Record<VersionType, number> = { none: 0, patch: 1, minor: 2, major: 3 };
 
 function readSdkPackages(): Package[] {
@@ -61,26 +63,36 @@ export async function validatePendingChangesets(): Promise<void> {
 	console.log(changesets.length === 0 ? 'No pending changesets to validate.' : `Validated ${changesets.length} pending changeset(s).`);
 }
 
-/** Every release-bound changeset is rewritten to bump every SDK at the highest SDK bump present. */
-export async function expandChangesetsToAllSdks(): Promise<void> {
-	const allSdkNames = readSdkPackages()
-		.map((pkg) => pkg.packageJson.name)
-		.sort();
-	const sdkNames = new Set(allSdkNames);
+function readCanonicalPackage(): Package {
+	const canonical = readSdkPackages().find((pkg) => pkg.packageJson.name === CANONICAL_PACKAGE_NAME);
+	if (canonical === undefined) {
+		throw new Error(`Canonical SDK package not found: ${CANONICAL_PACKAGE_NAME}`);
+	}
+	return canonical;
+}
+
+/**
+ * The repo uses a single public release package for Changesets output. Private SDKs
+ * still get version-synced, but they are removed from release entries so the release
+ * PR body and changelog don't duplicate the same notes for every language.
+ */
+export async function rewriteChangesetsToCanonicalPackage(): Promise<void> {
+	const sdkNames = new Set(readSdkPackages().map((pkg) => pkg.packageJson.name));
 
 	for (const changeset of await readChangesets(ROOT)) {
 		const sdkReleases = changeset.releases.filter((release) => sdkNames.has(release.name));
 		if (sdkReleases.length === 0) continue;
 
-		const present = new Set(changeset.releases.map((release) => release.name));
-		const missing = allSdkNames.filter((name) => !present.has(name));
-		if (missing.length === 0) continue;
-
 		const bump = highestBump(sdkReleases.map((release) => release.type));
-		const expanded: Release[] = [...changeset.releases, ...missing.map((name) => ({ name, type: bump }))];
+		const rewritten: Release[] = [{ name: CANONICAL_PACKAGE_NAME, type: bump }];
+		const alreadyCanonical =
+			changeset.releases.length === rewritten.length &&
+			changeset.releases[0]?.name === CANONICAL_PACKAGE_NAME &&
+			changeset.releases[0]?.type === bump;
+		if (alreadyCanonical) continue;
 
-		writeChangesetFile({ id: changeset.id, summary: changeset.summary, releases: expanded });
-		console.log(`Expanded .changeset/${changeset.id}.md to all SDKs at bump '${bump}'.`);
+		writeChangesetFile({ id: changeset.id, summary: changeset.summary, releases: rewritten });
+		console.log(`Rewrote .changeset/${changeset.id}.md to ${CANONICAL_PACKAGE_NAME} at bump '${bump}'.`);
 	}
 }
 
@@ -91,6 +103,21 @@ function highestBump(bumps: VersionType[]): VersionType {
 function writeChangesetFile({ id, summary, releases }: NewChangeset): void {
 	const frontmatter = releases.map((release) => `"${release.name}": ${release.type}`).join('\n');
 	writeFileSync(join(ROOT, '.changeset', `${id}.md`), `---\n${frontmatter}\n---\n\n${summary}\n`);
+}
+
+/** Syncs private SDK package.json versions to the canonical public package version. */
+export function syncPrivateSdkPackageVersions(): void {
+	const targetVersion = readCanonicalPackage().packageJson.version;
+
+	for (const pkg of readSdkPackages()) {
+		if (pkg.packageJson.private !== true) continue;
+		if (pkg.packageJson.version === targetVersion) continue;
+
+		const packageJsonPath = join(pkg.dir, 'package.json');
+		const packageJson = `${JSON.stringify({ ...pkg.packageJson, version: targetVersion }, null, '\t')}\n`;
+		writeFileSync(packageJsonPath, packageJson);
+		console.log(`Synced ${relative(ROOT, packageJsonPath)} -> ${targetVersion}.`);
+	}
 }
 
 /** Mirrors each SDK's `package.json` version into the native manifest beside it, if present. */
@@ -105,6 +132,26 @@ export function syncNativeManifests(): void {
 
 	if (errors.length > 0) {
 		throw new Error(`Native manifest sync failed:\n  - ${errors.join('\n  - ')}`);
+	}
+}
+
+/**
+ * Regenerate native lockfiles after manifest version bumps so the release PR
+ * contains an up-to-date lockfile. Skipped silently when the relevant CLI is
+ * not on PATH (e.g. local dev environments without `uv` installed).
+ */
+export function refreshNativeLockfiles(): void {
+	for (const pkg of readSdkPackages()) {
+		const pyprojectPath = join(pkg.dir, 'pyproject.toml');
+		const uvLockPath = join(pkg.dir, 'uv.lock');
+		if (existsSync(pyprojectPath) && existsSync(uvLockPath)) {
+			try {
+				execSync('uv lock', { cwd: pkg.dir, stdio: 'inherit' });
+				console.log(`Refreshed ${relative(ROOT, uvLockPath)}.`);
+			} catch (error) {
+				throw new Error(`Failed to refresh ${relative(ROOT, uvLockPath)}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 	}
 }
 
@@ -188,7 +235,7 @@ async function runRelease(): Promise<void> {
 	);
 
 	try {
-		await expandChangesetsToAllSdks();
+		await rewriteChangesetsToCanonicalPackage();
 		execSync('pnpm changeset version', { stdio: 'inherit' });
 	} catch (error) {
 		for (const [file, content] of snapshot) {
@@ -197,7 +244,9 @@ async function runRelease(): Promise<void> {
 		throw error;
 	}
 
+	syncPrivateSdkPackageVersions();
 	syncNativeManifests();
+	refreshNativeLockfiles();
 	deletePrivateSdkChangelogs();
 	execSync('pnpm install --no-frozen-lockfile', { stdio: 'inherit' });
 }

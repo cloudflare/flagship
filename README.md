@@ -6,7 +6,7 @@
 
 Flagship is Cloudflare's feature flag platform. This repository contains the official Flagship SDKs for application developers who want to evaluate feature flags through [OpenFeature](https://openfeature.dev/).
 
-The TypeScript SDK is the recommended SDK, especially for Cloudflare Workers, because it supports the native Flagship Workers binding in addition to HTTP evaluation.
+The TypeScript SDK is recommended for most use cases. It supports HTTP evaluation, browser-side caching, and the native Flagship Workers binding — which skips HTTP entirely and requires no auth token configuration. If you are building on Cloudflare Workers, use the TypeScript SDK with the Workers binding. The Python SDK is available for server-side Python applications and supports HTTP evaluation only.
 
 ## SDKs
 

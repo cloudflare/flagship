@@ -1,4 +1,14 @@
-name: Publish npm
+name: Release
+
+# On push to main:
+#   - If there are pending changesets, opens/updates a release PR that bumps
+#     versions and rewrites changelogs.
+#   - If the previous commit was a merge of that release PR (no pending
+#     changesets remain), publishes to npm and triggers PyPI publish.
+#
+# PR CI (`pull-request.yml`) is the source of truth for correctness; this
+# workflow does not re-run checks. Branch protection on `main` requires
+# `CI Success` to pass before merge.
 
 on:
   push:
@@ -13,55 +23,11 @@ permissions:
   contents: read
 
 jobs:
-  check-typescript:
-    name: Check (TypeScript)
+  release:
+    name: Changesets
     if: ${{ github.repository_owner == 'cloudflare' }}
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v5
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: pnpm run check
-      - run: pnpm run test
-
-  check-python:
-    name: Check (Python)
-    if: ${{ github.repository_owner == 'cloudflare' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          working-directory: sdks/python
-
-      - run: uv sync --group dev --locked
-        working-directory: sdks/python
-
-      - run: uv run ruff format --check .
-        working-directory: sdks/python
-
-      - run: uv run ruff check .
-        working-directory: sdks/python
-
-      - run: uv run mypy
-        working-directory: sdks/python
-
-      - run: uv run pytest
-        working-directory: sdks/python
-
-  publish:
-    name: Publish
-    needs: [check-typescript, check-python]
-    if: ${{ github.repository_owner == 'cloudflare' }}
-    runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       published: ${{ steps.changesets.outputs.published }}
     permissions:
@@ -80,6 +46,8 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
+      # `uv` is needed by `.github/changeset-version.ts` to refresh `uv.lock`
+      # when the Python SDK version is bumped.
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           working-directory: sdks/python
@@ -101,8 +69,8 @@ jobs:
 
   publish-pypi:
     name: Publish PyPI
-    needs: publish
-    if: ${{ needs.publish.outputs.published == 'true' }}
+    needs: release
+    if: ${{ needs.release.outputs.published == 'true' }}
     uses: ./.github/workflows/publish-pypi.yml
     permissions:
       contents: read

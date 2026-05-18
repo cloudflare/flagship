@@ -32,7 +32,7 @@ sdks/
     uv.lock          # Python dependency lockfile
 
 .changeset/          # Changeset config and pending changesets
-.github/             # CI workflows (pull-request, release/npm publish, PyPI publish, bonk), issue templates
+.github/             # CI workflows (pull-request, release, publish-pypi, bonk, semgrep), issue templates
 ```
 
 ## Setup
@@ -193,18 +193,18 @@ Changesets should remain the only release intent file. Do not add release-please
 
 ### Pull Request Process
 
-CI runs on every PR: `pnpm install → build → check → test → changeset:validate`. All checks must pass.
+`pull-request.yml` runs on every PR with all checks in parallel:
 
-The PR workflow is split by SDK:
+- **Repo-wide:** changeset validation.
+- **TypeScript:** format, lint, typecheck, test, build, publish preview (`pkg-pr-new`).
+- **Python:** format, lint, typecheck, test, build.
 
-- Repo-wide changeset validation.
-- TypeScript format, lint, build, typecheck, test, and publish preview.
-- Python format, lint, build, typecheck, and test.
+A `CI Success` aggregator job depends on all of the above and is the single required status check for branch protection on `main`.
 
-Publishing workflows are language-specific:
+Publishing is split across two workflows; `pull-request.yml` is the source of truth for correctness and is never re-run during release:
 
-- `release.yml` (`Publish npm`) runs on pushes to `main`; Changesets creates release PRs and publishes npm packages after the release PR is merged.
-- `publish-pypi.yml` runs on canonical `@cloudflare/flagship@*` tags; it runs Python checks, builds the Python package, and publishes to PyPI with trusted publishing.
+- `release.yml` runs on pushes to `main`. Changesets opens or updates a release PR that bumps versions; merging that PR triggers the same workflow, which then publishes npm packages and reports `published: true`.
+- `publish-pypi.yml` is a reusable workflow (`workflow_call`) invoked by `release.yml` only when `published == 'true'`. It builds the Python SDK and publishes to PyPI via OIDC trusted publishing — never runs on every push.
 
 ## Boundaries
 

@@ -6,7 +6,7 @@
 
 Flagship is Cloudflare's feature flag platform. This repository contains the official Flagship SDKs for application developers who want to evaluate feature flags through [OpenFeature](https://openfeature.dev/).
 
-The TypeScript SDK is recommended for most use cases. It supports HTTP evaluation, browser-side caching, and the native Flagship Workers binding — which skips HTTP entirely and requires no auth token configuration. If you are building on Cloudflare Workers, use the TypeScript SDK with the Workers binding. The Python SDK is available for server-side Python applications and supports HTTP evaluation only.
+The TypeScript SDK is recommended for most use cases. It supports HTTP evaluation, browser-side caching, and the native Flagship Workers binding — which skips HTTP entirely and requires no auth token configuration. If you are building on Cloudflare Workers, use the TypeScript SDK with the Workers binding. The Python and Go SDKs are available for server-side applications and support HTTP evaluation only.
 
 ## SDKs
 
@@ -14,6 +14,7 @@ The TypeScript SDK is recommended for most use cases. It supports HTTP evaluatio
 | ---------- | ---------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------- | ------------------------------------ |
 | TypeScript | [`@cloudflare/flagship`](https://www.npmjs.com/package/@cloudflare/flagship) | Node.js, Cloudflare Workers, browsers | Workers binding, HTTP, browser prefetch cache | [`sdks/typescript`](sdks/typescript) |
 | Python     | [`cloudflare-flagship`](https://pypi.org/project/cloudflare-flagship/)       | Python server applications            | HTTP                                          | [`sdks/python`](sdks/python)         |
+| Go         | [`github.com/cloudflare/flagship/sdks/go`](sdks/go)                          | Go server applications                | HTTP                                          | [`sdks/go`](sdks/go)                 |
 
 ## TypeScript
 
@@ -97,12 +98,62 @@ enabled = client.get_boolean_value(
 
 The Python SDK supports HTTP evaluation only. It does not support the Cloudflare Workers binding.
 
+## Go
+
+Install with `go get`:
+
+```sh
+go get github.com/cloudflare/flagship/sdks/go
+```
+
+```go
+package main
+
+import (
+	"context"
+
+	flagship "github.com/cloudflare/flagship/sdks/go"
+	"github.com/open-feature/go-sdk/openfeature"
+)
+
+func main() {
+	provider, err := flagship.NewProvider(flagship.Options{
+		AppID:     "your-app-id",
+		AccountID: "your-account-id",
+		AuthToken: "your-token",
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	if err := openfeature.SetProviderAndWait(provider); err != nil {
+		panic(err)
+	}
+	defer openfeature.Shutdown()
+
+	client := openfeature.NewDefaultClient()
+	enabled, err := client.BooleanValue(
+		context.Background(),
+		"dark-mode",
+		false,
+		openfeature.NewEvaluationContext("user-123", map[string]any{"plan": "premium"}),
+	)
+	if err != nil {
+		panic(err)
+	}
+	_ = enabled
+}
+```
+
+The Go SDK supports HTTP evaluation only. It does not support the Cloudflare Workers binding.
+
 ## Repository Layout
 
 | Path                                     | Description                                                  |
 | ---------------------------------------- | ------------------------------------------------------------ |
 | [`sdks/typescript`](sdks/typescript)     | TypeScript SDK source, tests, examples, and package metadata |
 | [`sdks/python`](sdks/python)             | Python SDK source, tests, examples, and package metadata     |
+| [`sdks/go`](sdks/go)                     | Go SDK source, tests, examples, and module metadata          |
 | [`.changeset`](.changeset)               | Release intent files and Changesets configuration            |
 | [`.github/workflows`](.github/workflows) | Pull request checks and publish workflows                    |
 

@@ -54,6 +54,8 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  sdks/go: {}
+
   sdks/python: {}
 
   sdks/typescript:

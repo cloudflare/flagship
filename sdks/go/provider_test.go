@@ -7,57 +7,33 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/open-feature/go-sdk/openfeature"
 )
 
-func TestProviderInitializeSucceedsOn200(t *testing.T) {
-	provider, server := newProviderWithResponse(t, http.StatusOK, true, "on", "DEFAULT")
-	defer server.Close()
-
-	if err := provider.InitWithContext(context.Background(), openfeature.NewTargetlessEvaluationContext(nil)); err != nil {
-		t.Fatal(err)
-	}
-	if provider.Status() != openfeature.ReadyState {
-		t.Fatalf("status = %s", provider.Status())
-	}
-}
-
-func TestProviderInitializeTreats404AsReady(t *testing.T) {
-	server := statusServer(http.StatusNotFound)
+func TestProviderInitializeMarksReadyWithoutHTTPRequest(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	}))
 	defer server.Close()
 	provider := newTestProvider(t, server.URL, Options{DisableRetries: true})
 
 	if err := provider.InitWithContext(context.Background(), openfeature.NewTargetlessEvaluationContext(nil)); err != nil {
 		t.Fatal(err)
 	}
-	if provider.Status() != openfeature.ReadyState {
-		t.Fatalf("status = %s", provider.Status())
+	if calls.Load() != 0 {
+		t.Fatalf("initialization made %d HTTP requests, want 0", calls.Load())
 	}
 }
 
-func TestProviderInitializeFailureSetsErrorStatus(t *testing.T) {
-	server := statusServer(http.StatusInternalServerError)
-	defer server.Close()
-	provider := newTestProvider(t, server.URL, Options{DisableRetries: true})
-
-	if err := provider.InitWithContext(context.Background(), openfeature.NewTargetlessEvaluationContext(nil)); err == nil {
-		t.Fatal("expected init error")
-	}
-	if provider.Status() != openfeature.ErrorState {
-		t.Fatalf("status = %s", provider.Status())
-	}
-}
-
-func TestProviderShutdownResetsStatus(t *testing.T) {
+func TestProviderShutdownIsNoop(t *testing.T) {
 	provider, server := newProviderWithResponse(t, http.StatusOK, true, "on", "DEFAULT")
 	defer server.Close()
-	provider.setStatus(openfeature.ReadyState)
 	provider.Shutdown()
-	if provider.Status() != openfeature.NotReadyState {
-		t.Fatalf("status = %s", provider.Status())
-	}
 }
 
 func TestProviderMetadataName(t *testing.T) {

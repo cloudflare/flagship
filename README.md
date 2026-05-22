@@ -96,7 +96,7 @@ enabled = client.get_boolean_value(
 )
 ```
 
-The Python SDK supports HTTP evaluation only. It does not support the Cloudflare Workers binding.
+The Python SDK supports HTTP evaluation only.
 
 ## Go
 
@@ -145,7 +145,7 @@ func main() {
 }
 ```
 
-The Go SDK supports HTTP evaluation only. It does not support the Cloudflare Workers binding.
+The Go SDK supports HTTP evaluation only.
 
 ## Repository Layout
 

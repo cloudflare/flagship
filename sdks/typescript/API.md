@@ -333,54 +333,32 @@ if (details.errorCode) {
 
 ## Hooks
 
-OpenFeature hooks run at defined points in the evaluation lifecycle. Two built-in hooks are available from `@cloudflare/flagship/server`.
-
-### LoggingHook
-
-Logs flag key, default value, context, resolved value, reason, and variant for every evaluation.
+Flagship does not ship SDK-specific hooks. Use standard OpenFeature hooks to attach logging, analytics, or telemetry behavior at the application level.
 
 ```typescript
-import { OpenFeature } from '@openfeature/server-sdk';
-import { FlagshipServerProvider, LoggingHook } from '@cloudflare/flagship/server';
+import { OpenFeature, type Hook } from '@openfeature/server-sdk';
+import { FlagshipServerProvider } from '@cloudflare/flagship/server';
+
+const analyticsHook: Hook = {
+  after(hookContext, details) {
+    analytics.track('flag_evaluated', {
+      flagKey: hookContext.flagKey,
+      value: details.value,
+      reason: details.reason,
+      variant: details.variant,
+      errorCode: details.errorCode,
+    });
+  },
+};
+
+OpenFeature.addHooks(analyticsHook);
 
 await OpenFeature.setProviderAndWait(new FlagshipServerProvider({ appId: '...', accountId: '...' }));
-
-// Uses console.log by default
-OpenFeature.addHooks(new LoggingHook());
-
-// Or pass a custom log function (message: string, ...args: unknown[])
-OpenFeature.addHooks(new LoggingHook((message, ...args) => logger.debug(message, ...args)));
-```
-
-### TelemetryHook
-
-Calls a user-supplied callback after each evaluation with timing and outcome data. Useful for sending flag evaluation metrics to an analytics or observability service.
-
-```typescript
-import { TelemetryHook } from '@cloudflare/flagship/server';
-
-OpenFeature.addHooks(
-  new TelemetryHook((event) => {
-    // event.type        — 'evaluation' | 'error'
-    // event.flagKey     — flag key
-    // event.timestamp   — Unix timestamp (ms)
-    // event.duration    — evaluation duration in ms
-    // event.value       — resolved value (evaluation events only)
-    // event.reason      — resolution reason
-    // event.variant     — variation key
-    // event.errorCode   — OpenFeature error code (set on evaluation events when the resolution produced an error)
-    // event.errorMessage
-    // event.context     — evaluation context
-    // event.hints       — hook hints from EvaluationOptions (optional)
-
-    analytics.track('flag_evaluated', event);
-  }),
-);
 ```
 
 ## Provider events
 
-The provider emits standard OpenFeature events during its lifecycle:
+OpenFeature emits standard provider events during the provider lifecycle:
 
 ```typescript
 import { OpenFeature, ProviderEvents } from '@openfeature/server-sdk';
@@ -392,24 +370,19 @@ OpenFeature.addHandler(ProviderEvents.Ready, () => {
   console.log('Provider initialized and ready');
 });
 
-OpenFeature.addHandler(ProviderEvents.Error, ({ message }) => {
-  console.error('Provider failed to initialize:', message);
-});
-
 await OpenFeature.setProviderAndWait(provider);
 ```
 
-**Server provider (HTTP mode):** During initialization, the provider probes the evaluation endpoint with a health-check request. A 404 response (flag not found) is treated as success — it means the endpoint is reachable. Any network or timeout error causes `ProviderEvents.Error` to be emitted, but `setProviderAndWait` still resolves (does not reject) — the provider transitions to `ERROR` status silently.
+**Server provider (HTTP mode):** Initialization does not probe the evaluation endpoint. Network, timeout, authentication, and missing-flag errors are reported by the flag evaluations that encounter them.
 
-**Server provider (binding mode):** Initialization sets READY immediately — the binding is guaranteed to be available by the Workers runtime. No health-check probe is performed.
+**Server provider (binding mode):** Initialization does not call the binding. Binding errors are reported by the flag evaluations that encounter them.
 
-**Client provider:** During initialization, the provider fetches all `prefetchFlags` using `Promise.allSettled`. Even if some or all fetches fail, the provider transitions to `READY` status. Failed flags return `FLAG_NOT_FOUND` when resolved.
+**Client provider:** During initialization, the provider fetches all `prefetchFlags` using `Promise.allSettled`. Even if some or all fetches fail, OpenFeature marks the provider ready. Failed flags return `FLAG_NOT_FOUND` when resolved.
 
 To shut down the provider and release resources:
 
 ```typescript
 await provider.onClose();
-// provider.status === ProviderStatus.NOT_READY
 // Client provider also clears the in-memory cache
 ```
 
@@ -430,9 +403,6 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 **`@cloudflare/flagship/server`** (core value exports + server-relevant types, plus):
 
 - `FlagshipServerProvider` — dual-mode provider (HTTP or binding)
-- `LoggingHook` — evaluation logging hook
-- `TelemetryHook` — evaluation telemetry hook
-- Type: `TelemetryEvent`
 
 **`@cloudflare/flagship/web`** (all core exports plus):
 
@@ -448,8 +418,6 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
     └─ HTTP mode (Node.js, etc.)     — delegates to FlagshipClient
         FlagshipClient               — HTTP client with retry + timeout
           ContextTransformer         — EvaluationContext → query parameters
-    LoggingHook / TelemetryHook      — OpenFeature hooks
-
 @cloudflare/flagship/web
   FlagshipClientProvider             — OpenFeature Provider interface (client)
     FlagshipClient                   — HTTP client (same as server)

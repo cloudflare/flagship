@@ -118,18 +118,6 @@ config, _ := client.ObjectValue(ctx, "ui-config", map[string]any{"theme": "light
 
 Use `*ValueDetails` methods when you need reason, variant, metadata, or error codes.
 
-## Hooks
-
-```go
-openfeature.AddHooks(flagship.NewLoggingHook(nil))
-
-openfeature.AddHooks(flagship.NewTelemetryHook(func(event flagship.TelemetryEvent) {
-	// Send event to your analytics pipeline.
-}))
-```
-
-`TelemetryEvent` includes `Type`, `FlagKey`, `Timestamp`, `Duration`, `Value`, `Reason`, `Variant`, `ErrorCode`, `ErrorMessage`, `Context`, and `Hints`.
-
 ## Development
 
 ```sh

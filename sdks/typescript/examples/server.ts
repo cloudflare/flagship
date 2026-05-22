@@ -6,7 +6,7 @@
  */
 
 import { OpenFeature } from '@openfeature/server-sdk';
-import { FlagshipServerProvider, LoggingHook } from '@cloudflare/flagship/server';
+import { FlagshipServerProvider } from '@cloudflare/flagship/server';
 
 const FLAGSHIP_APP_ID = 'your-app-id';
 const FLAGSHIP_ACCOUNT_ID = 'your-account-id';
@@ -22,14 +22,7 @@ async function main() {
 		}),
 	);
 
-	// 2. Add hooks for logging
-	OpenFeature.addHooks(
-		new LoggingHook((message, ...args) => {
-			console.log(`[FLAGSHIP] ${message}`, ...args);
-		}),
-	);
-
-	// 3. Get a client and evaluate flags with context
+	// 2. Get a client and evaluate flags with context
 	const client = OpenFeature.getClient();
 
 	const context = {
@@ -56,7 +49,7 @@ async function main() {
 	const themeConfig = await client.getObjectValue('theme-config', { primaryColor: '#000000', fontSize: 14 }, context);
 	console.log('Theme config:', themeConfig);
 
-	// 4. Detailed evaluation — reason reflects how the flag resolved
+	// 3. Detailed evaluation — reason reflects how the flag resolved
 	// ('TARGETING_MATCH', 'DEFAULT', 'DISABLED', 'SPLIT')
 	const details = await client.getBooleanDetails('premium-features', false, context);
 	console.log('Premium features details:', {
@@ -66,11 +59,11 @@ async function main() {
 		flagMetadata: details.flagMetadata,
 	});
 
-	// 5. Non-existent flags return the default value — no exceptions thrown
+	// 4. Non-existent flags return the default value — no exceptions thrown
 	const unknownFlag = await client.getBooleanValue('non-existent-flag', false, context);
 	console.log('Unknown flag (returns default):', unknownFlag);
 
-	// 6. Evaluate without context — rules that don't require targeting still apply
+	// 5. Evaluate without context — rules that don't require targeting still apply
 	const betaAccess = await client.getBooleanValue('beta-access', false);
 	console.log('Beta access:', betaAccess);
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Logger } from '@openfeature/server-sdk';
-import { ErrorCode, ProviderStatus, ProviderEvents, OpenFeature } from '@openfeature/server-sdk';
+import { ErrorCode, ProviderEvents, OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 import type { FlagshipBinding, FlagshipBindingEvaluationDetails } from '../src/types.js';
 
@@ -169,19 +169,6 @@ describe('FlagshipServerProvider (binding mode)', () => {
 	// -----------------------------------------------------------------------
 
 	describe('lifecycle', () => {
-		it('status is NOT_READY before initialize', () => {
-			const binding = createMockBinding();
-			const provider = new FlagshipServerProvider({ binding });
-			expect(provider.status).toBe(ProviderStatus.NOT_READY);
-		});
-
-		it('status is READY immediately after initialize (no health check)', async () => {
-			const binding = createMockBinding();
-			const provider = new FlagshipServerProvider({ binding });
-			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.READY);
-		});
-
 		it('does not call any binding methods during initialize', async () => {
 			const binding = createMockBinding();
 			const provider = new FlagshipServerProvider({ binding });
@@ -194,25 +181,10 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			expect(binding.getObjectDetails).not.toHaveBeenCalled();
 		});
 
-		it('emits READY event on initialize', async () => {
+		it('onClose is a no-op', async () => {
 			const binding = createMockBinding();
 			const provider = new FlagshipServerProvider({ binding });
-			const readyHandler = vi.fn();
-			provider.events.addHandler(ProviderEvents.Ready, readyHandler);
-
-			await provider.initialize();
-
-			expect(readyHandler).toHaveBeenCalled();
-		});
-
-		it('status resets to NOT_READY after onClose', async () => {
-			const binding = createMockBinding();
-			const provider = new FlagshipServerProvider({ binding });
-			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.READY);
-
-			await provider.onClose();
-			expect(provider.status).toBe(ProviderStatus.NOT_READY);
+			await expect(provider.onClose()).resolves.toBeUndefined();
 		});
 	});
 

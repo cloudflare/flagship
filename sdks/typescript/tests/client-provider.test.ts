@@ -213,9 +213,7 @@ describe('FlagshipClientProvider', () => {
 			expect(mockEvaluate).not.toHaveBeenCalled();
 		});
 
-		it('still reaches READY when some pre-fetches fail', async () => {
-			const { ProviderStatus } = require('@openfeature/web-sdk');
-
+		it('does not reject when some pre-fetches fail', async () => {
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
 					evaluate: vi.fn().mockRejectedValue(new Error('network')),
@@ -227,18 +225,7 @@ describe('FlagshipClientProvider', () => {
 				prefetchFlags: ['flag1', 'flag2'],
 			});
 
-			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.READY);
-		});
-
-		it('emits ProviderEvents.Ready after initialize', async () => {
-			const { ProviderEvents } = require('@openfeature/web-sdk');
-
-			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
-			const handler = vi.fn();
-			provider.events.addHandler(ProviderEvents.Ready, handler);
-			await provider.initialize();
-			expect(handler).toHaveBeenCalled();
+			await expect(provider.initialize()).resolves.toBeUndefined();
 		});
 
 		it('does not log on failure when logging is false (default)', async () => {
@@ -550,27 +537,6 @@ describe('FlagshipClientProvider', () => {
 	});
 
 	describe('lifecycle', () => {
-		it('status is NOT_READY before initialize', () => {
-			const { ProviderStatus } = require('@openfeature/web-sdk');
-			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
-			expect(provider.status).toBe(ProviderStatus.NOT_READY);
-		});
-
-		it('status is READY after initialize', async () => {
-			const { ProviderStatus } = require('@openfeature/web-sdk');
-			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
-			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.READY);
-		});
-
-		it('status resets to NOT_READY after onClose', async () => {
-			const { ProviderStatus } = require('@openfeature/web-sdk');
-			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
-			await provider.initialize();
-			await provider.onClose();
-			expect(provider.status).toBe(ProviderStatus.NOT_READY);
-		});
-
 		it('onClose clears the cache', async () => {
 			(FlagshipClient as any).mockImplementation(function () {
 				return {

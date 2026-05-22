@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"github.com/open-feature/go-sdk/openfeature"
 )
@@ -12,7 +11,6 @@ import (
 var (
 	_ openfeature.FeatureProvider          = (*ServerProvider)(nil)
 	_ openfeature.ContextAwareStateHandler = (*ServerProvider)(nil)
-	_ openfeature.EventHandler             = (*ServerProvider)(nil)
 )
 
 // FlagshipServerProvider is an alias for ServerProvider kept for parity with
@@ -26,10 +24,6 @@ type ServerProvider struct {
 
 	logging bool
 	logger  Logger
-
-	mu     sync.RWMutex
-	status openfeature.State
-	events chan openfeature.Event
 }
 
 // NewProvider constructs a Flagship OpenFeature provider.
@@ -43,8 +37,6 @@ func NewProvider(options Options) (*ServerProvider, error) {
 		hooks:   append([]openfeature.Hook(nil), options.Hooks...),
 		logging: options.Logging,
 		logger:  resolveLogger(options.Logger),
-		status:  openfeature.NotReadyState,
-		events:  make(chan openfeature.Event, 5),
 	}, nil
 }
 
@@ -68,55 +60,20 @@ func (p *ServerProvider) Init(openfeature.EvaluationContext) error {
 	return p.InitWithContext(context.Background(), openfeature.NewTargetlessEvaluationContext(nil))
 }
 
-// InitWithContext initializes the provider by probing the evaluation endpoint.
-// A 404 means the endpoint is reachable and the health-check flag is absent,
-// so it is treated as READY.
-func (p *ServerProvider) InitWithContext(ctx context.Context, _ openfeature.EvaluationContext) error {
-	_, err := p.client.EvaluateFlat(ctx, healthCheckFlag, openfeature.FlattenedContext{})
-	if err != nil {
-		if flagshipErr, ok := asFlagshipError(err); ok && flagshipErr.Code == ErrorCodeFlagNotFound {
-			p.setStatus(openfeature.ReadyState)
-			p.emit(openfeature.ProviderReady, openfeature.ProviderEventDetails{})
-			return nil
-		}
-
-		p.setStatus(openfeature.ErrorState)
-		p.emit(openfeature.ProviderError, openfeature.ProviderEventDetails{
-			Message:   err.Error(),
-			ErrorCode: providerErrorCode(err),
-		})
-		if p.logging {
-			p.logger.ErrorContext(ctx, "Flagship initialization failed", "error", err)
-		}
-		return err
-	}
-
-	p.setStatus(openfeature.ReadyState)
-	p.emit(openfeature.ProviderReady, openfeature.ProviderEventDetails{})
+// InitWithContext does not probe the evaluation endpoint. HTTP connectivity
+// and authentication errors are reported by individual flag evaluations.
+func (p *ServerProvider) InitWithContext(context.Context, openfeature.EvaluationContext) error {
 	return nil
 }
 
-// Shutdown resets provider status to NOT_READY.
+// Shutdown releases provider resources.
 func (p *ServerProvider) Shutdown() {
-	p.setStatus(openfeature.NotReadyState)
 }
 
-// ShutdownWithContext resets provider status to NOT_READY.
+// ShutdownWithContext releases provider resources.
 func (p *ServerProvider) ShutdownWithContext(context.Context) error {
 	p.Shutdown()
 	return nil
-}
-
-// Status returns the provider status.
-func (p *ServerProvider) Status() openfeature.State {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.status
-}
-
-// EventChannel returns provider lifecycle events.
-func (p *ServerProvider) EventChannel() <-chan openfeature.Event {
-	return p.events
 }
 
 // BooleanEvaluation evaluates a boolean flag.
@@ -203,24 +160,6 @@ func resolveTyped[T any](
 	}
 }
 
-func (p *ServerProvider) setStatus(status openfeature.State) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.status = status
-}
-
-func (p *ServerProvider) emit(eventType openfeature.EventType, details openfeature.ProviderEventDetails) {
-	event := openfeature.Event{
-		ProviderName:         p.Metadata().Name,
-		EventType:            eventType,
-		ProviderEventDetails: details,
-	}
-	select {
-	case p.events <- event:
-	default:
-	}
-}
-
 func mapReason(reason EvaluationReason) openfeature.Reason {
 	switch reason {
 	case ReasonTargetingMatch:
@@ -234,22 +173,6 @@ func mapReason(reason EvaluationReason) openfeature.Reason {
 	default:
 		return openfeature.Reason(reason)
 	}
-}
-
-func providerErrorCode(err error) openfeature.ErrorCode {
-	if flagshipErr, ok := asFlagshipError(err); ok {
-		switch flagshipErr.Code {
-		case ErrorCodeFlagNotFound:
-			return openfeature.FlagNotFoundCode
-		case ErrorCodeInvalidContext:
-			return openfeature.InvalidContextCode
-		case ErrorCodeParse:
-			return openfeature.ParseErrorCode
-		default:
-			return openfeature.GeneralCode
-		}
-	}
-	return openfeature.GeneralCode
 }
 
 func resolutionError(err error) openfeature.ResolutionError {
@@ -285,63 +208,29 @@ func toString(value any) (string, error) {
 }
 
 func toFloat64(value any) (float64, error) {
-	switch v := value.(type) {
-	case json.Number:
-		f, err := v.Float64()
-		if err != nil {
-			return 0, fmt.Errorf("expected number, got %s", v.String())
-		}
-		return f, nil
-	case float64:
-		return v, nil
-	case float32:
-		return float64(v), nil
-	case int:
-		return float64(v), nil
-	case int8:
-		return float64(v), nil
-	case int16:
-		return float64(v), nil
-	case int32:
-		return float64(v), nil
-	case int64:
-		return float64(v), nil
-	case uint:
-		return float64(v), nil
-	case uint8:
-		return float64(v), nil
-	case uint16:
-		return float64(v), nil
-	case uint32:
-		return float64(v), nil
-	case uint64:
-		return float64(v), nil
-	default:
+	number, ok := value.(json.Number)
+	if !ok {
 		return 0, fmt.Errorf("expected number, got %s", typeName(value))
 	}
+
+	result, err := number.Float64()
+	if err != nil {
+		return 0, fmt.Errorf("expected number, got %s", number.String())
+	}
+	return result, nil
 }
 
 func toInt64(value any) (int64, error) {
-	switch v := value.(type) {
-	case json.Number:
-		i, err := v.Int64()
-		if err != nil {
-			return 0, fmt.Errorf("expected integer, got number")
-		}
-		return i, nil
-	case int:
-		return int64(v), nil
-	case int8:
-		return int64(v), nil
-	case int16:
-		return int64(v), nil
-	case int32:
-		return int64(v), nil
-	case int64:
-		return v, nil
-	default:
+	number, ok := value.(json.Number)
+	if !ok {
 		return 0, fmt.Errorf("expected integer, got %s", typeName(value))
 	}
+
+	result, err := number.Int64()
+	if err != nil {
+		return 0, fmt.Errorf("expected integer, got number")
+	}
+	return result, nil
 }
 
 func toObject(value any) (any, error) {

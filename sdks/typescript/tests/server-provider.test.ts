@@ -727,56 +727,23 @@ describe('FlagshipServerProvider', () => {
 	});
 
 	describe('lifecycle', () => {
-		it('status is NOT_READY before initialize', () => {
-			const { ProviderStatus } = require('@openfeature/server-sdk');
-			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
-			expect(provider.status).toBe(ProviderStatus.NOT_READY);
-		});
-
-		it('status is READY after successful initialize', async () => {
-			const { ProviderStatus } = require('@openfeature/server-sdk');
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
+		it('does not make an HTTP request during initialize', async () => {
 			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
 			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.READY);
+			expect(global.fetch).not.toHaveBeenCalled();
 		});
 
-		it('status is READY after initialize when health check returns 404', async () => {
-			const { ProviderStatus } = require('@openfeature/server-sdk');
-			const mockResponse = new Response(null, { status: 404, statusText: 'Not Found' });
-			(global.fetch as any).mockResolvedValueOnce(mockResponse);
-
-			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
-			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.READY);
-		});
-
-		it('status is ERROR after initialize when endpoint unreachable', async () => {
-			const { ProviderStatus } = require('@openfeature/server-sdk');
+		it('does not fail initialize when endpoint would be unreachable', async () => {
 			(global.fetch as any).mockRejectedValueOnce(new Error('network down'));
 
 			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
-			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.ERROR);
+			await expect(provider.initialize()).resolves.toBeUndefined();
+			expect(global.fetch).not.toHaveBeenCalled();
 		});
 
-		it('status resets to NOT_READY after onClose', async () => {
-			const { ProviderStatus } = require('@openfeature/server-sdk');
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
+		it('onClose is a no-op', async () => {
 			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
-			await provider.initialize();
-			expect(provider.status).toBe(ProviderStatus.READY);
-
-			await provider.onClose();
-			expect(provider.status).toBe(ProviderStatus.NOT_READY);
+			await expect(provider.onClose()).resolves.toBeUndefined();
 		});
 	});
 

@@ -12,7 +12,10 @@ func TestContextToQueryParamsSerializesPrimitives(t *testing.T) {
 		"targetingKey": "u1",
 		"name":         "alice",
 		"age":          30,
+		"small":        int8(-8),
+		"unsigned":     uint16(16),
 		"score":        1.5,
+		"ratio":        float32(1.25),
 		"premium":      true,
 		"trial":        false,
 	})
@@ -24,7 +27,10 @@ func TestContextToQueryParamsSerializesPrimitives(t *testing.T) {
 		"targetingKey": "u1",
 		"name":         "alice",
 		"age":          "30",
+		"small":        "-8",
+		"unsigned":     "16",
 		"score":        "1.5",
+		"ratio":        "1.25",
 		"premium":      "true",
 		"trial":        "false",
 	}

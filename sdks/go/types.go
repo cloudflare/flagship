@@ -22,8 +22,6 @@ const (
 	maxRetryDelay     = 30 * time.Second
 )
 
-const healthCheckFlag = "_flagship_health_check"
-
 // HeaderFactory returns request headers for a single Flagship API request.
 // It is invoked once per attempt, so callers can use it for rotating tokens.
 type HeaderFactory func(context.Context) (http.Header, error)

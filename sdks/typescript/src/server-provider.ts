@@ -1,5 +1,5 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/server-sdk';
-import { ErrorCode, ProviderStatus, OpenFeatureEventEmitter, ProviderEvents } from '@openfeature/server-sdk';
+import { ErrorCode } from '@openfeature/server-sdk';
 import { FlagshipClient } from './client.js';
 import {
 	FlagshipError,
@@ -72,14 +72,12 @@ const HTTP_ONLY_FIELDS = [
 export class FlagshipServerProvider implements Provider {
 	readonly metadata: ProviderMetadata;
 	readonly runsOn = 'server' as const;
-	readonly events = new OpenFeatureEventEmitter();
 
 	/** Set when operating in HTTP mode; `undefined` in binding mode. */
 	private readonly client: FlagshipClient | undefined;
 	/** Set when operating in binding mode; `undefined` in HTTP mode. */
 	private readonly binding: FlagshipBinding | undefined;
 	private readonly logging: boolean;
-	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
 
 	private readonly resolve: <T>(
 		flagKey: string,
@@ -125,43 +123,16 @@ export class FlagshipServerProvider implements Provider {
 	/**
 	 * Initializes the provider.
 	 *
-	 * **HTTP mode**: probes the evaluation endpoint with a health-check request.
-	 * A 404 response is treated as success — it means the endpoint is reachable
-	 * but the health-check flag simply doesn't exist, which is expected.
-	 *
-	 * **Binding mode**: sets READY immediately — the binding is guaranteed to
-	 * be available by the Workers runtime.
+	 * The OpenFeature SDK owns provider readiness state. Flagship does not issue
+	 * an initialization probe; HTTP and binding failures are reported by the
+	 * individual flag evaluations that encounter them.
 	 */
 	async initialize(_context?: EvaluationContext): Promise<void> {
-		if (this.binding) {
-			// Binding mode: the runtime guarantees the binding is available.
-			this.currentStatus = ProviderStatus.READY;
-			this.events.emit(ProviderEvents.Ready);
-			return;
-		}
-
-		// HTTP mode: health-check probe.
-		try {
-			await this.client!.evaluate('_flagship_health_check', {});
-			this.currentStatus = ProviderStatus.READY;
-			this.events.emit(ProviderEvents.Ready);
-		} catch (error) {
-			if (error instanceof FlagshipError && error.cause instanceof Response && error.cause.status === 404) {
-				this.currentStatus = ProviderStatus.READY;
-				this.events.emit(ProviderEvents.Ready);
-				return;
-			}
-			this.currentStatus = ProviderStatus.ERROR;
-			this.events.emit(ProviderEvents.Error, { message: error instanceof Error ? error.message : String(error) });
-		}
+		return;
 	}
 
 	async onClose(): Promise<void> {
-		this.currentStatus = ProviderStatus.NOT_READY;
-	}
-
-	get status(): ProviderStatus {
-		return this.currentStatus;
+		return;
 	}
 
 	async resolveBooleanEvaluation(

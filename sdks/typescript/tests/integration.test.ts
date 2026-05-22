@@ -46,10 +46,10 @@ describe('Flagship Integration Tests', () => {
 			});
 
 			expect(value).toBe(true);
-			expect(global.fetch).toHaveBeenCalledTimes(2); // Init + evaluation
+			expect(global.fetch).toHaveBeenCalledTimes(1);
 
-			// Verify the URL contains context (second call is the actual evaluation)
-			const callArgs = (global.fetch as any).mock.calls[1];
+			// Verify the URL contains context.
+			const callArgs = (global.fetch as any).mock.calls[0];
 			const url = new URL(callArgs[0]);
 			expect(url.searchParams.get('flagKey')).toBe('feature-flag');
 			expect(url.searchParams.get('targetingKey')).toBe('user-123');
@@ -209,12 +209,8 @@ describe('Flagship Integration Tests', () => {
 		});
 
 		it('should handle multiple sequential evaluations', async () => {
-			// Mock all responses
+			// Mock evaluation responses. Initialization does not make a request.
 			(global.fetch as any)
-				.mockResolvedValueOnce({
-					ok: true,
-					json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-				})
 				.mockResolvedValueOnce({
 					ok: true,
 					json: async () => ({ flagKey: 'flag1', value: true }),
@@ -242,7 +238,7 @@ describe('Flagship Integration Tests', () => {
 
 			expect(value1).toBe(true);
 			expect(value2).toBe('variant-b');
-			expect(global.fetch).toHaveBeenCalledTimes(3); // Init + 2 evaluations
+			expect(global.fetch).toHaveBeenCalledTimes(2);
 		});
 
 		it('should work with empty context', async () => {
@@ -265,8 +261,8 @@ describe('Flagship Integration Tests', () => {
 
 			expect(value).toBe(true);
 
-			// Verify URL only has flagKey (second call is the actual evaluation)
-			const callArgs = (global.fetch as any).mock.calls[1];
+			// Verify URL only has flagKey.
+			const callArgs = (global.fetch as any).mock.calls[0];
 			const url = new URL(callArgs[0]);
 			expect(url.searchParams.get('flagKey')).toBe('default-feature');
 			expect(url.searchParams.get('targetingKey')).toBeNull();

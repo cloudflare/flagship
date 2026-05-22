@@ -2,6 +2,7 @@ package flagship
 
 import (
 	"net/url"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -30,32 +31,15 @@ func serializeContextValue(value any) (string, bool) {
 		return v, true
 	case bool:
 		return strconv.FormatBool(v), true
-	case int:
-		return strconv.FormatInt(int64(v), 10), true
-	case int8:
-		return strconv.FormatInt(int64(v), 10), true
-	case int16:
-		return strconv.FormatInt(int64(v), 10), true
-	case int32:
-		return strconv.FormatInt(int64(v), 10), true
-	case int64:
-		return strconv.FormatInt(v, 10), true
-	case uint:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint8:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint16:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint32:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint64:
-		return strconv.FormatUint(v, 10), true
-	case float32:
-		return strconv.FormatFloat(float64(v), 'f', -1, 32), true
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64), true
 	case time.Time:
 		return v.Format(time.RFC3339Nano), true
+	case int, int8, int16, int32, int64:
+		return strconv.FormatInt(reflect.ValueOf(v).Int(), 10), true
+	case uint, uint8, uint16, uint32, uint64:
+		return strconv.FormatUint(reflect.ValueOf(v).Uint(), 10), true
+	case float32, float64:
+		value := reflect.ValueOf(v)
+		return strconv.FormatFloat(value.Float(), 'f', -1, int(value.Type().Bits())), true
 	default:
 		return "", false
 	}

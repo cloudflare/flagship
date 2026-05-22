@@ -10,7 +10,6 @@ from openfeature.exception import (
     TypeMismatchError,
 )
 from openfeature.flag_evaluation import Reason
-from openfeature.provider import ProviderStatus
 
 from flagship import FlagshipServerProvider
 
@@ -28,32 +27,20 @@ def _resp(value: object, *, reason: str = "TARGETING_MATCH", variant: str = "on"
 
 
 @respx.mock
-def test_initialize_succeeds_on_200(provider: FlagshipServerProvider) -> None:
-    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=_resp(True))
+def test_initialize_does_not_make_http_request(provider: FlagshipServerProvider) -> None:
     provider.initialize(EvaluationContext())
-    assert provider.status == ProviderStatus.READY
+    assert not respx.calls
 
 
 @respx.mock
-def test_initialize_treats_404_as_ready(provider: FlagshipServerProvider) -> None:
-    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=httpx.Response(404))
-    provider.initialize(EvaluationContext())
-    assert provider.status == ProviderStatus.READY
-
-
-@respx.mock
-def test_initialize_failure_sets_error_status(
-    provider: FlagshipServerProvider,
-) -> None:
+def test_initialize_ignores_unreachable_endpoint(provider: FlagshipServerProvider) -> None:
     respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=httpx.Response(500))
     provider.initialize(EvaluationContext())
-    assert provider.status == ProviderStatus.ERROR
+    assert not respx.calls
 
 
-def test_shutdown_resets_status(provider: FlagshipServerProvider) -> None:
-    provider._status = ProviderStatus.READY  # type: ignore[attr-defined]
+def test_shutdown_closes_client(provider: FlagshipServerProvider) -> None:
     provider.shutdown()
-    assert provider.status == ProviderStatus.NOT_READY
 
 
 def test_metadata_name(provider: FlagshipServerProvider) -> None:

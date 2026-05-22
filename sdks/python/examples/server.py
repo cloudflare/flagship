@@ -8,7 +8,7 @@ such as Django, Flask, or any synchronous server environment.
 from openfeature import api
 from openfeature.evaluation_context import EvaluationContext
 
-from flagship import FlagshipServerProvider, LoggingHook
+from flagship import FlagshipServerProvider
 
 FLAGSHIP_APP_ID = "your-app-id"
 FLAGSHIP_ACCOUNT_ID = "your-account-id"
@@ -27,10 +27,7 @@ def main() -> None:
         )
     )
 
-    # 2. Add hooks for logging (optional)
-    api.add_hooks([LoggingHook()])
-
-    # 3. Get a client and evaluate flags with context
+    # 2. Get a client and evaluate flags with context
     client = api.get_client()
 
     context = EvaluationContext(
@@ -63,7 +60,7 @@ def main() -> None:
     theme_config = client.get_object_value("theme-config", {"primary_color": "#000000", "font_size": 14}, context)
     print("Theme config:", theme_config)
 
-    # 4. Detailed evaluation — reason reflects how the flag resolved
+    # 3. Detailed evaluation — reason reflects how the flag resolved
     # ('TARGETING_MATCH', 'DEFAULT', 'DISABLED', 'SPLIT')
     details = client.get_boolean_details("premium-features", False, context)
     print("Premium features details:")
@@ -71,15 +68,15 @@ def main() -> None:
     print("  reason: ", details.reason)  # why this value was served
     print("  variant:", details.variant)  # which variation key was matched
 
-    # 5. Non-existent flags return the default value — no exceptions raised
+    # 4. Non-existent flags return the default value — no exceptions raised
     unknown = client.get_boolean_value("non-existent-flag", False, context)
     print("Unknown flag (returns default):", unknown)
 
-    # 6. Evaluate without context — rules that don't require targeting still apply
+    # 5. Evaluate without context — rules that don't require targeting still apply
     beta_access = client.get_boolean_value("beta-access", False)
     print("Beta access:", beta_access)
 
-    # 7. Shut down cleanly
+    # 6. Shut down cleanly
     api.shutdown()
 
 

@@ -19,16 +19,6 @@ describe('Hooks', () => {
 			const logMessages: any[] = [];
 			const logger = vi.fn((...args: any[]) => logMessages.push(args));
 
-			// First mock for initialization health check
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({
-					flagKey: '_flagship_health_check',
-					value: true,
-				}),
-			});
-
-			// Second mock for actual flag evaluation
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({
@@ -64,13 +54,6 @@ describe('Hooks', () => {
 			const logMessages: any[] = [];
 			const logger = vi.fn((...args: any[]) => logMessages.push(args));
 
-			// First mock for initialization
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
-			// Second mock for actual flag evaluation (error)
 			(global.fetch as any).mockRejectedValueOnce(new Error('Network error'));
 
 			await OpenFeature.setProviderAndWait(
@@ -98,13 +81,6 @@ describe('Hooks', () => {
 		it('should use default console.log if no logger provided', async () => {
 			const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
-			// First mock for initialization
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
-			// Second mock for actual flag evaluation
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({
@@ -135,13 +111,6 @@ describe('Hooks', () => {
 			const events: TelemetryEvent[] = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
-			// First mock for initialization
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
-			// Second mock for actual flag evaluation
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({
@@ -182,13 +151,6 @@ describe('Hooks', () => {
 			const events: TelemetryEvent[] = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
-			// First mock for initialization
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
-			// Second mock for actual flag evaluation (error)
 			(global.fetch as any).mockRejectedValueOnce(new Error('Network error'));
 
 			await OpenFeature.setProviderAndWait(
@@ -217,13 +179,6 @@ describe('Hooks', () => {
 			const events: TelemetryEvent[] = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
-			// First mock for initialization
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
-			// Mock two successful evaluations
 			(global.fetch as any)
 				.mockResolvedValueOnce({
 					ok: true,
@@ -255,13 +210,6 @@ describe('Hooks', () => {
 			const events: TelemetryEvent[] = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
-			// First mock for initialization
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
-			// Second mock for actual evaluation
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({ flagKey: 'test-flag', value: true }),
@@ -296,13 +244,6 @@ describe('Hooks', () => {
 			const events: TelemetryEvent[] = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
-			// First mock for initialization
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
-			// Second mock for actual evaluation
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({ flagKey: 'test-flag', value: true }),

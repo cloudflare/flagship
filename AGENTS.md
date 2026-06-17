@@ -73,7 +73,7 @@ Python SDK (run from `sdks/python/`):
 | `uv sync --group dev`          | Install Python dev deps    |
 | `uv run ruff format --check .` | Check Python formatting    |
 | `uv run ruff check .`          | Run Python linting         |
-| `uv run --group dev mypy`      | Run Python type checking   |
+| `uv run --group dev ty check`  | Run Python type checking   |
 | `uv run --group dev pytest`    | Run Python tests           |
 | `uv build`                     | Build Python wheel + sdist |
 
@@ -131,7 +131,7 @@ Python files under `sdks/python/**` are excluded from oxfmt and formatted with R
 ### Python
 
 - Package metadata and build backend live in `sdks/python/pyproject.toml`.
-- Python source is typed (`py.typed`) and checked with mypy in strict mode.
+- Python source is typed (`py.typed`) and checked with ty.
 - Python requires `>=3.10`.
 
 ## Testing
@@ -211,7 +211,7 @@ Publishing is split across two workflows; `pull-request.yml` is the source of tr
 **Always:**
 
 - Run `pnpm run check` before considering work done
-- For Python SDK changes, also run `uv run ruff format --check .`, `uv run ruff check .`, `uv run --group dev mypy`, and `uv run --group dev pytest` from `sdks/python/`
+- For Python SDK changes, also run `uv run ruff format --check .`, `uv run ruff check .`, `uv run --group dev ty check`, and `uv run --group dev pytest` from `sdks/python/`
 - Keep OpenFeature peer dependencies optional
 - Use `import type` for type-only imports
 

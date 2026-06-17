@@ -185,7 +185,7 @@ Initialization does not perform network I/O. Flag evaluation requests happen onl
 ```sh
 uv sync --group dev        # install dependencies
 uv run pytest              # run tests
-uv run mypy src            # type check
+uv run ty check            # type check
 uv build                   # build wheel and sdist
 ```
 

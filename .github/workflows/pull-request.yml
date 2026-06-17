@@ -155,7 +155,7 @@ jobs:
       - working-directory: sdks/python
         run: uv sync --group dev --locked
       - working-directory: sdks/python
-        run: uv run mypy
+        run: uv run ty check
 
   python-test:
     name: Python / Test

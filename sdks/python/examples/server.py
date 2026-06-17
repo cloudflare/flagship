@@ -24,6 +24,7 @@ def main() -> None:
             timeout=5.0,
             retries=1,
             logging=True,
+            cache_ttl=30.0,  # cache evaluations per context for 30s (off by default)
         )
     )
 

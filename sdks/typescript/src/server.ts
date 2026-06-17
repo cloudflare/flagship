@@ -50,6 +50,7 @@ export type {
 	FlagshipBindingEvaluationDetails,
 	FlagshipBindingProviderOptions,
 	FlagshipServerProviderOptions,
+	FlagshipCacheOptions,
 } from './index.js';
 
 // Export server provider

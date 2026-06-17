@@ -120,6 +120,10 @@ new FlagshipServerProvider({
 
   // Logging — controls logs emitted by the Flagship SDK itself (default: false)
   logging: false,
+
+  // Caching — opt-in, off by default. See "Caching" below.
+  cacheTtl: 30000, // ms; enables the cache when > 0
+  cacheMaxSize: 1000, // max cached entries (default: 1000)
 });
 ```
 
@@ -151,10 +155,41 @@ new FlagshipServerProvider({
   timeout: 5000, // request timeout in ms (default: 5000)
   retries: 1, // retry attempts on transient errors (default: 1, max: 10)
   retryDelay: 1000, // delay between retries in ms (default: 1000, max: 30000)
+
+  // Caching — opt-in, off by default. See "Caching" below.
+  cacheTtl: 30000, // ms; enables the cache when > 0
+  cacheMaxSize: 1000, // max cached entries (default: 1000)
 });
 ```
 
 404 and 400 responses are never retried. Only transient server errors (5xx) and network failures trigger the retry logic.
+
+### Caching
+
+The server provider can cache evaluations in both HTTP and binding modes. Caching is **off by default** and enabled by setting `cacheTtl` to a positive number of milliseconds.
+
+```typescript
+new FlagshipServerProvider({
+  appId: 'your-app-id',
+  accountId: 'your-account-id',
+  cacheTtl: 30000,
+  cacheMaxSize: 1000,
+});
+```
+
+| Option         | Type     | Default | Description                                                       |
+| -------------- | -------- | ------- | ----------------------------------------------------------------- |
+| `cacheTtl`     | `number` | —       | Time-to-live per entry in ms. Enables caching when `> 0`.         |
+| `cacheMaxSize` | `number` | `1000`  | Maximum cached entries; the least-recently-used entry is evicted. |
+
+| Situation                                     | `reason`                           | Cached?           |
+| --------------------------------------------- | ---------------------------------- | ----------------- |
+| Successful evaluation served from API/binding | original (`TARGETING_MATCH`, etc.) | yes               |
+| Same flag + context within the TTL            | `CACHED`                           | served from cache |
+| Disabled flag                                 | `DISABLED`                         | no                |
+| Any error (not found, timeout, etc.)          | `ERROR`                            | no                |
+
+Each entry is keyed by flag key, expected type, and the **full evaluation context**, so distinct contexts never share a cached value. Because freshness is TTL-based, a flag change in Flagship takes effect once the entry expires (up to `cacheTtl` later). The cache is per-provider-instance and is cleared on `onClose()`.
 
 ### Cloudflare Workers example (binding)
 
@@ -420,7 +455,7 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 - `FlagshipErrorCode` — enum: `NETWORK_ERROR`, `TIMEOUT_ERROR`, `PARSE_ERROR`, `INVALID_CONTEXT`
 - `isBindingOptions()` — type guard for binding options
 - `FLAGSHIP_DEFAULT_BASE_URL` — default base URL constant
-- Types: `FlagshipProviderOptions`, `FlagshipClientProviderOptions`, `FlagshipEvaluationResponse`, `CachedFlag`, `FlagshipBinding`, `FlagshipBindingEvaluationDetails`, `FlagshipBindingProviderOptions`, `FlagshipServerProviderOptions`
+- Types: `FlagshipProviderOptions`, `FlagshipClientProviderOptions`, `FlagshipEvaluationResponse`, `CachedFlag`, `FlagshipBinding`, `FlagshipBindingEvaluationDetails`, `FlagshipBindingProviderOptions`, `FlagshipServerProviderOptions`, `FlagshipCacheOptions`
 
 **`@cloudflare/flagship/server`** (core value exports + server-relevant types, plus):
 
@@ -438,6 +473,7 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 ```
 @cloudflare/flagship/server
   FlagshipServerProvider             — OpenFeature Provider interface (server)
+    ├─ TTL + LRU cache (opt-in)      — keyed by flag key, type, and context
     ├─ Binding mode (Workers)        — delegates to env.FLAGS via RPC
     │   EvaluationContext → Record<string, string|number|boolean>
     └─ HTTP mode (Node.js, etc.)     — delegates to FlagshipClient

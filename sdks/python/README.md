@@ -93,6 +93,10 @@ FlagshipServerProvider(
     retries=1,        # retry attempts on transient errors, capped at 10 (default: 1)
     retry_delay=1.0,  # seconds between retries, capped at 30.0 (default: 1.0)
     logging=False,    # set True to enable SDK debug output (default: False)
+
+    # Response caching — opt-in, off by default (see "Caching")
+    # cache_ttl=30.0,      # seconds; enables caching when set
+    # cache_max_size=1000, # max cached entries, LRU-evicted (default: 1000)
 )
 ```
 
@@ -108,6 +112,25 @@ FlagshipServerProvider(
 | `retries`         | `int`                          | `1`                          | Retry attempts on transient errors; capped at `10`       |
 | `retry_delay`     | `float`                        | `1.0`                        | Delay between retries in seconds; capped at `30.0`       |
 | `logging`         | `bool`                         | `False`                      | Enable SDK-level debug output via the `flagship` logger  |
+| `cache_ttl`       | `float`                        | —                            | Cache TTL in seconds; enables caching when set           |
+| `cache_max_size`  | `int`                          | `1000`                       | Maximum cached entries; least-recently-used is evicted   |
+
+## Caching
+
+The provider can cache evaluations to avoid a network round-trip for repeated flag/context pairs. Caching is **off by default** and enabled by setting `cache_ttl` (seconds):
+
+```python
+FlagshipServerProvider(
+    app_id="your-app-id",
+    account_id="your-account-id",
+    cache_ttl=30.0,        # cached values may be up to 30s stale
+    cache_max_size=1000,   # LRU eviction beyond this many entries
+)
+```
+
+Each entry is keyed by flag key, type, and the **full evaluation context**, so distinct contexts never share a value. Cache hits resolve with `reason == Reason.CACHED`. Disabled flags and errors are never cached. Because freshness is TTL-based, a flag change in Flagship takes effect after the entry expires.
+
+The cache is shared by the sync and async APIs and guarded by a lock for thread-safe sync use.
 
 ## Evaluation context
 

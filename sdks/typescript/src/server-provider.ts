@@ -1,5 +1,6 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/server-sdk';
 import { ErrorCode, OpenFeatureEventEmitter } from '@openfeature/server-sdk';
+import { LRUCache } from 'lru-cache';
 import { FlagshipClient } from './client.js';
 import {
 	FlagshipError,
@@ -9,6 +10,9 @@ import {
 	type FlagshipBindingEvaluationDetails,
 	type FlagshipServerProviderOptions,
 } from './types.js';
+
+const DEFAULT_CACHE_MAX_SIZE = 1000;
+type ExpectedType = 'boolean' | 'string' | 'number' | 'object';
 
 // Shared no-op used to build a silent logger when logging is false.
 const _noop = (): void => {};
@@ -80,17 +84,24 @@ export class FlagshipServerProvider implements Provider {
 	private readonly binding: FlagshipBinding | undefined;
 	private readonly logging: boolean;
 
+	/** TTL + LRU response cache; `undefined` when caching is disabled. */
+	private readonly cache: LRUCache<string, ResolutionDetails<unknown>> | undefined;
+
 	private readonly resolve: <T>(
 		flagKey: string,
 		defaultValue: T,
 		context: EvaluationContext,
-		expectedType: 'boolean' | 'string' | 'number' | 'object',
+		expectedType: ExpectedType,
 		logger: Logger,
 	) => Promise<ResolutionDetails<T>>;
 
 	constructor(options: FlagshipServerProviderOptions) {
 		this.metadata = { name: 'Flagship Server Provider' };
 		this.logging = options.logging ?? false;
+
+		if (options.cacheTtl !== undefined && options.cacheTtl > 0) {
+			this.cache = new LRUCache({ max: options.cacheMaxSize ?? DEFAULT_CACHE_MAX_SIZE, ttl: options.cacheTtl });
+		}
 
 		if (isBindingOptions(options)) {
 			// Validate that no HTTP-specific fields are present alongside `binding`.
@@ -121,13 +132,17 @@ export class FlagshipServerProvider implements Provider {
 		return { debug: _noop, info: _noop, warn: _noop, error: _noop };
 	}
 
+	async onClose(): Promise<void> {
+		this.cache?.clear();
+	}
+
 	async resolveBooleanEvaluation(
 		flagKey: string,
 		defaultValue: boolean,
 		context: EvaluationContext,
 		logger: Logger,
 	): Promise<ResolutionDetails<boolean>> {
-		return this.resolve(flagKey, defaultValue, context, 'boolean', logger);
+		return this.resolveCached(flagKey, defaultValue, context, 'boolean', logger);
 	}
 
 	async resolveStringEvaluation(
@@ -136,7 +151,7 @@ export class FlagshipServerProvider implements Provider {
 		context: EvaluationContext,
 		logger: Logger,
 	): Promise<ResolutionDetails<string>> {
-		return this.resolve(flagKey, defaultValue, context, 'string', logger);
+		return this.resolveCached(flagKey, defaultValue, context, 'string', logger);
 	}
 
 	async resolveNumberEvaluation(
@@ -145,7 +160,7 @@ export class FlagshipServerProvider implements Provider {
 		context: EvaluationContext,
 		logger: Logger,
 	): Promise<ResolutionDetails<number>> {
-		return this.resolve(flagKey, defaultValue, context, 'number', logger);
+		return this.resolveCached(flagKey, defaultValue, context, 'number', logger);
 	}
 
 	async resolveObjectEvaluation<T extends JsonValue>(
@@ -154,7 +169,35 @@ export class FlagshipServerProvider implements Provider {
 		context: EvaluationContext,
 		logger: Logger,
 	): Promise<ResolutionDetails<T>> {
-		return this.resolve(flagKey, defaultValue, context, 'object', logger);
+		return this.resolveCached(flagKey, defaultValue, context, 'object', logger);
+	}
+
+	// ---------------------------------------------------------------------------
+	// Caching
+	// ---------------------------------------------------------------------------
+
+	private async resolveCached<T>(
+		flagKey: string,
+		defaultValue: T,
+		context: EvaluationContext,
+		expectedType: ExpectedType,
+		logger: Logger,
+	): Promise<ResolutionDetails<T>> {
+		if (!this.cache) {
+			return this.resolve(flagKey, defaultValue, context, expectedType, logger);
+		}
+
+		const key = buildCacheKey(flagKey, expectedType, context);
+		const cached = this.cache.get(key) as ResolutionDetails<T> | undefined;
+		if (cached) {
+			return { ...cached, reason: 'CACHED' };
+		}
+
+		const result = await this.resolve(flagKey, defaultValue, context, expectedType, logger);
+		if (isCacheable(result)) {
+			this.cache.set(key, result as ResolutionDetails<unknown>);
+		}
+		return result;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -165,7 +208,7 @@ export class FlagshipServerProvider implements Provider {
 		flagKey: string,
 		defaultValue: T,
 		context: EvaluationContext,
-		expectedType: 'boolean' | 'string' | 'number' | 'object',
+		expectedType: ExpectedType,
 		logger: Logger,
 	): Promise<ResolutionDetails<T>> {
 		const log = this.logger(logger);
@@ -236,7 +279,7 @@ export class FlagshipServerProvider implements Provider {
 		flagKey: string,
 		defaultValue: T,
 		context: EvaluationContext,
-		expectedType: 'boolean' | 'string' | 'number' | 'object',
+		expectedType: ExpectedType,
 		logger: Logger,
 	): Promise<ResolutionDetails<T>> {
 		const log = this.logger(logger);
@@ -290,7 +333,7 @@ export class FlagshipServerProvider implements Provider {
 	private async evaluateBinding<T>(
 		flagKey: string,
 		defaultValue: T,
-		expectedType: 'boolean' | 'string' | 'number' | 'object',
+		expectedType: ExpectedType,
 		context: Record<string, string | number | boolean>,
 	): Promise<FlagshipBindingEvaluationDetails<T>> {
 		const binding = this.binding!;
@@ -325,11 +368,31 @@ export class FlagshipServerProvider implements Provider {
  * `null` maps to `'object'` (typeof null === 'object'), treating it as a
  * JSON null which belongs to the object/structure category.
  */
-function getValueType(value: unknown): 'boolean' | 'string' | 'number' | 'object' {
+function getValueType(value: unknown): ExpectedType {
 	if (typeof value === 'boolean') return 'boolean';
 	if (typeof value === 'string') return 'string';
 	if (typeof value === 'number') return 'number';
 	return 'object';
+}
+
+/** A resolution is cacheable only when it succeeded and isn't a disabled flag. */
+function isCacheable(details: ResolutionDetails<unknown>): boolean {
+	return details.errorCode === undefined && details.reason !== 'DISABLED';
+}
+
+/** Stable cache key over flag key, expected type, and the evaluation context. */
+function buildCacheKey(flagKey: string, expectedType: ExpectedType, context: EvaluationContext): string {
+	const entries = Object.entries(context)
+		.filter(([, value]) => value !== undefined && value !== null)
+		.map(([key, value]): [string, string] => [key, serializeContextValue(value)])
+		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+	return JSON.stringify([flagKey, expectedType, entries]);
+}
+
+function serializeContextValue(value: unknown): string {
+	if (value instanceof Date) return value.toISOString();
+	if (typeof value === 'object') return JSON.stringify(value);
+	return String(value);
 }
 
 /**

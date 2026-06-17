@@ -25,6 +25,7 @@ async def main() -> None:
             auth_token="your-token",
             timeout=5.0,
             retries=1,
+            cache_ttl=30.0,  # cache evaluations per context for 30s (off by default)
         )
     )
 

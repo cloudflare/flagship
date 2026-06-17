@@ -1,7 +1,10 @@
 import logging
-from collections.abc import Callable, Mapping, Sequence
+import threading
+from collections.abc import Callable, Hashable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
+from cachetools import TTLCache
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.exception import (
     GeneralError,
@@ -17,6 +20,7 @@ from openfeature.hook import Hook
 from openfeature.provider import AbstractProvider, Metadata
 
 from .client import FLAGSHIP_DEFAULT_BASE_URL, FlagshipClient
+from .context import context_to_query_params
 
 __all__ = ["FlagshipServerProvider"]
 
@@ -47,6 +51,10 @@ class FlagshipServerProvider(AbstractProvider):
 
     Set ``logging=True`` to enable SDK-level debug output. When ``False``
     (the default) the SDK produces no log output of its own.
+
+    Set ``cache_ttl`` (seconds) to enable an opt-in TTL + LRU response cache,
+    keyed by flag key, type, and evaluation context. Caching is disabled by
+    default; cached values may be up to ``cache_ttl`` stale.
     """
 
     def __init__(
@@ -62,6 +70,8 @@ class FlagshipServerProvider(AbstractProvider):
         retries: int = 1,
         retry_delay: float = 1.0,
         logging: bool = False,
+        cache_ttl: float | None = None,
+        cache_max_size: int = 1000,
     ) -> None:
         self._client = FlagshipClient(
             app_id=app_id,
@@ -75,6 +85,10 @@ class FlagshipServerProvider(AbstractProvider):
             retry_delay=retry_delay,
         )
         self._logging = logging
+        self._cache: TTLCache[Hashable, FlagResolutionDetails[Any]] | None = (
+            TTLCache(maxsize=cache_max_size, ttl=cache_ttl) if cache_ttl is not None and cache_ttl > 0 else None
+        )
+        self._cache_lock = threading.Lock()
 
     def get_metadata(self) -> Metadata:
         return Metadata(name="Flagship Server Provider")
@@ -83,9 +97,11 @@ class FlagshipServerProvider(AbstractProvider):
         return []
 
     def shutdown(self) -> None:
+        self._clear_cache()
         self._client.close()
 
     async def shutdown_async(self) -> None:
+        self._clear_cache()
         await self._client.aclose()
 
     def resolve_boolean_details(
@@ -176,6 +192,11 @@ class FlagshipServerProvider(AbstractProvider):
         evaluation_context: EvaluationContext | None,
     ) -> FlagResolutionDetails[Any]:
         self._log_debug("[Flagship] Evaluating flag %r", flag_key)
+        key = self._cache_key(flag_type, flag_key, evaluation_context)
+        if key is not None:
+            cached = self._cache_get(key)
+            if cached is not None:
+                return cached
         result = self._client.evaluate(flag_key, evaluation_context)
         details = _build_details(flag_type, default_value, result)
         self._log_debug(
@@ -185,6 +206,8 @@ class FlagshipServerProvider(AbstractProvider):
             details.reason,
             details.variant,
         )
+        if key is not None and result.reason != "DISABLED":
+            self._cache_store(key, details)
         return details
 
     async def _resolve_async(
@@ -195,6 +218,11 @@ class FlagshipServerProvider(AbstractProvider):
         evaluation_context: EvaluationContext | None,
     ) -> FlagResolutionDetails[Any]:
         self._log_debug("[Flagship] Evaluating flag %r", flag_key)
+        key = self._cache_key(flag_type, flag_key, evaluation_context)
+        if key is not None:
+            cached = self._cache_get(key)
+            if cached is not None:
+                return cached
         result = await self._client.evaluate_async(flag_key, evaluation_context)
         details = _build_details(flag_type, default_value, result)
         self._log_debug(
@@ -204,7 +232,38 @@ class FlagshipServerProvider(AbstractProvider):
             details.reason,
             details.variant,
         )
+        if key is not None and result.reason != "DISABLED":
+            self._cache_store(key, details)
         return details
+
+    def _cache_key(
+        self,
+        flag_type: FlagType,
+        flag_key: str,
+        evaluation_context: EvaluationContext | None,
+    ) -> Hashable | None:
+        if self._cache is None:
+            return None
+        params = context_to_query_params(evaluation_context)
+        return (flag_key, flag_type, frozenset(params.items()))
+
+    def _cache_get(self, key: Hashable) -> FlagResolutionDetails[Any] | None:
+        assert self._cache is not None
+        with self._cache_lock:
+            cached = self._cache.get(key)
+        if cached is None:
+            return None
+        return replace(cached, reason=Reason.CACHED)
+
+    def _cache_store(self, key: Hashable, details: FlagResolutionDetails[Any]) -> None:
+        assert self._cache is not None
+        with self._cache_lock:
+            self._cache[key] = details
+
+    def _clear_cache(self) -> None:
+        if self._cache is not None:
+            with self._cache_lock:
+                self._cache.clear()
 
     def _log_debug(self, msg: str, *args: Any) -> None:
         if self._logging:

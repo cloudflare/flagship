@@ -203,13 +203,37 @@ export interface FlagshipBindingProviderOptions {
 }
 
 /**
+ * Opt-in server-side response cache options. Caching is disabled unless
+ * `cacheTtl` is set to a positive value. A cache entry is keyed by flag key,
+ * expected type, and the full evaluation context, so distinct contexts never
+ * share a cached value. Eviction is TTL-based with an LRU bound on size.
+ */
+export interface FlagshipCacheOptions {
+	/**
+	 * Time-to-live for cached evaluations, in milliseconds. Enables caching when
+	 * greater than `0`. Cached values may be up to this stale before a fresh
+	 * evaluation is performed.
+	 * @default undefined (caching disabled)
+	 */
+	cacheTtl?: number;
+
+	/**
+	 * Maximum number of cached entries. The least-recently-used entry is evicted
+	 * once the limit is exceeded. Only used when `cacheTtl` is set.
+	 * @default 1000
+	 */
+	cacheMaxSize?: number;
+}
+
+/**
  * Options accepted by `FlagshipServerProvider`.
  *
  * Provide **either** HTTP configuration (`appId`/`endpoint` + credentials) **or**
  * a wrangler `binding` — never both. The provider detects which mode to use
- * based on the presence of the `binding` field.
+ * based on the presence of the `binding` field. Caching options apply to both
+ * modes.
  */
-export type FlagshipServerProviderOptions = FlagshipProviderOptions | FlagshipBindingProviderOptions;
+export type FlagshipServerProviderOptions = (FlagshipProviderOptions | FlagshipBindingProviderOptions) & FlagshipCacheOptions;
 
 /**
  * Type guard: returns `true` when the options use binding mode.

@@ -19,6 +19,7 @@ async function main() {
 			accountId: FLAGSHIP_ACCOUNT_ID,
 			timeout: 5000,
 			retries: 1,
+			cacheTtl: 30_000, // cache evaluations per context for 30s (off by default)
 		}),
 	);
 

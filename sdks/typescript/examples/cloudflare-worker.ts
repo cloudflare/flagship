@@ -19,6 +19,7 @@ async function initializeOpenFeature() {
 			new FlagshipServerProvider({
 				appId: FLAGSHIP_APP_ID,
 				accountId: FLAGSHIP_ACCOUNT_ID,
+				cacheTtl: 30_000, // reuse evaluations per context across requests in a warm isolate
 			}),
 		);
 		isInitialized = true;

@@ -3,9 +3,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from openfeature.evaluation_context import EvaluationContext
-from openfeature.event import ProviderEventDetails
 from openfeature.exception import (
-    FlagNotFoundError,
     GeneralError,
     TypeMismatchError,
 )
@@ -16,15 +14,13 @@ from openfeature.flag_evaluation import (
     Reason,
 )
 from openfeature.hook import Hook
-from openfeature.provider import AbstractProvider, Metadata, ProviderStatus
+from openfeature.provider import AbstractProvider, Metadata
 
 from .client import FLAGSHIP_DEFAULT_BASE_URL, FlagshipClient
 
 __all__ = ["FlagshipServerProvider"]
 
 _logger = logging.getLogger("flagship")
-
-_HEALTH_CHECK_FLAG = "_flagship_health_check"
 
 _TYPE_MAP: dict[FlagType, type | tuple[type, ...]] = {
     FlagType.BOOLEAN: bool,
@@ -79,7 +75,6 @@ class FlagshipServerProvider(AbstractProvider):
             retry_delay=retry_delay,
         )
         self._logging = logging
-        self._status: ProviderStatus = ProviderStatus.NOT_READY
 
     def get_metadata(self) -> Metadata:
         return Metadata(name="Flagship Server Provider")
@@ -87,34 +82,10 @@ class FlagshipServerProvider(AbstractProvider):
     def get_provider_hooks(self) -> list[Hook]:
         return []
 
-    @property
-    def status(self) -> ProviderStatus:
-        return self._status
-
-    def initialize(self, evaluation_context: EvaluationContext) -> None:
-        """Probe the evaluation endpoint.
-
-        A 404 response is treated as success — it means the endpoint is reachable
-        but the health-check flag simply doesn't exist, which is expected.
-        """
-        try:
-            self._client.evaluate(_HEALTH_CHECK_FLAG, EvaluationContext())
-        except FlagNotFoundError:
-            pass
-        except Exception as e:
-            self._status = ProviderStatus.ERROR
-            self._log_error("Flagship initialization failed: %s", e)
-            self.emit_provider_error(ProviderEventDetails(message=str(e)))
-            return
-        self._status = ProviderStatus.READY
-        self.emit_provider_ready(ProviderEventDetails())
-
     def shutdown(self) -> None:
-        self._status = ProviderStatus.NOT_READY
         self._client.close()
 
     async def shutdown_async(self) -> None:
-        self._status = ProviderStatus.NOT_READY
         await self._client.aclose()
 
     def resolve_boolean_details(

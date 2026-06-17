@@ -176,10 +176,9 @@ api.add_hooks([TelemetryHook(lambda event: analytics.track("flag_evaluated", eve
 from openfeature.event import ProviderEvent
 
 api.add_handler(ProviderEvent.PROVIDER_READY, lambda _: print("ready"))
-api.add_handler(ProviderEvent.PROVIDER_ERROR, lambda d: print("error:", d.message))
 ```
 
-During initialisation the provider probes the endpoint with a health-check request. A 404 is treated as success. Any other error transitions the provider to `ERROR` status and emits `PROVIDER_ERROR`.
+Initialization does not perform network I/O. Flag evaluation requests happen only when resolving flags.
 
 ## Development
 

@@ -1,6 +1,7 @@
 import httpx
 import pytest
 import respx
+from openfeature import api
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.exception import (
     FlagNotFoundError,
@@ -28,32 +29,15 @@ def _resp(value: object, *, reason: str = "TARGETING_MATCH", variant: str = "on"
 
 
 @respx.mock
-def test_initialize_succeeds_on_200(provider: FlagshipServerProvider) -> None:
-    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=_resp(True))
-    provider.initialize(EvaluationContext())
-    assert provider.status == ProviderStatus.READY
+def test_set_provider_does_not_request_endpoint(provider: FlagshipServerProvider) -> None:
+    api.set_provider(provider)
+    assert len(respx.calls) == 0
+    assert api.get_client().get_provider_status() == ProviderStatus.READY
+    api.clear_providers()
 
 
-@respx.mock
-def test_initialize_treats_404_as_ready(provider: FlagshipServerProvider) -> None:
-    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=httpx.Response(404))
-    provider.initialize(EvaluationContext())
-    assert provider.status == ProviderStatus.READY
-
-
-@respx.mock
-def test_initialize_failure_sets_error_status(
-    provider: FlagshipServerProvider,
-) -> None:
-    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=httpx.Response(500))
-    provider.initialize(EvaluationContext())
-    assert provider.status == ProviderStatus.ERROR
-
-
-def test_shutdown_resets_status(provider: FlagshipServerProvider) -> None:
-    provider._status = ProviderStatus.READY  # type: ignore[attr-defined]
+def test_shutdown_closes_client(provider: FlagshipServerProvider) -> None:
     provider.shutdown()
-    assert provider.status == ProviderStatus.NOT_READY
 
 
 def test_metadata_name(provider: FlagshipServerProvider) -> None:

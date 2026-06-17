@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { OpenFeature, ProviderEvents, ProviderStatus } from '@openfeature/server-sdk';
+import { OpenFeature, ProviderEvents } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 
 // Mock fetch globally
@@ -8,6 +8,7 @@ global.fetch = vi.fn();
 describe('Provider Events', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		OpenFeature.clearHandlers();
 		OpenFeature.clearProviders();
 	});
 
@@ -15,59 +16,16 @@ describe('Provider Events', () => {
 		it('should emit READY event on successful initialization', async () => {
 			const readyHandler = vi.fn();
 
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
 			const provider = new FlagshipServerProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
 
-			provider.events.addHandler(ProviderEvents.Ready, readyHandler);
+			OpenFeature.addHandler(ProviderEvents.Ready, readyHandler);
 
 			await OpenFeature.setProviderAndWait(provider);
 
 			expect(readyHandler).toHaveBeenCalled();
-		});
-
-		it('should emit ERROR event on network failure during initialization', async () => {
-			const errorHandler = vi.fn();
-
-			(global.fetch as any).mockRejectedValueOnce(new Error('Network error'));
-
-			const provider = new FlagshipServerProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				retries: 0,
-			});
-
-			provider.events.addHandler(ProviderEvents.Error, errorHandler);
-
-			await OpenFeature.setProviderAndWait(provider);
-
-			expect(errorHandler).toHaveBeenCalled();
-			expect(provider.status).toBe(ProviderStatus.ERROR);
-		});
-
-		it('should emit READY event when health check returns 404 (endpoint reachable)', async () => {
-			const readyHandler = vi.fn();
-
-			// Must use a real Response instance so `instanceof Response` succeeds
-			// in the 404 detection path inside initialize().
-			const mockResponse = new Response(null, { status: 404, statusText: 'Not Found' });
-			(global.fetch as any).mockResolvedValueOnce(mockResponse);
-
-			const provider = new FlagshipServerProvider({
-				endpoint: 'https://api.example.com/evaluate',
-				retries: 0,
-			});
-
-			provider.events.addHandler(ProviderEvents.Ready, readyHandler);
-
-			await OpenFeature.setProviderAndWait(provider);
-
-			expect(readyHandler).toHaveBeenCalled();
-			expect(provider.status).toBe(ProviderStatus.READY);
+			expect(global.fetch).not.toHaveBeenCalled();
 		});
 
 		it('should handle initialization without explicit initialize call', async () => {
@@ -102,33 +60,7 @@ describe('Provider Events', () => {
 
 			await OpenFeature.setProviderAndWait(provider);
 
-			// Shutdown should not throw
-			await expect(provider.onClose()).resolves.not.toThrow();
-		});
-	});
-
-	describe('Provider Status', () => {
-		it('should start with NOT_READY status', () => {
-			const provider = new FlagshipServerProvider({
-				endpoint: 'https://api.example.com/evaluate',
-			});
-
-			expect(provider.status).toBeDefined();
-		});
-
-		it('should be READY after initialization', async () => {
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
-			const provider = new FlagshipServerProvider({
-				endpoint: 'https://api.example.com/evaluate',
-			});
-
-			await OpenFeature.setProviderAndWait(provider);
-
-			expect(provider.status).toBeDefined();
+			await expect(OpenFeature.clearProviders()).resolves.not.toThrow();
 		});
 	});
 
@@ -136,18 +68,12 @@ describe('Provider Events', () => {
 		it('should allow adding multiple event handlers', async () => {
 			const handler1 = vi.fn();
 			const handler2 = vi.fn();
-
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
 			const provider = new FlagshipServerProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
 
-			provider.events.addHandler(ProviderEvents.Ready, handler1);
-			provider.events.addHandler(ProviderEvents.Ready, handler2);
+			OpenFeature.addHandler(ProviderEvents.Ready, handler1);
+			OpenFeature.addHandler(ProviderEvents.Ready, handler2);
 
 			await OpenFeature.setProviderAndWait(provider);
 
@@ -157,18 +83,12 @@ describe('Provider Events', () => {
 
 		it('should allow removing event handlers', async () => {
 			const handler = vi.fn();
-
-			(global.fetch as any).mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ flagKey: '_flagship_health_check', value: true }),
-			});
-
 			const provider = new FlagshipServerProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
 
-			provider.events.addHandler(ProviderEvents.Ready, handler);
-			provider.events.removeHandler(ProviderEvents.Ready, handler);
+			OpenFeature.addHandler(ProviderEvents.Ready, handler);
+			OpenFeature.removeHandler(ProviderEvents.Ready, handler);
 
 			await OpenFeature.setProviderAndWait(provider);
 

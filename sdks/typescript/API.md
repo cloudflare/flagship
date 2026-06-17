@@ -392,24 +392,19 @@ OpenFeature.addHandler(ProviderEvents.Ready, () => {
   console.log('Provider initialized and ready');
 });
 
-OpenFeature.addHandler(ProviderEvents.Error, ({ message }) => {
-  console.error('Provider failed to initialize:', message);
-});
-
 await OpenFeature.setProviderAndWait(provider);
 ```
 
-**Server provider (HTTP mode):** During initialization, the provider probes the evaluation endpoint with a health-check request. A 404 response (flag not found) is treated as success — it means the endpoint is reachable. Any network or timeout error causes `ProviderEvents.Error` to be emitted, but `setProviderAndWait` still resolves (does not reject) — the provider transitions to `ERROR` status silently.
+**Server provider:** Initialization does not perform network I/O. Flag evaluation requests happen only when resolving flags.
 
-**Server provider (binding mode):** Initialization sets READY immediately — the binding is guaranteed to be available by the Workers runtime. No health-check probe is performed.
+**Server provider (binding mode):** Initialization does not call binding methods. Binding evaluation requests happen only when resolving flags.
 
 **Client provider:** During initialization, the provider fetches all `prefetchFlags` using `Promise.allSettled`. Even if some or all fetches fail, the provider transitions to `READY` status. Failed flags return `FLAG_NOT_FOUND` when resolved.
 
-To shut down the provider and release resources:
+To shut down providers and release resources:
 
 ```typescript
-await provider.onClose();
-// provider.status === ProviderStatus.NOT_READY
+await OpenFeature.clearProviders();
 // Client provider also clears the in-memory cache
 ```
 

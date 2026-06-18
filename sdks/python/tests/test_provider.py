@@ -1,6 +1,7 @@
 import httpx
 import pytest
 import respx
+from openfeature import api
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.exception import (
     FlagNotFoundError,
@@ -10,6 +11,7 @@ from openfeature.exception import (
     TypeMismatchError,
 )
 from openfeature.flag_evaluation import Reason
+from openfeature.provider import ProviderStatus
 
 from flagship import FlagshipServerProvider
 
@@ -27,16 +29,11 @@ def _resp(value: object, *, reason: str = "TARGETING_MATCH", variant: str = "on"
 
 
 @respx.mock
-def test_initialize_does_not_make_http_request(provider: FlagshipServerProvider) -> None:
-    provider.initialize(EvaluationContext())
-    assert not respx.calls
-
-
-@respx.mock
-def test_initialize_ignores_unreachable_endpoint(provider: FlagshipServerProvider) -> None:
-    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=httpx.Response(500))
-    provider.initialize(EvaluationContext())
-    assert not respx.calls
+def test_set_provider_does_not_request_endpoint(provider: FlagshipServerProvider) -> None:
+    api.set_provider(provider)
+    assert len(respx.calls) == 0
+    assert api.get_client().get_provider_status() == ProviderStatus.READY
+    api.clear_providers()
 
 
 def test_shutdown_closes_client(provider: FlagshipServerProvider) -> None:

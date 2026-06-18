@@ -2,54 +2,136 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { OpenFeature, ProviderEvents } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 
+// Mock fetch globally
 global.fetch = vi.fn();
 
 describe('Provider Events', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		OpenFeature.clearHandlers();
 		OpenFeature.clearProviders();
 	});
 
-	it('emits READY through OpenFeature without an initialization request', async () => {
-		const providerReadyHandler = vi.fn();
-		OpenFeature.addHandler(ProviderEvents.Ready, providerReadyHandler);
+	describe('Initialization', () => {
+		it('should emit READY event on successful initialization', async () => {
+			const readyHandler = vi.fn();
 
-		await OpenFeature.setProviderAndWait(
-			new FlagshipServerProvider({
+			const provider = new FlagshipServerProvider({
 				endpoint: 'https://api.example.com/evaluate',
-			}),
-		);
+			});
 
-		expect(providerReadyHandler).toHaveBeenCalled();
-		expect(global.fetch).not.toHaveBeenCalled();
-	});
+			OpenFeature.addHandler(ProviderEvents.Ready, readyHandler);
 
-	it('evaluates flags after initialization', async () => {
-		(global.fetch as any).mockResolvedValue({
-			ok: true,
-			json: async () => ({ flagKey: 'test-flag', value: true }),
+			await OpenFeature.setProviderAndWait(provider);
+
+			expect(readyHandler).toHaveBeenCalled();
+			expect(global.fetch).not.toHaveBeenCalled();
 		});
 
-		await OpenFeature.setProviderAndWait(
-			new FlagshipServerProvider({
+		it('should handle initialization without explicit initialize call', async () => {
+			(global.fetch as any).mockResolvedValue({
+				ok: true,
+				json: async () => ({ flagKey: 'test-flag', value: true }),
+			});
+
+			const provider = new FlagshipServerProvider({
 				endpoint: 'https://api.example.com/evaluate',
-			}),
-		);
+			});
 
-		const client = OpenFeature.getClient();
-		const value = await client.getBooleanValue('test-flag', false);
+			await OpenFeature.setProviderAndWait(provider);
 
-		expect(value).toBe(true);
-		expect(global.fetch).toHaveBeenCalledTimes(1);
+			const client = OpenFeature.getClient();
+			const value = await client.getBooleanValue('test-flag', false);
+
+			expect(value).toBe(true);
+		});
 	});
 
-	it('handles shutdown gracefully', async () => {
-		const provider = new FlagshipServerProvider({
-			endpoint: 'https://api.example.com/evaluate',
+	describe('Shutdown', () => {
+		it('should handle shutdown gracefully', async () => {
+			(global.fetch as any).mockResolvedValue({
+				ok: true,
+				json: async () => ({ flagKey: 'test-flag', value: true }),
+			});
+
+			const provider = new FlagshipServerProvider({
+				endpoint: 'https://api.example.com/evaluate',
+			});
+
+			await OpenFeature.setProviderAndWait(provider);
+
+			await expect(OpenFeature.clearProviders()).resolves.not.toThrow();
+		});
+	});
+
+	describe('Event Handlers', () => {
+		it('should allow adding multiple event handlers', async () => {
+			const handler1 = vi.fn();
+			const handler2 = vi.fn();
+			const provider = new FlagshipServerProvider({
+				endpoint: 'https://api.example.com/evaluate',
+			});
+
+			OpenFeature.addHandler(ProviderEvents.Ready, handler1);
+			OpenFeature.addHandler(ProviderEvents.Ready, handler2);
+
+			await OpenFeature.setProviderAndWait(provider);
+
+			expect(handler1).toHaveBeenCalled();
+			expect(handler2).toHaveBeenCalled();
 		});
 
-		await OpenFeature.setProviderAndWait(provider);
+		it('should allow removing event handlers', async () => {
+			const handler = vi.fn();
+			const provider = new FlagshipServerProvider({
+				endpoint: 'https://api.example.com/evaluate',
+			});
 
-		await expect(provider.onClose()).resolves.toBeUndefined();
+			OpenFeature.addHandler(ProviderEvents.Ready, handler);
+			OpenFeature.removeHandler(ProviderEvents.Ready, handler);
+
+			await OpenFeature.setProviderAndWait(provider);
+
+			expect(handler).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('Integration with OpenFeature', () => {
+		it('should work with OpenFeature event system', async () => {
+			const providerReadyHandler = vi.fn();
+
+			(global.fetch as any).mockResolvedValue({
+				ok: true,
+				json: async () => ({ flagKey: 'test-flag', value: true }),
+			});
+
+			OpenFeature.addHandler(ProviderEvents.Ready, providerReadyHandler);
+
+			await OpenFeature.setProviderAndWait(
+				new FlagshipServerProvider({
+					endpoint: 'https://api.example.com/evaluate',
+				}),
+			);
+
+			expect(providerReadyHandler).toHaveBeenCalled();
+		});
+
+		it('should evaluate flags after initialization', async () => {
+			(global.fetch as any).mockResolvedValue({
+				ok: true,
+				json: async () => ({ flagKey: 'test-flag', value: true }),
+			});
+
+			await OpenFeature.setProviderAndWait(
+				new FlagshipServerProvider({
+					endpoint: 'https://api.example.com/evaluate',
+				}),
+			);
+
+			const client = OpenFeature.getClient();
+			const value = await client.getBooleanValue('test-flag', false);
+
+			expect(value).toBe(true);
+		});
 	});
 });

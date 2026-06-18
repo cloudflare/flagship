@@ -1,7 +1,7 @@
 /**
  * @cloudflare/flagship/server
  *
- * OpenFeature server provider for Flagship feature flags.
+ * OpenFeature server provider and hooks for Flagship feature flags.
  * Requires `@openfeature/server-sdk` as a peer dependency.
  *
  * The provider supports two modes:
@@ -54,3 +54,8 @@ export type {
 
 // Export server provider
 export { FlagshipServerProvider } from './server-provider.js';
+
+// Export hooks (server-sdk only)
+export { LoggingHook } from './hooks/logging-hook.js';
+export { TelemetryHook } from './hooks/telemetry-hook.js';
+export type { TelemetryEvent } from './hooks/telemetry-hook.js';

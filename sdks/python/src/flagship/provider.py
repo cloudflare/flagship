@@ -82,14 +82,6 @@ class FlagshipServerProvider(AbstractProvider):
     def get_provider_hooks(self) -> list[Hook]:
         return []
 
-    def initialize(self, _evaluation_context: EvaluationContext) -> None:
-        """Initialize without probing the evaluation endpoint.
-
-        The OpenFeature SDK owns provider readiness state. HTTP failures are
-        reported by the individual flag evaluations that encounter them.
-        """
-        return None
-
     def shutdown(self) -> None:
         self._client.close()
 
@@ -217,6 +209,11 @@ class FlagshipServerProvider(AbstractProvider):
     def _log_debug(self, msg: str, *args: Any) -> None:
         if self._logging:
             _logger.debug(msg, *args)
+
+    def _log_error(self, msg: str, *args: Any) -> None:
+        if self._logging:
+            _logger.error(msg, *args)
+
 
 def _build_details(
     flag_type: FlagType,

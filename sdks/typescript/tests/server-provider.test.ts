@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Logger } from '@openfeature/server-sdk';
-import { ErrorCode } from '@openfeature/server-sdk';
+import { ErrorCode, OpenFeature, ProviderEvents } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 
 // Mock fetch globally
@@ -17,6 +17,8 @@ const noopLogger: Logger = {
 describe('FlagshipServerProvider', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		OpenFeature.clearHandlers();
+		OpenFeature.clearProviders();
 	});
 
 	describe('constructor', () => {
@@ -727,23 +729,18 @@ describe('FlagshipServerProvider', () => {
 	});
 
 	describe('lifecycle', () => {
-		it('does not make an HTTP request during initialize', async () => {
+		it('setProviderAndWait does not request the endpoint', async () => {
 			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
-			await provider.initialize();
+			await OpenFeature.setProviderAndWait(provider);
 			expect(global.fetch).not.toHaveBeenCalled();
 		});
 
-		it('does not fail initialize when endpoint would be unreachable', async () => {
-			(global.fetch as any).mockRejectedValueOnce(new Error('network down'));
-
-			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
-			await expect(provider.initialize()).resolves.toBeUndefined();
-			expect(global.fetch).not.toHaveBeenCalled();
-		});
-
-		it('onClose is a no-op', async () => {
+		it('setProviderAndWait emits READY', async () => {
+			const readyHandler = vi.fn();
+			OpenFeature.addHandler(ProviderEvents.Ready, readyHandler);
 			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate' });
-			await expect(provider.onClose()).resolves.toBeUndefined();
+			await OpenFeature.setProviderAndWait(provider);
+			expect(readyHandler).toHaveBeenCalled();
 		});
 	});
 

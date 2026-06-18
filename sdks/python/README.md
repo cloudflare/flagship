@@ -156,6 +156,20 @@ The provider never throws from a resolution method. On error the OpenFeature SDK
 
 404 and 400 responses are never retried. All other failures are retried up to `retries` times.
 
+## Hooks
+
+```python
+from flagship import LoggingHook, TelemetryHook
+
+# Logs evaluation lifecycle events via the flagship logger (INFO level)
+api.add_hooks([LoggingHook()])
+
+# Emits a TelemetryEvent after every evaluation
+api.add_hooks([TelemetryHook(lambda event: analytics.track("flag_evaluated", event))])
+```
+
+`TelemetryEvent` fields: `type`, `flag_key`, `timestamp`, `duration_ms`, `value`, `reason`, `variant`, `error_code`, `error_message`, `context`, `hints`.
+
 ## Provider events
 
 ```python
@@ -164,14 +178,14 @@ from openfeature.event import ProviderEvent
 api.add_handler(ProviderEvent.PROVIDER_READY, lambda _: print("ready"))
 ```
 
-Initialization does not probe the evaluation endpoint. Network, timeout, authentication, and missing-flag errors are reported by the flag evaluations that encounter them.
+Initialization does not perform network I/O. Flag evaluation requests happen only when resolving flags.
 
 ## Development
 
 ```sh
 uv sync --group dev        # install dependencies
 uv run pytest              # run tests
-uv run mypy src            # type check
+uv run ty check            # type check
 uv build                   # build wheel and sdist
 ```
 

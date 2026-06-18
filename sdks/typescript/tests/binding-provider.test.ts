@@ -46,6 +46,8 @@ const noopLogger: Logger = {
 describe('FlagshipServerProvider (binding mode)', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		OpenFeature.clearHandlers();
+		OpenFeature.clearProviders();
 	});
 
 	// -----------------------------------------------------------------------
@@ -169,10 +171,10 @@ describe('FlagshipServerProvider (binding mode)', () => {
 	// -----------------------------------------------------------------------
 
 	describe('lifecycle', () => {
-		it('does not call any binding methods during initialize', async () => {
+		it('setProviderAndWait does not call binding methods', async () => {
 			const binding = createMockBinding();
 			const provider = new FlagshipServerProvider({ binding });
-			await provider.initialize();
+			await OpenFeature.setProviderAndWait(provider);
 
 			expect(binding.get).not.toHaveBeenCalled();
 			expect(binding.getBooleanDetails).not.toHaveBeenCalled();
@@ -181,10 +183,15 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			expect(binding.getObjectDetails).not.toHaveBeenCalled();
 		});
 
-		it('onClose is a no-op', async () => {
+		it('setProviderAndWait emits READY', async () => {
 			const binding = createMockBinding();
 			const provider = new FlagshipServerProvider({ binding });
-			await expect(provider.onClose()).resolves.toBeUndefined();
+			const readyHandler = vi.fn();
+			OpenFeature.addHandler(ProviderEvents.Ready, readyHandler);
+
+			await OpenFeature.setProviderAndWait(provider);
+
+			expect(readyHandler).toHaveBeenCalled();
 		});
 	});
 

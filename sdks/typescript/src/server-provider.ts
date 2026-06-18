@@ -1,5 +1,5 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/server-sdk';
-import { ErrorCode } from '@openfeature/server-sdk';
+import { ErrorCode, OpenFeatureEventEmitter } from '@openfeature/server-sdk';
 import { FlagshipClient } from './client.js';
 import {
 	FlagshipError,
@@ -72,6 +72,7 @@ const HTTP_ONLY_FIELDS = [
 export class FlagshipServerProvider implements Provider {
 	readonly metadata: ProviderMetadata;
 	readonly runsOn = 'server' as const;
+	readonly events = new OpenFeatureEventEmitter();
 
 	/** Set when operating in HTTP mode; `undefined` in binding mode. */
 	private readonly client: FlagshipClient | undefined;
@@ -118,21 +119,6 @@ export class FlagshipServerProvider implements Provider {
 	private logger(logger: Logger): Logger {
 		if (this.logging) return logger;
 		return { debug: _noop, info: _noop, warn: _noop, error: _noop };
-	}
-
-	/**
-	 * Initializes the provider.
-	 *
-	 * The OpenFeature SDK owns provider readiness state. Flagship does not issue
-	 * an initialization probe; HTTP and binding failures are reported by the
-	 * individual flag evaluations that encounter them.
-	 */
-	async initialize(_context?: EvaluationContext): Promise<void> {
-		return;
-	}
-
-	async onClose(): Promise<void> {
-		return;
 	}
 
 	async resolveBooleanEvaluation(

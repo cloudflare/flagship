@@ -216,8 +216,6 @@ def _resolve_endpoint(
     if not account_id:
         raise ValueError('Flagship: "account_id" is required when using "app_id"')
 
+    assert app_id is not None
     base = base_url.rstrip("/")
-    return (
-        f"{base}/client/v4/accounts/{quote(account_id, safe='')}"
-        f"/flagship/apps/{quote(app_id, safe='')}/evaluate"  # type: ignore[arg-type]
-    )
+    return f"{base}/client/v4/accounts/{quote(account_id, safe='')}/flagship/apps/{quote(app_id, safe='')}/evaluate"

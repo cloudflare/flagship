@@ -21,7 +21,6 @@ describe('Flagship Integration Tests', () => {
 
 	describe('Server Provider Integration', () => {
 		it('should integrate with OpenFeature server SDK', async () => {
-			// Mock API response
 			(global.fetch as any).mockResolvedValue({
 				ok: true,
 				json: async () => ({
@@ -30,7 +29,6 @@ describe('Flagship Integration Tests', () => {
 				}),
 			});
 
-			// Set up provider
 			await OpenFeature.setProviderAndWait(
 				new FlagshipServerProvider({
 					endpoint: 'https://api.example.com/evaluate',
@@ -39,7 +37,6 @@ describe('Flagship Integration Tests', () => {
 
 			const client = OpenFeature.getClient();
 
-			// Evaluate flag
 			const value = await client.getBooleanValue('feature-flag', false, {
 				targetingKey: 'user-123',
 				email: 'user@example.com',
@@ -48,7 +45,6 @@ describe('Flagship Integration Tests', () => {
 			expect(value).toBe(true);
 			expect(global.fetch).toHaveBeenCalledTimes(1);
 
-			// Verify the URL contains context.
 			const callArgs = (global.fetch as any).mock.calls[0];
 			const url = new URL(callArgs[0]);
 			expect(url.searchParams.get('flagKey')).toBe('feature-flag');
@@ -209,7 +205,6 @@ describe('Flagship Integration Tests', () => {
 		});
 
 		it('should handle multiple sequential evaluations', async () => {
-			// Mock evaluation responses. Initialization does not make a request.
 			(global.fetch as any)
 				.mockResolvedValueOnce({
 					ok: true,
@@ -261,7 +256,6 @@ describe('Flagship Integration Tests', () => {
 
 			expect(value).toBe(true);
 
-			// Verify URL only has flagKey.
 			const callArgs = (global.fetch as any).mock.calls[0];
 			const url = new URL(callArgs[0]);
 			expect(url.searchParams.get('flagKey')).toBe('default-feature');

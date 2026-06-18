@@ -1,5 +1,5 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/web-sdk';
-import { ErrorCode } from '@openfeature/web-sdk';
+import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderStatus } from '@openfeature/web-sdk';
 import { FlagshipClient } from './client.js';
 import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js';
 
@@ -36,11 +36,13 @@ import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js'
 export class FlagshipClientProvider implements Provider {
 	readonly metadata: ProviderMetadata;
 	readonly runsOn = 'client' as const;
+	readonly events = new OpenFeatureEventEmitter();
 
 	private cache: Map<string, CachedFlag> = new Map();
 	private client: FlagshipClient;
 	private readonly prefetchFlags: string[];
 	private readonly logging: boolean;
+	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
 
 	constructor(options: FlagshipClientProviderOptions) {
 		this.metadata = { name: 'Flagship Client Provider' };
@@ -49,17 +51,24 @@ export class FlagshipClientProvider implements Provider {
 		this.logging = options.logging ?? false;
 	}
 
+	get status(): ProviderStatus {
+		return this.currentStatus;
+	}
+
 	/**
 	 * Fetches all `prefetchFlags` in parallel and populates the cache.
 	 * Individual flag fetch failures are logged when `logging` is enabled but
-	 * do not prevent OpenFeature from marking the provider ready.
+	 * do not prevent the provider from reaching READY.
 	 */
 	async initialize(context: EvaluationContext = {}): Promise<void> {
 		await this.fetchAll(context, 'initialization');
+		this.currentStatus = ProviderStatus.READY;
+		this.events.emit(ProviderEvents.Ready);
 	}
 
 	async onClose(): Promise<void> {
 		this.cache.clear();
+		this.currentStatus = ProviderStatus.NOT_READY;
 	}
 
 	/**

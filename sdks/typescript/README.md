@@ -129,16 +129,17 @@ const darkMode = client.getBooleanValue('dark-mode', false);
 | Authentication        | `authToken` option adds `Authorization: Bearer` to every request (HTTP only) |
 | Logging               | `logging` option surfaces fetch errors and cache misses (off by default)     |
 | Retries + timeouts    | Configurable retry logic with `AbortController`-based timeouts (HTTP only)   |
+| Hooks                 | Built-in `LoggingHook` and `TelemetryHook`                                   |
 | Tree-shakeable        | Server and client bundles are fully isolated                                 |
 | TypeScript            | Strict types throughout                                                      |
 
 ## Packages
 
-| Export                        | Description                | Peer dependency           |
-| ----------------------------- | -------------------------- | ------------------------- |
-| `@cloudflare/flagship`        | Core client, types, errors | None                      |
-| `@cloudflare/flagship/server` | `FlagshipServerProvider`   | `@openfeature/server-sdk` |
-| `@cloudflare/flagship/web`    | `FlagshipClientProvider`   | `@openfeature/web-sdk`    |
+| Export                        | Description                      | Peer dependency           |
+| ----------------------------- | -------------------------------- | ------------------------- |
+| `@cloudflare/flagship`        | Core client, types, errors       | None                      |
+| `@cloudflare/flagship/server` | `FlagshipServerProvider` + hooks | `@openfeature/server-sdk` |
+| `@cloudflare/flagship/web`    | `FlagshipClientProvider`         | `@openfeature/web-sdk`    |
 
 ## Documentation
 

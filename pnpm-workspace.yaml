@@ -1,2 +1,4 @@
 packages:
   - 'sdks/*'
+allowBuilds:
+  esbuild: true

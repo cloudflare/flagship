@@ -39,7 +39,6 @@
 		"tsx": "^4.22.4",
 		"typescript": "^5.9.3"
 	},
-	"packageManager": "pnpm@10.8.1",
 	"overrides": {},
 	"lint-staged": {
 		"*.{js,mjs,cjs,jsx,ts,mts,cts,tsx,css}": [

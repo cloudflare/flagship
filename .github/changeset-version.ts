@@ -71,11 +71,6 @@ function readCanonicalPackage(): Package {
 	return canonical;
 }
 
-/**
- * The repo uses a single public release package for Changesets output. Private SDKs
- * still get version-synced, but they are removed from release entries so the release
- * PR body and changelog don't duplicate the same notes for every language.
- */
 export async function rewriteChangesetsToCanonicalPackage(): Promise<void> {
 	const sdkNames = new Set(readSdkPackages().map((pkg) => pkg.packageJson.name));
 
@@ -105,7 +100,6 @@ function writeChangesetFile({ id, summary, releases }: NewChangeset): void {
 	writeFileSync(join(ROOT, '.changeset', `${id}.md`), `---\n${frontmatter}\n---\n\n${summary}\n`);
 }
 
-/** Syncs private SDK package.json versions to the canonical public package version. */
 export function syncPrivateSdkPackageVersions(): void {
 	const targetVersion = readCanonicalPackage().packageJson.version;
 
@@ -120,7 +114,6 @@ export function syncPrivateSdkPackageVersions(): void {
 	}
 }
 
-/** Mirrors each SDK's `package.json` version into the native manifest beside it, if present. */
 export function syncNativeManifests(): void {
 	const errors: string[] = [];
 
@@ -135,11 +128,6 @@ export function syncNativeManifests(): void {
 	}
 }
 
-/**
- * Regenerate native lockfiles after manifest version bumps so the release PR
- * contains an up-to-date lockfile. Skipped silently when the relevant CLI is
- * not on PATH (e.g. local dev environments without `uv` installed).
- */
 export function refreshNativeLockfiles(): void {
 	for (const pkg of readSdkPackages()) {
 		const pyprojectPath = join(pkg.dir, 'pyproject.toml');
@@ -158,10 +146,6 @@ export function refreshNativeLockfiles(): void {
 type PyProjectToml = { project?: { version?: string }; tool?: { poetry?: { version?: string } } };
 type CargoToml = { package?: { version?: string } };
 
-/**
- * Syncs the version for any PEP 621 pyproject (uv, hatch, flit, pdm, setuptools, Poetry 2.0+)
- * via `[project].version`, and also `[tool.poetry].version` for legacy Poetry 1.x layouts.
- */
 function syncPythonPackageVersion(packageDir: string, targetVersion: string, errors: string[]): void {
 	patchTomlField(join(packageDir, 'pyproject.toml'), targetVersion, errors, (parsed: PyProjectToml) => {
 		const hasProjectVersion = parsed.project?.version !== undefined;
@@ -183,7 +167,6 @@ function syncRustPackageVersion(packageDir: string, targetVersion: string, error
 	});
 }
 
-/** Mutates parsed TOML and patches the file in place, preserving comments and formatting. */
 function patchTomlField<T>(manifestPath: string, targetVersion: string, errors: string[], mutate: (parsed: T) => string | undefined): void {
 	if (!existsSync(manifestPath)) return;
 	const relativePath = relative(ROOT, manifestPath);
@@ -229,8 +212,6 @@ function stubPrivateSdkChangelogs(): void {
 async function runRelease(): Promise<void> {
 	await validatePendingChangesets();
 
-	// Snapshot changeset files so they can be restored if expansion or versioning fails,
-	// leaving the working tree clean for a retry.
 	const changesets = await readChangesets(ROOT);
 	const snapshot = new Map(
 		changesets.map(({ id }) => {

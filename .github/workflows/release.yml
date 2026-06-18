@@ -39,7 +39,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: "11"
 
       - uses: actions/setup-node@v6
         with:
@@ -48,7 +50,7 @@ jobs:
 
       # `uv` is needed by `.github/changeset-version.ts` to refresh `uv.lock`
       # when the Python SDK version is bumped.
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
           working-directory: sdks/python
 
@@ -56,7 +58,7 @@ jobs:
       - run: pnpm run build
 
       - id: changesets
-        uses: changesets/action@v1.7.0
+        uses: changesets/action@v1.9.0
         with:
           version: pnpm tsx .github/changeset-version.ts
           publish: pnpm changeset publish

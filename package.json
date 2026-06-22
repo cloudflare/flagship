@@ -15,10 +15,12 @@
 		"build": "pnpm -r run build",
 		"changeset:validate": "tsx .github/changeset-version.ts validate",
 		"format": "oxfmt --write .",
+		"format:write": "oxfmt --write .",
 		"format:check": "oxfmt --check .",
+		"sherif": "sherif -r root-package-manager-field",
 		"lint": "oxlint .",
 		"typecheck": "tsc --noEmit && pnpm -r run typecheck",
-		"check": "sherif && oxfmt --check . && oxlint . && pnpm run typecheck",
+		"check": "sherif -r root-package-manager-field && oxfmt --check . && oxlint . && pnpm run typecheck",
 		"test": "pnpm -r run test",
 		"prepare": "husky"
 	},

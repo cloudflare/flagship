@@ -1,5 +1,17 @@
 # @cloudflare/flagship
 
+## 0.4.0
+
+### Minor Changes
+
+- [#22](https://github.com/cloudflare/flagship/pull/22) [`b53a7ce`](https://github.com/cloudflare/flagship/commit/b53a7cef43ad360e45f90e833e35c6b2ddfdc779) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Add opt-in server-side response caching to the server providers. Set `cacheTtl` (TypeScript) or `cache_ttl` (Python) to enable a TTL + LRU cache keyed by flag key, type, and evaluation context. Cache hits resolve with reason `CACHED`; disabled flags and errors are never cached. Caching is off by default.
+
+### Patch Changes
+
+- [#24](https://github.com/cloudflare/flagship/pull/24) [`122535b`](https://github.com/cloudflare/flagship/commit/122535b477db2034144c9c511fea2e0b41dffcab) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Upgrade TypeScript SDK dependencies and switch the Python SDK type checker from mypy to ty.
+
+- [#21](https://github.com/cloudflare/flagship/pull/21) [`176c228`](https://github.com/cloudflare/flagship/commit/176c228123161d981e06af89fe7ea47d17367123) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Remove provider initialization health-check evaluations.
+
 ## 0.3.1
 
 ### Patch Changes

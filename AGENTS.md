@@ -4,7 +4,7 @@
 
 Cloudflare Flagship SDKs — OpenFeature-compatible SDKs for Cloudflare's Flagship feature flag platform.
 
-This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The TypeScript SDK is the recommended SDK, especially for Cloudflare Workers because it supports the native Flagship Workers binding. The Python SDK supports HTTP evaluation only.
+This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The TypeScript SDK is the recommended SDK, especially for Cloudflare Workers because it supports the native Flagship Workers binding. The Python and Go SDKs support HTTP evaluation only.
 
 ## Repository Structure
 
@@ -30,6 +30,12 @@ sdks/
     examples/        # Sync and async OpenFeature examples
     pyproject.toml   # Python package metadata and uv build config
     uv.lock          # Python dependency lockfile
+
+  go/                # github.com/cloudflare/flagship/sdks/go — OpenFeature provider SDK (HTTP only)
+    *.go             # Client, provider, context serialization, hooks
+    *_test.go        # Go unit and integration tests
+    examples/        # OpenFeature usage examples
+    go.mod           # Go module metadata
 
 .changeset/          # Changeset config and pending changesets
 .github/             # CI workflows (pull-request, release, publish-pypi, bonk, semgrep), issue templates
@@ -77,6 +83,14 @@ Python SDK (run from `sdks/python/`):
 | `uv run --group dev pytest`    | Run Python tests           |
 | `uv build`                     | Build Python wheel + sdist |
 
+Go SDK (run from `sdks/go/`):
+
+| Command         | What it does      |
+| --------------- | ----------------- |
+| `gofmt -w .`    | Format Go files   |
+| `go test ./...` | Run Go tests      |
+| `go vet ./...`  | Run Go vet checks |
+
 ## SDK Architecture
 
 ### TypeScript
@@ -107,6 +121,15 @@ The Python SDK is published as `cloudflare-flagship` and supports HTTP evaluatio
 - Sync and async evaluation APIs are supported.
 - Native Cloudflare Workers binding mode is not available in Python.
 
+### Go
+
+The Go SDK is published through Go modules at `github.com/cloudflare/flagship/sdks/go` and supports HTTP evaluation only.
+
+- `FlagshipClient` handles endpoint construction, auth headers, retries, timeouts, and response parsing.
+- `ServerProvider` implements the OpenFeature Go provider interface, including context-aware initialization, provider events, and typed resolution details.
+- Built-in `LoggingHook` and `TelemetryHook` mirror the other SDK hook conveniences.
+- Native Cloudflare Workers binding mode is not available in Go.
+
 ## Code Standards
 
 ### TypeScript
@@ -128,6 +151,8 @@ Config in `.oxfmtrc.json`: tabs, single quotes, semicolons, 140 print width.
 
 Python files under `sdks/python/**` are excluded from oxfmt and formatted with Ruff.
 
+Go files under `sdks/go/**` are formatted with `gofmt`.
+
 ### Python
 
 - Package metadata and build backend live in `sdks/python/pyproject.toml`.
@@ -148,6 +173,13 @@ Python tests use **pytest**:
 ```bash
 cd sdks/python
 uv run --group dev pytest
+```
+
+Go tests use the standard Go toolchain:
+
+```bash
+cd sdks/go
+go test ./...
 ```
 
 ## Contributing
@@ -212,6 +244,7 @@ Publishing is split across two workflows; `pull-request.yml` is the source of tr
 
 - Run `pnpm run check` before considering work done
 - For Python SDK changes, also run `uv run ruff format --check .`, `uv run ruff check .`, `uv run --group dev ty check`, and `uv run --group dev pytest` from `sdks/python/`
+- For Go SDK changes, also run `gofmt`, `go vet ./...`, and `go test ./...` from `sdks/go/`
 - Keep OpenFeature peer dependencies optional
 - Use `import type` for type-only imports
 

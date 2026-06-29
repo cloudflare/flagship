@@ -197,6 +197,44 @@ jobs:
       - working-directory: sdks/python
         run: uv build
 
+  # ── Go SDK ────────────────────────────────────────────────────────────────
+
+  go-format:
+    name: Go / Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: sdks/go/go.mod
+      - working-directory: sdks/go
+        run: test -z "$(gofmt -l .)"
+
+  go-vet:
+    name: Go / Vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: sdks/go/go.mod
+      - working-directory: sdks/go
+        run: go vet ./...
+
+  go-test:
+    name: Go / Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: sdks/go/go.mod
+      - working-directory: sdks/go
+        run: go test ./...
+
   # ── Aggregator (required status check for branch protection) ──────────────
 
   ci-success:
@@ -216,6 +254,9 @@ jobs:
       - python-typecheck
       - python-test
       - python-build
+      - go-format
+      - go-vet
+      - go-test
     steps:
       - name: Check job results
         run: |

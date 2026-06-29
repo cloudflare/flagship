@@ -1,6 +1,6 @@
 {
 	"name": "@cloudflare/flagship-go",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"private": true,
 	"description": "OpenFeature provider for Cloudflare Flagship feature flags in Go.",
 	"license": "Apache-2.0"

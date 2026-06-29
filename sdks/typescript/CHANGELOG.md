@@ -1,5 +1,11 @@
 # @cloudflare/flagship
 
+## 0.4.2
+
+### Patch Changes
+
+- [`0900845`](https://github.com/cloudflare/flagship/commit/090084580c921d3be010ae0013d25f77894367d9) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Publish `sdks/go/vX.Y.Z` Git tag on release so the Go module proxy resolves a proper semver version instead of a pseudo-version.
+
 ## 0.4.1
 
 ### Patch Changes

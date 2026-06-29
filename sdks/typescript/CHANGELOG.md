@@ -1,5 +1,13 @@
 # @cloudflare/flagship
 
+## 0.4.1
+
+### Patch Changes
+
+- [#20](https://github.com/cloudflare/flagship/pull/20) [`52765bb`](https://github.com/cloudflare/flagship/commit/52765bbec08a49d362c6079edc5102360cb83395) Thanks [@thebongy](https://github.com/thebongy)! - Add the Go OpenFeature provider SDK for Flagship HTTP evaluation.
+
+- [#27](https://github.com/cloudflare/flagship/pull/27) [`674d7c9`](https://github.com/cloudflare/flagship/commit/674d7c995cff822fbdbc4383747b8c966f05db8a) Thanks [@thebongy](https://github.com/thebongy)! - Add opt-in TTL and LRU response caching to the Go provider.
+
 ## 0.4.0
 
 ### Minor Changes

@@ -1,3 +1,3 @@
 # @cloudflare/flagship-go
 
-## 0.3.1
+## 0.4.1

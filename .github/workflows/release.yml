@@ -69,6 +69,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
 
+      - name: Tag Go SDK for pkg.go.dev
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          VERSION=$(node -p "require('./sdks/go/package.json').version")
+          git tag "sdks/go/v${VERSION}"
+          git push origin "sdks/go/v${VERSION}"
+
   publish-pypi:
     name: Publish PyPI
     needs: release

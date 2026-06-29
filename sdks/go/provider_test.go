@@ -322,6 +322,12 @@ func mergeOptions(options ...Options) Options {
 		if option.DisableRetries {
 			merged.DisableRetries = true
 		}
+		if option.CacheTTL != 0 {
+			merged.CacheTTL = option.CacheTTL
+		}
+		if option.CacheMaxSize != 0 {
+			merged.CacheMaxSize = option.CacheMaxSize
+		}
 	}
 	return merged
 }

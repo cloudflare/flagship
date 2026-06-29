@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	flagship "github.com/cloudflare/flagship/sdks/go"
 	"github.com/open-feature/go-sdk/openfeature"
@@ -30,6 +31,7 @@ func main() {
 		AppID:     "your-app-id",
 		AccountID: "your-account-id",
 		AuthToken: "your-token",
+		CacheTTL:  30 * time.Second, // cache evaluations per context for 30s (off by default)
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -74,9 +76,11 @@ provider, err := flagship.NewProvider(flagship.Options{
 		return http.Header{"Authorization": []string{"Bearer rotated-token"}}, nil
 	},
 
-	Timeout:    5 * time.Second,
-	Retries:    1,
-	RetryDelay: time.Second,
+	Timeout:      5 * time.Second,
+	Retries:      1,
+	RetryDelay:   time.Second,
+	CacheTTL:     30 * time.Second,
+	CacheMaxSize: 1000,
 
 	Logging: true,
 })
@@ -96,9 +100,29 @@ provider, err := flagship.NewProvider(flagship.Options{
 | `Retries`        | Retry attempts on transient errors; defaults to 1 and is capped at 10.         |
 | `DisableRetries` | Disables retries when set to true.                                             |
 | `RetryDelay`     | Delay between retries; defaults to 1 second and is capped at 30 seconds.       |
+| `CacheTTL`       | Cache TTL; enables response caching when greater than 0.                       |
+| `CacheMaxSize`   | Maximum cached entries; defaults to 1000 when `CacheTTL` is set.               |
 | `Logging`        | Enables provider debug/error logs; off by default.                             |
 | `Logger`         | Optional `slog`-compatible logger.                                             |
 | `Hooks`          | Provider-level OpenFeature hooks.                                              |
+
+## Response Caching
+
+The provider can cache evaluations to avoid a network round-trip for repeated flag/context pairs. Caching is **off by default** and enabled by setting `CacheTTL`:
+
+```go
+provider, err := flagship.NewProvider(flagship.Options{
+	AppID:        "your-app-id",
+	AccountID:    "your-account-id",
+	AuthToken:    "your-token",
+	CacheTTL:     30 * time.Second, // values may be up to this stale
+	CacheMaxSize: 1000,             // LRU-evicted beyond this many entries
+})
+```
+
+Each entry is keyed by flag key, flag type, and the full evaluation context, so distinct contexts never share a value. Cache hits resolve with `reason == openfeature.CachedReason`. Disabled flags, errors, and type mismatches are never cached. Because freshness is TTL-based, a flag change in Flagship takes effect after the entry expires.
+
+The cache is per-provider instance, guarded by a mutex for concurrent use, and cleared on `Shutdown`.
 
 ## Evaluation Context
 

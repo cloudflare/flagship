@@ -18,6 +18,7 @@ const (
 	defaultTimeout    = 5 * time.Second
 	defaultRetries    = 1
 	defaultRetryDelay = time.Second
+	defaultCacheSize  = 1000
 	maxRetries        = 10
 	maxRetryDelay     = 30 * time.Second
 )
@@ -52,6 +53,12 @@ type Options struct {
 	Logging bool
 	Logger  Logger
 	Hooks   []openfeature.Hook
+
+	// CacheTTL enables an in-memory TTL + LRU response cache when greater than 0.
+	// Cached values may be up to this duration stale.
+	CacheTTL time.Duration
+	// CacheMaxSize limits cached entries. Defaults to 1000 when CacheTTL is set.
+	CacheMaxSize int
 }
 
 // EvaluationReason is the reason returned by the Flagship evaluation API.

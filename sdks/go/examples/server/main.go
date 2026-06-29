@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	flagship "github.com/cloudflare/flagship/sdks/go"
 	"github.com/open-feature/go-sdk/openfeature"
@@ -15,6 +16,7 @@ func main() {
 		AppID:     "your-app-id",
 		AccountID: "your-account-id",
 		AuthToken: "your-token",
+		CacheTTL:  30 * time.Second, // cache evaluations per context for 30s (off by default)
 	})
 	if err != nil {
 		log.Fatal(err)

@@ -21,10 +21,19 @@ type FlagshipServerProvider = ServerProvider
 type ServerProvider struct {
 	client *FlagshipClient
 	hooks  []openfeature.Hook
+	cache  *responseCache
 
 	logging bool
 	logger  Logger
 }
+
+const (
+	flagTypeBoolean = "boolean"
+	flagTypeString  = "string"
+	flagTypeFloat   = "float"
+	flagTypeInt     = "integer"
+	flagTypeObject  = "object"
+)
 
 // NewProvider constructs a Flagship OpenFeature provider.
 func NewProvider(options Options) (*ServerProvider, error) {
@@ -32,9 +41,16 @@ func NewProvider(options Options) (*ServerProvider, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	var cache *responseCache
+	if options.CacheTTL > 0 {
+		cache = newResponseCache(options.CacheTTL, options.CacheMaxSize)
+	}
+
 	return &ServerProvider{
 		client:  client,
 		hooks:   append([]openfeature.Hook(nil), options.Hooks...),
+		cache:   cache,
 		logging: options.Logging,
 		logger:  resolveLogger(options.Logger),
 	}, nil
@@ -68,6 +84,9 @@ func (p *ServerProvider) InitWithContext(context.Context, openfeature.Evaluation
 
 // Shutdown releases provider resources.
 func (p *ServerProvider) Shutdown() {
+	if p.cache != nil {
+		p.cache.clear()
+	}
 }
 
 // ShutdownWithContext releases provider resources.
@@ -78,31 +97,31 @@ func (p *ServerProvider) ShutdownWithContext(context.Context) error {
 
 // BooleanEvaluation evaluates a boolean flag.
 func (p *ServerProvider) BooleanEvaluation(ctx context.Context, flag string, defaultValue bool, flatCtx openfeature.FlattenedContext) openfeature.BoolResolutionDetail {
-	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, toBool)
+	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, flagTypeBoolean, toBool)
 	return openfeature.BoolResolutionDetail{Value: value, ProviderResolutionDetail: detail}
 }
 
 // StringEvaluation evaluates a string flag.
 func (p *ServerProvider) StringEvaluation(ctx context.Context, flag string, defaultValue string, flatCtx openfeature.FlattenedContext) openfeature.StringResolutionDetail {
-	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, toString)
+	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, flagTypeString, toString)
 	return openfeature.StringResolutionDetail{Value: value, ProviderResolutionDetail: detail}
 }
 
 // FloatEvaluation evaluates a float flag.
 func (p *ServerProvider) FloatEvaluation(ctx context.Context, flag string, defaultValue float64, flatCtx openfeature.FlattenedContext) openfeature.FloatResolutionDetail {
-	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, toFloat64)
+	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, flagTypeFloat, toFloat64)
 	return openfeature.FloatResolutionDetail{Value: value, ProviderResolutionDetail: detail}
 }
 
 // IntEvaluation evaluates an integer flag.
 func (p *ServerProvider) IntEvaluation(ctx context.Context, flag string, defaultValue int64, flatCtx openfeature.FlattenedContext) openfeature.IntResolutionDetail {
-	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, toInt64)
+	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, flagTypeInt, toInt64)
 	return openfeature.IntResolutionDetail{Value: value, ProviderResolutionDetail: detail}
 }
 
 // ObjectEvaluation evaluates an object flag.
 func (p *ServerProvider) ObjectEvaluation(ctx context.Context, flag string, defaultValue any, flatCtx openfeature.FlattenedContext) openfeature.InterfaceResolutionDetail {
-	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, toObject)
+	value, detail := resolveTyped(ctx, p, flag, defaultValue, flatCtx, flagTypeObject, toObject)
 	return openfeature.InterfaceResolutionDetail{Value: value, ProviderResolutionDetail: detail}
 }
 
@@ -112,10 +131,29 @@ func resolveTyped[T any](
 	flag string,
 	defaultValue T,
 	flatCtx openfeature.FlattenedContext,
+	expectedType string,
 	convert func(any) (T, error),
 ) (T, openfeature.ProviderResolutionDetail) {
 	if p.logging {
 		p.logger.DebugContext(ctx, "Evaluating Flagship flag", "flag", flag)
+	}
+
+	var cacheKey string
+	if p.cache != nil {
+		key, err := buildCacheKey(flag, expectedType, flatCtx)
+		if err == nil {
+			if cached, ok := p.cache.get(key); ok {
+				value, err := convert(cached.Value)
+				if err == nil {
+					return value, openfeature.ProviderResolutionDetail{
+						Reason:       openfeature.CachedReason,
+						Variant:      cached.Variant,
+						FlagMetadata: openfeature.FlagMetadata{},
+					}
+				}
+			}
+			cacheKey = key
+		}
 	}
 
 	result, err := p.client.EvaluateFlat(ctx, flag, flatCtx)
@@ -152,12 +190,27 @@ func resolveTyped[T any](
 	if p.logging {
 		p.logger.DebugContext(ctx, "Flagship flag resolved", "flag", flag, "value", value, "reason", result.Reason, "variant", result.Variant)
 	}
+	if p.cache != nil && cacheKey != "" {
+		p.cache.set(cacheKey, result)
+	}
 
 	return value, openfeature.ProviderResolutionDetail{
 		Reason:       mapReason(result.Reason),
 		Variant:      result.Variant,
 		FlagMetadata: openfeature.FlagMetadata{},
 	}
+}
+
+func buildCacheKey(flagKey string, expectedType string, flatCtx openfeature.FlattenedContext) (string, error) {
+	params, err := contextToQueryParams(flatCtx)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal([]string{flagKey, expectedType, params.Encode()})
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func mapReason(reason EvaluationReason) openfeature.Reason {

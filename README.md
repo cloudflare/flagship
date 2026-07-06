@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@cloudflare/flagship.svg)](https://www.npmjs.com/package/@cloudflare/flagship)
 [![PyPI version](https://img.shields.io/pypi/v/cloudflare-flagship.svg)](https://pypi.org/project/cloudflare-flagship/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/cloudflare/flagship/sdks/go.svg)](https://pkg.go.dev/github.com/cloudflare/flagship/sdks/go)
 [![license](https://img.shields.io/npm/l/@cloudflare/flagship.svg)](LICENSE)
 
 Flagship is Cloudflare's feature flag platform. This repository contains the official Flagship SDKs for application developers who want to evaluate feature flags through [OpenFeature](https://openfeature.dev/).
@@ -170,6 +171,7 @@ pnpm run check
 
 - [TypeScript examples](sdks/typescript/examples)
 - [Python examples](sdks/python/examples)
+- [Go examples](sdks/go/examples)
 - [OpenFeature specification](https://openfeature.dev/specification/)
 - [Issues](https://github.com/cloudflare/flagship/issues)
 

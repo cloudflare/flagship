@@ -1,5 +1,8 @@
 # cloudflare/flagship Go SDK
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/cloudflare/flagship/sdks/go.svg)](https://pkg.go.dev/github.com/cloudflare/flagship/sdks/go)
+[![license](https://img.shields.io/github/license/cloudflare/flagship)](LICENSE)
+
 [OpenFeature](https://openfeature.dev)-compliant provider SDK for Cloudflare Flagship in Go server applications.
 
 > The Go SDK supports HTTP mode only. The Cloudflare Workers binding mode is exclusive to the TypeScript SDK.
@@ -142,9 +145,27 @@ config, _ := client.ObjectValue(ctx, "ui-config", map[string]any{"theme": "light
 
 Use `*ValueDetails` methods when you need reason, variant, metadata, or error codes.
 
+## Error Handling
+
+Provider resolution methods return the default value plus an OpenFeature resolution error when evaluation fails. The lower-level `FlagshipClient` returns `*flagship.Error` with a typed `Code`, HTTP `StatusCode`, and wrapped cause when available.
+
+| Error code        | Cause                                               |
+| ----------------- | --------------------------------------------------- |
+| `FLAG_NOT_FOUND`  | Flag key does not exist (HTTP 404)                  |
+| `BAD_REQUEST`     | Evaluation request was invalid (HTTP 400)           |
+| `INVALID_CONTEXT` | Evaluation context contains unsupported value types |
+| `NETWORK_ERROR`   | Network request failed                              |
+| `TIMEOUT_ERROR`   | Request timed out                                   |
+| `PARSE_ERROR`     | API response was not a valid evaluation response    |
+| `GENERAL`         | Any other transient or unexpected failure           |
+
+400 and 404 responses are never retried. Other failures are retried up to `Retries` times unless `DisableRetries` is set.
+
 ## Development
 
 ```sh
+gofmt -w .
+go vet ./...
 go test ./...
 ```
 

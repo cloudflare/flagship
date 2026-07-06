@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/cloudflare-flagship.svg)](https://pypi.org/project/cloudflare-flagship/)
 [![Python versions](https://img.shields.io/pypi/pyversions/cloudflare-flagship.svg)](https://pypi.org/project/cloudflare-flagship/)
-[![license](https://img.shields.io/pypi/l/cloudflare-flagship.svg)](LICENSE)
+[![license](https://img.shields.io/pypi/l/cloudflare-flagship.svg)](https://github.com/cloudflare/flagship/blob/main/LICENSE)
 
 Flagship is a globally distributed, low-latency feature flag platform built entirely on Cloudflare. This package is the Python SDK — an [OpenFeature](https://openfeature.dev)-compliant provider for evaluating feature flags from Python server environments.
 

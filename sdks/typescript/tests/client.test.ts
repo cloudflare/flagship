@@ -522,4 +522,335 @@ describe('FlagshipClient', () => {
 			expect(global.fetch).toHaveBeenCalledTimes(1);
 		});
 	});
+
+	describe('injectable transport', () => {
+		const okResponse = () => ({ ok: true, json: async () => ({ flagKey: 'my-flag', value: true }) }) as unknown as Response;
+
+		it('uses the client-level fetch instead of the global one', async () => {
+			const transport = vi.fn(async () => okResponse());
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport,
+			});
+
+			const result = await client.evaluate('my-flag', { targetingKey: 'user-1' });
+
+			expect(result.value).toBe(true);
+			expect(transport).toHaveBeenCalledTimes(1);
+			expect(global.fetch).not.toHaveBeenCalled();
+		});
+
+		it('lets a per-call fetch override the client-level one', async () => {
+			const clientTransport = vi.fn(async () => okResponse());
+			const callTransport = vi.fn(async () => okResponse());
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: clientTransport,
+			});
+
+			await client.evaluate('my-flag', {}, { fetch: callTransport });
+
+			expect(callTransport).toHaveBeenCalledTimes(1);
+			expect(clientTransport).not.toHaveBeenCalled();
+		});
+
+		it('never reassigns globalThis.fetch, observed while a call is in flight', async () => {
+			const ambient = globalThis.fetch;
+			let globalDuringCall: typeof globalThis.fetch | undefined;
+
+			const transport = vi.fn(async () => {
+				globalDuringCall = globalThis.fetch;
+				return okResponse();
+			});
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport,
+			});
+
+			await client.evaluate('my-flag', {});
+
+			expect(globalDuringCall).toBe(ambient);
+			expect(globalThis.fetch).toBe(ambient);
+		});
+
+		it('serves unrelated traffic with the ambient transport during an evaluation', async () => {
+			(global.fetch as any).mockResolvedValue(okResponse());
+
+			const transport = vi.fn(async () => {
+				await globalThis.fetch('https://unrelated.example/ping');
+				return okResponse();
+			});
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport,
+			});
+
+			await client.evaluate('my-flag', {});
+
+			expect(transport).toHaveBeenCalledTimes(1);
+			expect(global.fetch).toHaveBeenCalledTimes(1);
+			expect((global.fetch as any).mock.calls[0][0]).toBe('https://unrelated.example/ping');
+		});
+
+		it('resolves globalThis.fetch at call time when no transport is configured', async () => {
+			const client = new FlagshipClient({ endpoint: 'https://api.example.com/evaluate' });
+
+			const original = globalThis.fetch;
+			const lateInstalled = vi.fn(async () => okResponse());
+			globalThis.fetch = lateInstalled as unknown as typeof globalThis.fetch;
+
+			try {
+				await client.evaluate('my-flag', {});
+				expect(lateInstalled).toHaveBeenCalledTimes(1);
+			} finally {
+				globalThis.fetch = original;
+			}
+		});
+	});
+
+	describe('abort signal', () => {
+		/** Transport that only settles when the signal it was handed aborts. */
+		function pendingTransport() {
+			const seen: (AbortSignal | undefined)[] = [];
+			const fetchImpl = vi.fn((_url: any, init?: RequestInit) => {
+				const signal = (init?.signal ?? undefined) as AbortSignal | undefined;
+				seen.push(signal);
+				return new Promise<Response>((_resolve, reject) => {
+					const fail = () => {
+						const error = new Error('The operation was aborted');
+						error.name = 'AbortError';
+						reject(error);
+					};
+					if (signal?.aborted) fail();
+					else signal?.addEventListener('abort', fail);
+				});
+			});
+			return { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch, calls: fetchImpl, seen };
+		}
+
+		it('aborts the underlying request when the caller signal fires', async () => {
+			const { fetchImpl, seen } = pendingTransport();
+			const controller = new AbortController();
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: fetchImpl,
+				retries: 0,
+			});
+
+			const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
+			controller.abort();
+
+			const error = await pending.catch((e) => e);
+
+			expect(seen[0]?.aborted).toBe(true);
+			expect(error).toBeInstanceOf(FlagshipError);
+			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
+			expect(error.retryable).toBe(false);
+		});
+
+		it('does not retry a caller abort', async () => {
+			const { fetchImpl, calls } = pendingTransport();
+			const controller = new AbortController();
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: fetchImpl,
+				retries: 3,
+				retryDelay: 0,
+			});
+
+			const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
+			controller.abort();
+			const error = await pending.catch((e) => e);
+
+			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
+			expect(calls).toHaveBeenCalledTimes(1);
+		});
+
+		it('still retries a timeout abort', async () => {
+			const { fetchImpl, calls } = pendingTransport();
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: fetchImpl,
+				timeout: 10,
+				retries: 1,
+				retryDelay: 0,
+			});
+
+			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+
+			expect(error.code).toBe(FlagshipErrorCode.TIMEOUT_ERROR);
+			expect(error.retryable).toBe(true);
+			expect(calls).toHaveBeenCalledTimes(2);
+		});
+
+		it('short-circuits an already-aborted signal without issuing a request', async () => {
+			const { fetchImpl, calls } = pendingTransport();
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: fetchImpl,
+				retries: 3,
+				retryDelay: 0,
+			});
+
+			const error = await client.evaluate('my-flag', {}, { signal: AbortSignal.abort('gone') }).catch((e) => e);
+
+			expect(error).toBeInstanceOf(FlagshipError);
+			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
+			expect(error.cause).toBe('gone');
+			expect(calls).not.toHaveBeenCalled();
+		});
+
+		it('honours a signal supplied through fetchOptions', async () => {
+			const { fetchImpl, seen } = pendingTransport();
+			const controller = new AbortController();
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: fetchImpl,
+				fetchOptions: { signal: controller.signal },
+				retries: 0,
+			});
+
+			const pending = client.evaluate('my-flag', {});
+			controller.abort();
+			const error = await pending.catch((e) => e);
+
+			expect(seen[0]?.aborted).toBe(true);
+			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
+		});
+
+		it('aborts when either the fetchOptions signal or the per-call signal fires', async () => {
+			const fetchOptionsController = new AbortController();
+			const { fetchImpl, seen } = pendingTransport();
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: fetchImpl,
+				fetchOptions: { signal: fetchOptionsController.signal },
+				retries: 0,
+			});
+
+			// Per-call signal aborts.
+			const callController = new AbortController();
+			const first = client.evaluate('my-flag', {}, { signal: callController.signal });
+			callController.abort();
+			expect((await first.catch((e) => e)).code).toBe(FlagshipErrorCode.ABORTED);
+			expect(seen[0]?.aborted).toBe(true);
+
+			// fetchOptions signal aborts.
+			const second = client.evaluate('my-flag', {}, { signal: new AbortController().signal });
+			fetchOptionsController.abort();
+			expect((await second.catch((e) => e)).code).toBe(FlagshipErrorCode.ABORTED);
+			expect(seen[1]?.aborted).toBe(true);
+		});
+
+		it('falls back to a linked controller on runtimes without AbortSignal.any', async () => {
+			const { fetchImpl, seen } = pendingTransport();
+			const original = AbortSignal.any;
+			(AbortSignal as any).any = undefined;
+
+			try {
+				const controller = new AbortController();
+				const client = new FlagshipClient({
+					endpoint: 'https://api.example.com/evaluate',
+					fetch: fetchImpl,
+					retries: 0,
+				});
+
+				const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
+				controller.abort();
+				const error = await pending.catch((e) => e);
+
+				expect(seen[0]).not.toBe(controller.signal);
+				expect(seen[0]?.aborted).toBe(true);
+				expect(error.code).toBe(FlagshipErrorCode.ABORTED);
+			} finally {
+				(AbortSignal as any).any = original;
+			}
+		});
+
+		it('leaves the timeout signal intact when no caller signal is supplied', async () => {
+			const { fetchImpl, seen } = pendingTransport();
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: fetchImpl,
+				timeout: 10,
+				retries: 0,
+			});
+
+			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+
+			expect(seen[0]).toBeInstanceOf(AbortSignal);
+			expect(seen[0]?.aborted).toBe(true);
+			expect(error.code).toBe(FlagshipErrorCode.TIMEOUT_ERROR);
+		});
+	});
+
+	describe('retryable classification', () => {
+		function statusTransport(status: number) {
+			return vi.fn(async () => new Response(null, { status, statusText: `Status ${status}` }));
+		}
+
+		it.each([408, 425, 429, 500, 503])('treats %i as retryable', async (status) => {
+			const transport = statusTransport(status);
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport as unknown as typeof globalThis.fetch,
+				retries: 1,
+				retryDelay: 0,
+			});
+
+			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+
+			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
+			expect(error.retryable).toBe(true);
+			expect(error.cause).toBeInstanceOf(Response);
+			expect(transport).toHaveBeenCalledTimes(2);
+		});
+
+		it.each([400, 401, 403, 404, 422])('treats %i as terminal', async (status) => {
+			const transport = statusTransport(status);
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport as unknown as typeof globalThis.fetch,
+				retries: 3,
+				retryDelay: 0,
+			});
+
+			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+
+			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
+			expect(error.retryable).toBe(false);
+			expect((error.cause as Response).status).toBe(status);
+			expect(transport).toHaveBeenCalledTimes(1);
+		});
+
+		it('marks transport failures as retryable', async () => {
+			const transport = vi.fn(async () => {
+				throw new Error('connection refused');
+			});
+
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport as unknown as typeof globalThis.fetch,
+				retries: 0,
+			});
+
+			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+
+			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
+			expect(error.retryable).toBe(true);
+		});
+	});
 });

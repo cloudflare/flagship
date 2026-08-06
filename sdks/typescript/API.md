@@ -156,13 +156,30 @@ new FlagshipServerProvider({
   retries: 1, // retry attempts on transient errors (default: 1, max: 10)
   retryDelay: 1000, // delay between retries in ms (default: 1000, max: 30000)
 
+  // Custom transport (default: globalThis.fetch, resolved at call time).
+  // Useful for routing evaluations through a service binding, or for tests.
+  // fetch: env.FLAGS_SERVICE.fetch.bind(env.FLAGS_SERVICE),
+
   // Caching — opt-in, off by default. See "Caching" below.
   cacheTtl: 30000, // ms; enables the cache when > 0
   cacheMaxSize: 1000, // max cached entries (default: 1000)
 });
 ```
 
-404 and 400 responses are never retried. Only transient server errors (5xx) and network failures trigger the retry logic.
+Only transient failures are retried. Everything else is treated as a definitive answer and propagated immediately:
+
+| Outcome                                    | Retried? | `FlagshipError.code` | `retryable` |
+| ------------------------------------------ | -------- | -------------------- | ----------- |
+| 408, 425, 429                              | yes      | `NETWORK_ERROR`      | `true`      |
+| 5xx                                        | yes      | `NETWORK_ERROR`      | `true`      |
+| Connection failure                         | yes      | `NETWORK_ERROR`      | `true`      |
+| Timeout                                    | yes      | `TIMEOUT_ERROR`      | `true`      |
+| Malformed response body                    | yes      | `PARSE_ERROR`        | `true`      |
+| Other non-2xx (400, 401, 403, 404, 422, …) | no       | `NETWORK_ERROR`      | `false`     |
+| Caller abort                               | no       | `ABORTED`            | `false`     |
+| Unserializable evaluation context          | no       | `INVALID_CONTEXT`    | `false`     |
+
+For HTTP failures the `FlagshipError.cause` is the underlying `Response`, so the status is available for inspection. Only a `retryable: false` failure is a definitive answer that is safe to cache; a `retryable: true` failure means "ask again later".
 
 ### Caching
 
@@ -343,6 +360,40 @@ When enabled, the server provider logs via the OpenFeature-injected `Logger` (de
 
 > Note: `logging` only controls Flagship SDK logs. OpenFeature's own framework-level logs are controlled separately via `OpenFeature.setLogger(myLogger)`.
 
+## Custom transport and cancellation
+
+`FlagshipClient` resolves its transport from `options.fetch`, falling back to `globalThis.fetch` at call time. The SDK never assigns to `globalThis.fetch`, so injecting a transport cannot affect unrelated traffic in the same isolate.
+
+`evaluate()` also accepts per-call overrides:
+
+```typescript
+import { FlagshipClient, FlagshipErrorCode, FlagshipError } from '@cloudflare/flagship';
+
+const client = new FlagshipClient({ appId: 'your-app-id', accountId: 'your-account-id' });
+
+try {
+  const result = await client.evaluate('my-flag', context, {
+    // Aborting this signal aborts the in-flight HTTP request.
+    signal: request.signal,
+    // Optional per-call transport override.
+    fetch: env.FLAGS_SERVICE.fetch.bind(env.FLAGS_SERVICE),
+  });
+} catch (error) {
+  if (error instanceof FlagshipError && error.code === FlagshipErrorCode.ABORTED) {
+    // The caller cancelled — not a Flagship failure, and never retried.
+  }
+}
+```
+
+Signal semantics:
+
+- A caller signal is **merged** with the request timeout and with `fetchOptions.signal` — whichever fires first aborts the request. None of them is discarded.
+- An already-aborted signal rejects with `ABORTED` before any request is issued.
+- A caller abort is never retried; a timeout abort is retried as usual.
+- Caller aborts (`ABORTED`) and timeouts (`TIMEOUT_ERROR`) are distinct error codes.
+
+Both providers accept `fetch` in HTTP mode and forward it to the underlying client. It must not be combined with `binding`.
+
 ## Error handling
 
 The provider always returns a valid `ResolutionDetails` — it never throws. On error, the default value is returned alongside an `errorCode` and `errorMessage` describing what went wrong.
@@ -364,7 +415,7 @@ if (details.errorCode) {
 | `TYPE_MISMATCH`   | The flag's resolved value type does not match the requested type                |
 | `INVALID_CONTEXT` | The evaluation context contains objects or arrays                               |
 | `PARSE_ERROR`     | The API response was not a valid evaluation response                            |
-| `GENERAL`         | Network error, timeout, or any other transient failure                          |
+| `GENERAL`         | Network error, timeout, caller abort, or any other transient failure            |
 
 ## Hooks
 
@@ -451,11 +502,11 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 
 - `FlagshipClient` — HTTP client with retry, timeout, AbortController
 - `ContextTransformer` — converts evaluation context to query parameters
-- `FlagshipError` — error class with `code` and `cause` properties
-- `FlagshipErrorCode` — enum: `NETWORK_ERROR`, `TIMEOUT_ERROR`, `PARSE_ERROR`, `INVALID_CONTEXT`
+- `FlagshipError` — error class with `code`, `cause`, and `retryable` properties
+- `FlagshipErrorCode` — enum: `NETWORK_ERROR`, `TIMEOUT_ERROR`, `ABORTED`, `PARSE_ERROR`, `INVALID_CONTEXT`
 - `isBindingOptions()` — type guard for binding options
 - `FLAGSHIP_DEFAULT_BASE_URL` — default base URL constant
-- Types: `FlagshipProviderOptions`, `FlagshipClientProviderOptions`, `FlagshipEvaluationResponse`, `CachedFlag`, `FlagshipBinding`, `FlagshipBindingEvaluationDetails`, `FlagshipBindingProviderOptions`, `FlagshipServerProviderOptions`, `FlagshipCacheOptions`
+- Types: `FlagshipProviderOptions`, `FlagshipRequestOptions`, `FlagshipClientProviderOptions`, `FlagshipEvaluationResponse`, `CachedFlag`, `FlagshipBinding`, `FlagshipBindingEvaluationDetails`, `FlagshipBindingProviderOptions`, `FlagshipServerProviderOptions`, `FlagshipCacheOptions`
 
 **`@cloudflare/flagship/server`** (core value exports + server-relevant types, plus):
 

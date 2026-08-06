@@ -93,6 +93,17 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			).toThrow('must not be provided');
 		});
 
+		it('should throw when binding and fetch are both provided', () => {
+			const binding = createMockBinding();
+			expect(
+				() =>
+					new FlagshipServerProvider({
+						binding,
+						fetch: globalThis.fetch,
+					} as any),
+			).toThrow('must not be provided');
+		});
+
 		it('should throw when binding and authToken are both provided', () => {
 			const binding = createMockBinding();
 			expect(

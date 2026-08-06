@@ -45,6 +45,7 @@ export {
 } from './index.js';
 export type {
 	FlagshipProviderOptions,
+	FlagshipRequestOptions,
 	FlagshipEvaluationResponse,
 	FlagshipBinding,
 	FlagshipBindingEvaluationDetails,

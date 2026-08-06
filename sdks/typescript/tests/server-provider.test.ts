@@ -860,4 +860,51 @@ describe('FlagshipServerProvider', () => {
 			expect(result.errorCode).toBeUndefined();
 		});
 	});
+	describe('injectable transport', () => {
+		it('routes HTTP-mode evaluations through the supplied fetch', async () => {
+			const transport = vi.fn(
+				async () => ({ ok: true, json: async () => ({ flagKey: 'my-flag', value: true, variant: 'on', reason: 'DEFAULT' }) }) as any,
+			);
+
+			const provider = new FlagshipServerProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport,
+			});
+
+			const result = await provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
+
+			expect(result.value).toBe(true);
+			expect(transport).toHaveBeenCalledTimes(1);
+			expect(global.fetch).not.toHaveBeenCalled();
+		});
+
+		it('maps a caller abort to ErrorCode.GENERAL', async () => {
+			const controller = new AbortController();
+			const transport = vi.fn(
+				(_url: any, init?: RequestInit) =>
+					new Promise<any>((_resolve, reject) => {
+						(init?.signal as AbortSignal | undefined)?.addEventListener('abort', () => {
+							const error = new Error('The operation was aborted');
+							error.name = 'AbortError';
+							reject(error);
+						});
+					}),
+			);
+
+			const provider = new FlagshipServerProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport as any,
+				fetchOptions: { signal: controller.signal },
+				retries: 0,
+			});
+
+			const pending = provider.resolveBooleanEvaluation('my-flag', false, {}, noopLogger);
+			controller.abort();
+			const result = await pending;
+
+			expect(result.value).toBe(false);
+			expect(result.errorCode).toBe(ErrorCode.GENERAL);
+			expect(result.errorMessage).toContain('aborted');
+		});
+	});
 });

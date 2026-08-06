@@ -6,15 +6,23 @@ import {
 	FLAGSHIP_DEFAULT_BASE_URL,
 	type FlagshipEvaluationResponse,
 	type FlagshipProviderOptions,
+	type FlagshipRequestOptions,
 } from './types.js';
 
 interface ResolvedOptions {
 	endpoint: string;
 	fetchOptions: RequestInit;
+	fetch: typeof globalThis.fetch | undefined;
 	timeout: number;
 	retries: number;
 	retryDelay: number;
 }
+
+/**
+ * Non-2xx statuses that represent a transient condition. Everything else in
+ * the 4xx range is treated as a definitive answer and never retried.
+ */
+const RETRYABLE_STATUSES = new Set([408, 425, 429]);
 
 export class FlagshipClient {
 	private readonly options: ResolvedOptions;
@@ -23,6 +31,7 @@ export class FlagshipClient {
 		this.options = {
 			endpoint: resolveEndpoint(options),
 			fetchOptions: buildFetchOptions(options),
+			fetch: options.fetch,
 			timeout: options.timeout || 5000,
 			retries: Math.min(options.retries !== undefined ? options.retries : 1, 10),
 			retryDelay: Math.min(options.retryDelay !== undefined ? options.retryDelay : 1000, 30_000),
@@ -35,8 +44,12 @@ export class FlagshipClient {
 	 * Throws a `FlagshipError` with `FlagshipErrorCode.INVALID_CONTEXT` if the
 	 * evaluation context contains complex values (objects or arrays) that cannot
 	 * be serialized to query parameters.
+	 *
+	 * `options.fetch` overrides the transport for this call, and
+	 * `options.signal` cancels the in-flight HTTP request — aborting rejects
+	 * with `FlagshipErrorCode.ABORTED` and is never retried.
 	 */
-	async evaluate(flagKey: string, context: EvaluationContext): Promise<FlagshipEvaluationResponse> {
+	async evaluate(flagKey: string, context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipEvaluationResponse> {
 		const droppedKeys: string[] = [];
 		const url = ContextTransformer.buildUrl(this.options.endpoint, flagKey, context, droppedKeys);
 
@@ -48,29 +61,25 @@ export class FlagshipClient {
 			);
 		}
 
-		return this.fetchWithRetry(url, this.options.retries);
+		return this.fetchWithRetry(url, this.options.retries, options);
 	}
 
 	/**
-	 * Fetch with retry logic. Only retries on transient network/server errors —
-	 * 404 and 400 responses are terminal and propagated immediately.
+	 * Fetch with retry logic. Only retries failures marked as retryable —
+	 * terminal responses (400, 401, 403, 404, …) and caller aborts are
+	 * propagated immediately.
 	 */
-	private async fetchWithRetry(url: string, retriesLeft: number): Promise<FlagshipEvaluationResponse> {
+	private async fetchWithRetry(url: string, retriesLeft: number, options?: FlagshipRequestOptions): Promise<FlagshipEvaluationResponse> {
 		try {
-			return await this.fetchWithTimeout(url, this.options.timeout);
+			return await this.fetchWithTimeout(url, this.options.timeout, options);
 		} catch (error) {
-			// Do not retry on client errors — 404 (flag not found) and 400 (bad request)
-			// are deterministic and retrying will not change the outcome.
-			if (error instanceof FlagshipError && error.cause instanceof Response) {
-				const status = error.cause.status;
-				if (status === 404 || status === 400) {
-					throw error;
-				}
+			if (error instanceof FlagshipError && !error.retryable) {
+				throw error;
 			}
 
 			if (retriesLeft > 0) {
 				await new Promise((resolve) => setTimeout(resolve, this.options.retryDelay));
-				return this.fetchWithRetry(url, retriesLeft - 1);
+				return this.fetchWithRetry(url, retriesLeft - 1, options);
 			}
 
 			throw error;
@@ -78,45 +87,110 @@ export class FlagshipClient {
 	}
 
 	/**
-	 * Fetch with timeout using AbortController
+	 * Issues a single request against the resolved transport, aborting it when
+	 * the timeout elapses or when any caller-supplied signal fires.
 	 */
-	private async fetchWithTimeout(url: string, timeout: number): Promise<FlagshipEvaluationResponse> {
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), timeout);
+	private async fetchWithTimeout(url: string, timeout: number, options?: FlagshipRequestOptions): Promise<FlagshipEvaluationResponse> {
+		const callerSignals = [options?.signal, this.options.fetchOptions.signal].filter((signal): signal is AbortSignal => Boolean(signal));
+
+		const alreadyAborted = callerSignals.find((signal) => signal.aborted);
+		if (alreadyAborted) {
+			throw abortedError(alreadyAborted.reason);
+		}
+
+		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
+
+		const timeoutController = new AbortController();
+		let timedOut = false;
+		const timeoutId = setTimeout(() => {
+			timedOut = true;
+			timeoutController.abort();
+		}, timeout);
+		const merged = mergeSignals([timeoutController.signal, ...callerSignals]);
 
 		try {
-			const response = await fetch(url, {
+			const response = await transport(url, {
 				...this.options.fetchOptions,
-				signal: controller.signal,
+				signal: merged.signal,
 			});
 
-			clearTimeout(timeoutId);
-
 			if (!response.ok) {
-				throw new FlagshipError(`HTTP ${response.status}: ${response.statusText}`, FlagshipErrorCode.NETWORK_ERROR, response);
+				throw new FlagshipError(
+					`HTTP ${response.status}: ${response.statusText}`,
+					FlagshipErrorCode.NETWORK_ERROR,
+					response,
+					isRetryableStatus(response.status),
+				);
 			}
 
 			const data = await response.json();
 
 			if (!data || typeof data !== 'object' || !('flagKey' in data) || !('value' in data)) {
-				throw new FlagshipError('Invalid response format from Flagship API', FlagshipErrorCode.PARSE_ERROR);
+				throw new FlagshipError('Invalid response format from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 			}
 
 			return data as FlagshipEvaluationResponse;
 		} catch (error) {
-			clearTimeout(timeoutId);
-
-			if (error instanceof Error && error.name === 'AbortError') {
-				throw new FlagshipError(`Request timeout after ${timeout}ms`, FlagshipErrorCode.TIMEOUT_ERROR, error);
-			}
-
 			if (error instanceof FlagshipError) {
 				throw error;
 			}
 
-			throw new FlagshipError(`Network error: ${error}`, FlagshipErrorCode.NETWORK_ERROR, error);
+			const abortedBy = callerSignals.find((signal) => signal.aborted);
+			if (abortedBy) {
+				throw abortedError(abortedBy.reason ?? error);
+			}
+
+			if (timedOut || (error instanceof Error && error.name === 'AbortError')) {
+				throw new FlagshipError(`Request timeout after ${timeout}ms`, FlagshipErrorCode.TIMEOUT_ERROR, error, true);
+			}
+
+			throw new FlagshipError(`Network error: ${error}`, FlagshipErrorCode.NETWORK_ERROR, error, true);
+		} finally {
+			clearTimeout(timeoutId);
+			merged.dispose();
 		}
 	}
+}
+
+function abortedError(cause: unknown): FlagshipError {
+	return new FlagshipError('Request aborted by caller', FlagshipErrorCode.ABORTED, cause, false);
+}
+
+/** 408, 425, 429 and any 5xx are transient; every other non-2xx is definitive. */
+function isRetryableStatus(status: number): boolean {
+	return status >= 500 || RETRYABLE_STATUSES.has(status);
+}
+
+/**
+ * Combines signals into one. Prefers `AbortSignal.any` where available and
+ * falls back to a manually linked `AbortController` on older runtimes.
+ */
+function mergeSignals(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
+	const noop = (): void => {};
+
+	if (signals.length === 1) {
+		return { signal: signals[0]!, dispose: noop };
+	}
+
+	if (typeof AbortSignal.any === 'function') {
+		return { signal: AbortSignal.any(signals), dispose: noop };
+	}
+
+	const controller = new AbortController();
+	const onAbort = (event: Event): void => controller.abort((event.target as AbortSignal).reason);
+
+	for (const signal of signals) {
+		signal.addEventListener('abort', onAbort);
+	}
+
+	return {
+		signal: controller.signal,
+		dispose: () => {
+			for (const signal of signals) {
+				signal.removeEventListener('abort', onAbort);
+			}
+		},
+	};
 }
 
 /**

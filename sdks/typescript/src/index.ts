@@ -15,6 +15,7 @@
 // Export types
 export type {
 	FlagshipProviderOptions,
+	FlagshipRequestOptions,
 	FlagshipClientProviderOptions,
 	FlagshipEvaluationResponse,
 	CachedFlag,

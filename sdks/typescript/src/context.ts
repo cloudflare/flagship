@@ -22,39 +22,7 @@ export class ContextTransformer {
 	 * @param droppedKeys - Optional collector array; skipped key names are pushed here
 	 */
 	static toQueryParams(context: EvaluationContext, droppedKeys?: string[]): Record<string, string> {
-		const params: Record<string, string> = {};
-
-		for (const [key, value] of Object.entries(context)) {
-			if (value === undefined || value === null) {
-				continue;
-			}
-
-			if (value instanceof Date) {
-				params[key] = value.toISOString();
-				continue;
-			}
-
-			if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-				params[key] = String(value);
-				continue;
-			}
-
-			if (typeof value === 'object') {
-				if (droppedKeys) {
-					// Caller is collecting dropped keys and will handle the situation.
-					droppedKeys.push(key);
-				} else {
-					// No collector — warn so the issue is visible in development.
-					console.warn(
-						`[Flagship] Context key "${key}" is a complex object/array and cannot be serialized to a query parameter. ` +
-							'This value will be ignored during flag evaluation.',
-					);
-				}
-				continue;
-			}
-		}
-
-		return params;
+		return Object.fromEntries(toSearchParams(context, droppedKeys));
 	}
 
 	/**
@@ -66,14 +34,48 @@ export class ContextTransformer {
 	 * @param droppedKeys - Optional collector array; skipped context key names are pushed here
 	 */
 	static buildUrl(baseUrl: string, flagKey: string, context: EvaluationContext, droppedKeys?: string[]): string {
-		const url = new URL(baseUrl);
-		url.searchParams.set('flagKey', flagKey);
+		return buildEvaluationUrl(new URL(baseUrl).toString(), flagKey, context, droppedKeys);
+	}
+}
 
-		const params = this.toQueryParams(context, droppedKeys);
-		for (const [key, value] of Object.entries(params)) {
-			url.searchParams.set(key, value);
+export function buildEvaluationUrl(baseUrl: string, flagKey: string, context: EvaluationContext, droppedKeys?: string[]): string {
+	const params = toSearchParams(context, droppedKeys, flagKey);
+
+	if (!baseUrl.includes('?') && !baseUrl.includes('#')) return `${baseUrl}?${params}`;
+
+	const url = new URL(baseUrl);
+	for (const [key, value] of params) url.searchParams.set(key, value);
+	return url.toString();
+}
+
+function toSearchParams(context: EvaluationContext, droppedKeys?: string[], flagKey?: string): URLSearchParams {
+	const params = new URLSearchParams();
+	if (flagKey !== undefined) params.set('flagKey', flagKey);
+
+	for (const [key, value] of Object.entries(context)) {
+		if (value === undefined || value === null) continue;
+
+		if (value instanceof Date) {
+			params.set(key, value.toISOString());
+			continue;
 		}
 
-		return url.toString();
+		if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+			params.set(key, String(value));
+			continue;
+		}
+
+		if (typeof value === 'object') {
+			if (droppedKeys) {
+				droppedKeys.push(key);
+			} else {
+				console.warn(
+					`[Flagship] Context key "${key}" is a complex object/array and cannot be serialized to a query parameter. ` +
+						'This value will be ignored during flag evaluation.',
+				);
+			}
+		}
 	}
+
+	return params;
 }

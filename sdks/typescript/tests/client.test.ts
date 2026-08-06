@@ -454,6 +454,49 @@ describe('FlagshipClient', () => {
 			vi.useRealTimers();
 		});
 
+		it('aborts while waiting to retry', async () => {
+			const transport = vi.fn(async () => {
+				throw new Error('flaky');
+			});
+			const controller = new AbortController();
+			const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport as unknown as typeof globalThis.fetch,
+				retries: 1,
+				retryDelay: 10_000,
+			});
+
+			const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
+			await vi.waitFor(() => expect(setTimeoutSpy.mock.calls.some((call) => call[1] === 10_000)).toBe(true));
+			controller.abort('cancelled');
+
+			const error = await pending.catch((e) => e);
+			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
+			expect(error.cause).toBe('cancelled');
+			expect(transport).toHaveBeenCalledTimes(1);
+		});
+
+		it('cancels a retryable response body before retrying', async () => {
+			const cancel = vi.fn();
+			const retryableResponse = { ok: false, status: 500, statusText: 'Server Error', body: { cancel } };
+			const transport = vi
+				.fn()
+				.mockResolvedValueOnce(retryableResponse)
+				.mockResolvedValueOnce({ ok: true, json: async () => ({ flagKey: 'my-flag', value: true }) });
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				fetch: transport as unknown as typeof globalThis.fetch,
+				retries: 1,
+				retryDelay: 0,
+			});
+
+			await client.evaluate('my-flag', {});
+
+			expect(cancel).toHaveBeenCalledTimes(1);
+			expect(transport).toHaveBeenCalledTimes(2);
+		});
+
 		it('uses default baseUrl when only appId and accountId provided', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,

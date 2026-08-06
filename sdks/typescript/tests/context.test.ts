@@ -153,6 +153,24 @@ describe('ContextTransformer', () => {
 			expect(url.searchParams.get('email')).toBe('user@example.com');
 		});
 
+		it('preserves parameter order and encoding', () => {
+			const result = ContextTransformer.buildUrl('https://api.example.com/evaluate', 'my flag/name', {
+				targetingKey: 'user-123',
+				email: 'user+test@example.com',
+				active: false,
+			});
+
+			expect(result).toBe(
+				'https://api.example.com/evaluate?flagKey=my+flag%2Fname&targetingKey=user-123&email=user%2Btest%40example.com&active=false',
+			);
+		});
+
+		it('preserves existing query parameters and fragments', () => {
+			const result = ContextTransformer.buildUrl('https://api.example.com/evaluate?source=sdk#result', 'my-flag', { source: 'context' });
+
+			expect(result).toBe('https://api.example.com/evaluate?source=context&flagKey=my-flag#result');
+		});
+
 		it('should handle special characters in values', () => {
 			const baseUrl = 'https://api.example.com/evaluate';
 			const flagKey = 'my-flag';
@@ -176,6 +194,11 @@ describe('ContextTransformer', () => {
 			const result = ContextTransformer.buildUrl(baseUrl, flagKey, context);
 
 			expect(result).toBe('https://api.example.com/api/v1/apps/my-app/evaluate?flagKey=my-flag');
+		});
+
+		it('preserves URL canonicalization and validation', () => {
+			expect(ContextTransformer.buildUrl('https://api.example.com', 'my flag', {})).toBe('https://api.example.com/?flagKey=my+flag');
+			expect(() => ContextTransformer.buildUrl('not-a-url', 'my-flag', {})).toThrow();
 		});
 
 		it('should encode special characters in flagKey', () => {

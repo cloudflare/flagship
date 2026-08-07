@@ -21,8 +21,9 @@
 		"lint": "oxlint .",
 		"typecheck": "tsc --noEmit && pnpm -r run typecheck",
 		"check": "sherif -r root-package-manager-field && oxfmt --check . && oxlint . && pnpm run typecheck",
-		"test": "pnpm -r run test",
-		"prepare": "husky"
+		"test": "pnpm run release:test && pnpm -r run test",
+		"prepare": "husky",
+		"release:test": "tsx --test .github/release-sdks.test.ts"
 	},
 	"devDependencies": {
 		"@changesets/changelog-github": "^0.7.0",

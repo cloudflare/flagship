@@ -12,11 +12,20 @@ export function classifySdkChanges(paths: string[]): SdkChanges {
 	const typescript = relative('typescript');
 	const python = relative('python');
 	const go = relative('go');
+	const isDocumentation = (path: string): boolean =>
+		path.startsWith('examples/') ||
+		path.startsWith('docs/') ||
+		path.endsWith('.md') ||
+		path.slice(path.lastIndexOf('/') + 1).startsWith('LICENSE');
 
 	return {
-		typescript: typescript.some((path) => path.startsWith('src/') || ['package.json', 'tsconfig.json', 'tsdown.config.ts'].includes(path)),
-		python: python.some((path) => path.startsWith('src/') || path === 'pyproject.toml'),
-		go: go.some((path) => (!path.includes('/') && path.endsWith('.go') && !path.endsWith('_test.go')) || path === 'go.mod'),
+		typescript: typescript.some(
+			(path) => isDocumentation(path) || path.startsWith('src/') || ['package.json', 'tsconfig.json', 'tsdown.config.ts'].includes(path),
+		),
+		python: python.some((path) => isDocumentation(path) || path.startsWith('src/') || path === 'pyproject.toml'),
+		go: go.some(
+			(path) => isDocumentation(path) || (!path.includes('/') && path.endsWith('.go') && !path.endsWith('_test.go')) || path === 'go.mod',
+		),
 	};
 }
 

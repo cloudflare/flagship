@@ -7,25 +7,26 @@ import test from 'node:test';
 import { classifySdkChanges, detectSdkChanges, publishCommands } from './release-sdks.js';
 
 test('classifies changes by SDK directory', () => {
-	assert.deepEqual(classifySdkChanges(['sdks/typescript/src/client.ts', 'sdks/go/client.go', 'sdks/python/README.md']), {
+	assert.deepEqual(classifySdkChanges(['sdks/typescript/src/client.ts', 'sdks/go/client.go', 'README.md']), {
 		typescript: true,
 		python: false,
 		go: true,
 	});
 });
 
-test('ignores tests, examples, and package documentation', () => {
+test('ignores test-only changes', () => {
 	assert.deepEqual(
-		classifySdkChanges([
-			'sdks/typescript/tests/client.test.ts',
-			'sdks/typescript/README.md',
-			'sdks/python/tests/test_client.py',
-			'sdks/python/LICENSE',
-			'sdks/go/client_test.go',
-			'sdks/go/examples/basic/main.go',
-		]),
+		classifySdkChanges(['sdks/typescript/tests/client.test.ts', 'sdks/python/tests/test_client.py', 'sdks/go/client_test.go']),
 		{ typescript: false, python: false, go: false },
 	);
+});
+
+test('includes examples, documentation, and licenses', () => {
+	assert.deepEqual(classifySdkChanges(['sdks/typescript/README.md', 'sdks/python/LICENSE', 'sdks/go/examples/basic/main.go']), {
+		typescript: true,
+		python: true,
+		go: true,
+	});
 });
 
 test('includes package and build configuration changes but excludes lockfiles', () => {

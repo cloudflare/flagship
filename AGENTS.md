@@ -206,7 +206,7 @@ The release pipeline runs `.github/changeset-version.ts`, which:
 5. Deletes duplicate changelogs generated for private SDK packages.
 6. Re-runs `pnpm install` to refresh the lockfile.
 
-After merge the same workflow compares each SDK directory against the parent of the release commit, starting at that SDK's previous publication tag. This excludes mechanical version updates in the release PR and keeps failed native publishes eligible for the next release. It then:
+After merge the same workflow compares each SDK directory against the parent of the release commit, starting at that SDK's previous publication tag. This keeps failed native publishes eligible for the next release. Detection skips commits titled `chore(release): version SDK packages` and ignores generated `CHANGELOG.md` files, so the mechanical version bumps never look like source changes — an SDK skipped by one release has a stale baseline whose window spans earlier release commits. It then:
 
 - Publishes `@cloudflare/flagship` to npm only when `sdks/typescript/` changed.
 - Publishes to PyPI and creates `sdks/python/v*` only when publish-relevant files in `sdks/python/` changed, using trusted publishing (OIDC, no PyPI token).

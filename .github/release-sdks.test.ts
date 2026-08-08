@@ -29,6 +29,14 @@ test('includes examples, documentation, and licenses', () => {
 	});
 });
 
+test('excludes generated changelogs', () => {
+	assert.deepEqual(classifySdkChanges(['sdks/typescript/CHANGELOG.md', 'sdks/python/CHANGELOG.md', 'sdks/go/CHANGELOG.md']), {
+		typescript: false,
+		python: false,
+		go: false,
+	});
+});
+
 test('includes package and build configuration changes but excludes lockfiles', () => {
 	assert.deepEqual(classifySdkChanges(['sdks/typescript/package.json', 'sdks/python/pyproject.toml', 'sdks/go/go.mod']), {
 		typescript: true,
@@ -56,9 +64,7 @@ test('ignores mechanical SDK version changes in the release commit', () => {
 	const repo = createRepository();
 	write(repo, 'sdks/python/src/client.py', 'changed\n');
 	commit(repo, 'change python');
-
-	for (const sdk of ['typescript', 'python', 'go']) write(repo, `sdks/${sdk}/package.json`, '{"version":"0.2.0"}\n');
-	commit(repo, 'version SDKs');
+	releaseCommit(repo, '0.2.0');
 
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false });
 });
@@ -67,8 +73,7 @@ test('reports no SDK changes after the release is tagged', () => {
 	const repo = createRepository();
 	write(repo, 'sdks/go/client.go', 'changed\n');
 	commit(repo, 'change go');
-	write(repo, 'sdks/go/package.json', '{"version":"0.2.0"}\n');
-	commit(repo, 'version SDKs');
+	releaseCommit(repo, '0.2.0');
 	git(repo, 'tag', '@cloudflare/flagship@0.2.0');
 	write(repo, 'README.md', 'docs\n');
 	commit(repo, 'update docs');
@@ -82,8 +87,7 @@ test('uses the first parent of a merged release PR', () => {
 	write(repo, 'sdks/go/client.go', 'changed\n');
 	commit(repo, 'change go');
 	git(repo, 'checkout', '-b', 'release');
-	for (const sdk of ['typescript', 'python', 'go']) write(repo, `sdks/${sdk}/package.json`, '{"version":"0.2.0"}\n');
-	commit(repo, 'version SDKs');
+	releaseCommit(repo, '0.2.0');
 	git(repo, 'checkout', mainBranch);
 	git(repo, 'merge', '--no-ff', 'release', '-m', 'merge release PR');
 
@@ -104,23 +108,34 @@ test('retains unpublished SDK changes across canonical releases', () => {
 	git(repo, 'tag', 'sdks/go/v0.1.0');
 	write(repo, 'sdks/go/client.go', 'changed\n');
 	commit(repo, 'change go');
-	write(repo, 'sdks/go/package.json', '{"version":"0.2.0"}\n');
-	commit(repo, 'version SDKs');
+	releaseCommit(repo, '0.2.0');
 	git(repo, 'tag', '@cloudflare/flagship@0.2.0');
 	write(repo, 'README.md', 'next release\n');
 	commit(repo, 'prepare next release');
-	write(repo, 'sdks/typescript/package.json', '{"version":"0.3.0"}\n');
-	commit(repo, 'version SDKs again');
+	releaseCommit(repo, '0.3.0');
 
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: true });
+});
+
+test('ignores release commits inside a stale SDK baseline window', () => {
+	const repo = createRepository();
+	git(repo, 'tag', 'sdks/go/v0.1.0');
+	write(repo, 'sdks/typescript/src/client.ts', 'changed\n');
+	commit(repo, 'change typescript');
+	releaseCommit(repo, '0.2.0');
+	git(repo, 'tag', '@cloudflare/flagship@0.2.0');
+	write(repo, 'sdks/typescript/src/client.ts', 'changed again\n');
+	commit(repo, 'change typescript again');
+	releaseCommit(repo, '0.3.0');
+
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: true, python: false, go: false });
 });
 
 test('ignores an SDK tag that is not reachable from the release parent', () => {
 	const repo = createRepository();
 	write(repo, 'sdks/python/src/client.py', 'changed\n');
 	commit(repo, 'change python');
-	write(repo, 'sdks/python/package.json', '{"version":"0.2.0"}\n');
-	commit(repo, 'version SDKs');
+	releaseCommit(repo, '0.2.0');
 	git(repo, 'tag', '@cloudflare/flagship@0.2.0');
 	git(repo, 'tag', 'sdks/python/v0.2.0');
 
@@ -140,6 +155,17 @@ function createRepository(): string {
 	commit(repo, 'initial release');
 	git(repo, 'tag', '@cloudflare/flagship@0.1.0');
 	return repo;
+}
+
+/** Mirrors what `.github/changeset-version.ts` writes, including the release commit message. */
+function releaseCommit(repo: string, version: string): void {
+	for (const sdk of ['typescript', 'python', 'go']) {
+		write(repo, `sdks/${sdk}/package.json`, `{"version":"${version}"}\n`);
+		write(repo, `sdks/${sdk}/CHANGELOG.md`, `## ${version}\n`);
+	}
+	write(repo, 'sdks/python/pyproject.toml', `version = "${version}"\n`);
+	write(repo, 'sdks/python/uv.lock', `version = "${version}"\n`);
+	commit(repo, `chore(release): version SDK packages (#${version.replaceAll('.', '')})`);
 }
 
 function write(repo: string, path: string, content: string): void {

@@ -72,6 +72,8 @@ jobs:
           version: pnpm tsx .github/changeset-version.ts
           publish: pnpm tsx .github/release-sdks.ts publish
           title: 'chore(release): version SDK packages'
+          # `.github/release-sdks.ts` matches this message to skip mechanical version
+          # bumps when detecting SDK changes. Keep both in sync.
           commit: 'chore(release): version SDK packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

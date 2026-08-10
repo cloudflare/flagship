@@ -21,11 +21,11 @@ test('ignores test-only changes', () => {
 	);
 });
 
-test('includes examples, documentation, and licenses', () => {
+test('ignores examples, documentation, and licenses', () => {
 	assert.deepEqual(classifySdkChanges(['sdks/typescript/README.md', 'sdks/python/LICENSE', 'sdks/go/examples/basic/main.go']), {
-		typescript: true,
-		python: true,
-		go: true,
+		typescript: false,
+		python: false,
+		go: false,
 	});
 });
 
@@ -92,6 +92,20 @@ test('reports no changes when the head commit is not a release commit', () => {
 	commit(repo, 'docs: unrelated follow-up');
 
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false });
+});
+
+test('does not publish native SDKs for documentation changes', () => {
+	const repo = createRepository();
+	git(repo, 'tag', 'sdks/go/v0.1.0');
+	write(repo, 'sdks/go/README.md', 'changed\n');
+	write(repo, 'sdks/go/LICENSE', 'changed\n');
+	write(repo, 'sdks/python/README.md', 'changed\n');
+	commit(repo, 'docs: update native SDK documentation');
+	write(repo, 'sdks/typescript/src/client.ts', 'changed\n');
+	commit(repo, 'feat: change typescript');
+	releaseCommit(repo, '0.2.0');
+
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: true, python: false, go: false });
 });
 
 test('uses the first parent of a merged release PR', () => {

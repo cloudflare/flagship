@@ -15,14 +15,25 @@ jobs:
       name: pypi
       url: https://pypi.org/project/cloudflare-flagship/
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           working-directory: sdks/python
+
+      - name: Bootstrap Python release baseline
+        run: |
+          if [ -z "$(git tag --list 'sdks/python/v*')" ]; then
+            BASE=$(git describe --first-parent --tags --match '@cloudflare/flagship@*' --exclude '*-*' --abbrev=0 "${GITHUB_SHA}^1")
+            TAG="sdks/python/v${BASE##*@}"
+            git tag "${TAG}" "${BASE}"
+            git push origin "${TAG}"
+          fi
 
       - name: Build
         working-directory: sdks/python
@@ -30,4 +41,19 @@ jobs:
 
       - name: Publish
         working-directory: sdks/python
-        run: uv publish
+        run: uv publish --check-url https://pypi.org/simple
+
+      - name: Tag Python SDK release
+        run: |
+          VERSION=$(uv version --project sdks/python --short)
+          TAG="sdks/python/v${VERSION}"
+          if git rev-parse --verify --quiet "refs/tags/${TAG}"; then
+            test "$(git rev-list -n 1 "${TAG}")" = "${GITHUB_SHA}" || {
+              echo "${TAG} exists on a different commit." >&2
+              exit 1
+            }
+            echo "${TAG} already exists on this release; skipping."
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          fi

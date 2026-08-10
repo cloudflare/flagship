@@ -206,10 +206,12 @@ The release pipeline runs `.github/changeset-version.ts`, which:
 5. Deletes duplicate changelogs generated for private SDK packages.
 6. Re-runs `pnpm install` to refresh the lockfile.
 
-After merge the same workflow runs `pnpm changeset publish` and:
+After merge the same workflow compares each SDK directory against the parent of the release commit, starting at that SDK's previous publication tag. This keeps failed native publishes eligible for the next release. Detection reports nothing unless the pushed commit merged the release PR — recognised by the `chore(release): version SDK packages` subject on the commit or, for merge commits, its second parent. Ordinary pushes to `main` also have an empty changeset queue, so without that gate they would publish an unbumped version and stamp an SDK tag on a non-release commit, poisoning the baseline for later changes. Within a release, detection skips those same release commits and ignores generated `CHANGELOG.md` files, so the mechanical version bumps never look like source changes — an SDK skipped by one release has a stale baseline whose window spans earlier release commits. It then:
 
-- Publishes public npm SDKs (currently `@cloudflare/flagship`) and creates the canonical `@cloudflare/flagship@*` git tag.
-- Skips npm publish and tag creation for `private: true` SDKs (`privatePackages.tag: false`). The Python PyPI workflow subscribes to the canonical `@cloudflare/flagship@*` tag and publishes via PyPI trusted publishing (OIDC, no PyPI token). For Go, the canonical release tag is the version signal — no additional file sync is needed.
+- Publishes `@cloudflare/flagship` to npm only when `sdks/typescript/` changed.
+- Publishes to PyPI and creates `sdks/python/v*` only when publish-relevant files in `sdks/python/` changed, using trusted publishing (OIDC, no PyPI token).
+- Creates `sdks/go/v*` only when publish-relevant files in `sdks/go/` changed.
+- Creates the canonical `@cloudflare/flagship@*` tag for every release, even when npm is skipped, so versions and future change detection retain one shared baseline.
 
 Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Non-npm SDK packages should use `private: true` and keep their native manifest beside it:
 
@@ -235,8 +237,8 @@ A `CI Success` aggregator job depends on all of the above and is the single requ
 
 Publishing is split across two workflows; `pull-request.yml` is the source of truth for correctness and is never re-run during release:
 
-- `release.yml` runs on pushes to `main`. Changesets opens or updates a release PR that bumps versions; merging that PR triggers the same workflow, which then publishes npm packages and reports `published: true`.
-- `publish-pypi.yml` is a reusable workflow (`workflow_call`) invoked by `release.yml` only when `published == 'true'`. It builds the Python SDK and publishes to PyPI via OIDC trusted publishing — never runs on every push.
+- `release.yml` runs on pushes to `main`. Changesets opens or updates a release PR that bumps versions; merging that PR triggers the same workflow, which publishes or tags only SDKs whose directories changed.
+- `publish-pypi.yml` is a reusable workflow (`workflow_call`) invoked by `release.yml` only for a canonical release that includes Python SDK changes.
 
 ## Boundaries
 

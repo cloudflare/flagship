@@ -8,6 +8,6 @@ We have a quick list of common questions to get you started engaging with this p
 
 ## Flagship SDK releases
 
-This repo uses Changesets for every SDK language. Release automation opens one SDK version PR and expands any SDK changeset so all SDK packages are versioned together.
+This repo uses Changesets for every SDK language. Release automation opens one SDK version PR and expands any SDK changeset so all SDK packages are versioned together. Publishing is independent: npm, PyPI, and Go releases are produced only when publish-relevant source or package configuration changed since that SDK's previous release tag.
 
 Use `pnpm changeset` for any published SDK change. You only need to select the SDK package you changed; the release workflow adds the other SDK packages during versioning.

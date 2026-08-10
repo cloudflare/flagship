@@ -40,6 +40,11 @@ describe('FlagshipError', () => {
 		expect(err.cause).toBeUndefined();
 	});
 
+	it('is non-retryable by default and honours an explicit flag', () => {
+		expect(new FlagshipError('oops', FlagshipErrorCode.NETWORK_ERROR).retryable).toBe(false);
+		expect(new FlagshipError('oops', FlagshipErrorCode.NETWORK_ERROR, undefined, true).retryable).toBe(true);
+	});
+
 	it('instanceof check works after prototype fix', () => {
 		function throwFlagshipError() {
 			throw new FlagshipError('test', FlagshipErrorCode.NETWORK_ERROR);
@@ -57,6 +62,7 @@ describe('FlagshipErrorCode', () => {
 	it('has all expected string values', () => {
 		expect(FlagshipErrorCode.NETWORK_ERROR).toBe('NETWORK_ERROR');
 		expect(FlagshipErrorCode.TIMEOUT_ERROR).toBe('TIMEOUT_ERROR');
+		expect(FlagshipErrorCode.ABORTED).toBe('ABORTED');
 		expect(FlagshipErrorCode.PARSE_ERROR).toBe('PARSE_ERROR');
 		expect(FlagshipErrorCode.INVALID_CONTEXT).toBe('INVALID_CONTEXT');
 	});

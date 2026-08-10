@@ -24,7 +24,13 @@
 
 // Re-export core utilities
 export { FlagshipClient, ContextTransformer, FlagshipError, FlagshipErrorCode, FLAGSHIP_DEFAULT_BASE_URL } from './index.js';
-export type { FlagshipProviderOptions, FlagshipClientProviderOptions, FlagshipEvaluationResponse, CachedFlag } from './index.js';
+export type {
+	FlagshipProviderOptions,
+	FlagshipRequestOptions,
+	FlagshipClientProviderOptions,
+	FlagshipEvaluationResponse,
+	CachedFlag,
+} from './index.js';
 
 // Export client provider
 export { FlagshipClientProvider } from './client-provider.js';

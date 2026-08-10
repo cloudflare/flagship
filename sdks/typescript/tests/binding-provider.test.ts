@@ -16,21 +16,17 @@ function createMockBinding(): FlagshipBinding {
 		getStringValue: vi.fn((_flagKey: string, defaultValue: string) => Promise.resolve(defaultValue)),
 		getNumberValue: vi.fn((_flagKey: string, defaultValue: number) => Promise.resolve(defaultValue)),
 		getObjectValue: vi.fn(<T extends object>(_flagKey: string, defaultValue: T) => Promise.resolve(defaultValue)),
-		getBooleanDetails: vi.fn(
-			(flagKey: string, defaultValue: boolean): Promise<FlagshipBindingEvaluationDetails<boolean>> =>
-				Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
+		getBooleanDetails: vi.fn((flagKey: string, defaultValue: boolean): Promise<FlagshipBindingEvaluationDetails<boolean>> =>
+			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
 		),
-		getStringDetails: vi.fn(
-			(flagKey: string, defaultValue: string): Promise<FlagshipBindingEvaluationDetails<string>> =>
-				Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
+		getStringDetails: vi.fn((flagKey: string, defaultValue: string): Promise<FlagshipBindingEvaluationDetails<string>> =>
+			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
 		),
-		getNumberDetails: vi.fn(
-			(flagKey: string, defaultValue: number): Promise<FlagshipBindingEvaluationDetails<number>> =>
-				Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
+		getNumberDetails: vi.fn((flagKey: string, defaultValue: number): Promise<FlagshipBindingEvaluationDetails<number>> =>
+			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
 		),
-		getObjectDetails: vi.fn(
-			<T extends object>(flagKey: string, defaultValue: T): Promise<FlagshipBindingEvaluationDetails<T>> =>
-				Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
+		getObjectDetails: vi.fn(<T extends object>(flagKey: string, defaultValue: T): Promise<FlagshipBindingEvaluationDetails<T>> =>
+			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
 		),
 	};
 }
@@ -89,6 +85,17 @@ describe('FlagshipServerProvider (binding mode)', () => {
 					new FlagshipServerProvider({
 						binding,
 						endpoint: 'https://api.example.com/evaluate',
+					} as any),
+			).toThrow('must not be provided');
+		});
+
+		it('should throw when binding and fetch are both provided', () => {
+			const binding = createMockBinding();
+			expect(
+				() =>
+					new FlagshipServerProvider({
+						binding,
+						fetch: globalThis.fetch,
 					} as any),
 			).toThrow('must not be provided');
 		});

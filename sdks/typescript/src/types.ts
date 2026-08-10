@@ -76,8 +76,25 @@ export interface FlagshipProviderOptions {
 	 * Headers provided here are merged with any headers derived from other
 	 * options (e.g. `authToken`), with values in `fetchOptions.headers`
 	 * taking precedence.
+	 *
+	 * A `signal` provided here is merged with the request timeout and with any
+	 * per-call signal — it is never dropped.
 	 */
 	fetchOptions?: RequestInit;
+
+	/**
+	 * Custom `fetch` implementation used for every request. Defaults to
+	 * `globalThis.fetch`, resolved at call time so a host that installs a
+	 * polyfill after construction still works. The SDK never assigns to
+	 * `globalThis.fetch`.
+	 *
+	 * Useful for routing evaluations through a Cloudflare Workers service
+	 * binding, or for stubbing the transport in tests without touching globals.
+	 *
+	 * @example
+	 * { appId: 'app-abc123', accountId: 'my-account', fetch: env.FLAGS_SERVICE.fetch.bind(env.FLAGS_SERVICE) }
+	 */
+	fetch?: typeof globalThis.fetch;
 
 	/**
 	 * Request timeout in milliseconds.
@@ -87,7 +104,10 @@ export interface FlagshipProviderOptions {
 
 	/**
 	 * Number of retry attempts on transient errors. Capped at 10.
-	 * 404 and 400 responses are never retried.
+	 *
+	 * Only retryable failures are retried — see `FlagshipError.retryable`.
+	 * Terminal responses (e.g. 400, 401, 403, 404) and caller aborts are
+	 * propagated immediately.
 	 * @default 1
 	 */
 	retries?: number;
@@ -97,6 +117,30 @@ export interface FlagshipProviderOptions {
 	 * @default 1000
 	 */
 	retryDelay?: number;
+}
+
+/**
+ * Per-call options accepted by `FlagshipClient.evaluate`.
+ *
+ * Both fields are optional and additive — omitting them preserves the
+ * client-level configuration exactly.
+ */
+export interface FlagshipRequestOptions {
+	/**
+	 * Overrides the client-level `fetch` for this call only.
+	 */
+	fetch?: typeof globalThis.fetch;
+
+	/**
+	 * Caller cancellation signal. Aborting it aborts the underlying HTTP
+	 * request, not just the pending promise. The signal is merged with the
+	 * request timeout and with `fetchOptions.signal`, so whichever fires first
+	 * wins.
+	 *
+	 * A caller abort rejects with `FlagshipErrorCode.ABORTED` and is never
+	 * retried. An already-aborted signal rejects without issuing a request.
+	 */
+	signal?: AbortSignal;
 }
 
 /**
@@ -251,10 +295,12 @@ export function isBindingOptions(options: FlagshipServerProviderOptions): option
  * These are mapped to OpenFeature `ErrorCode` values by the providers.
  */
 export enum FlagshipErrorCode {
-	/** HTTP or fetch-level failure (non-404/400 status, connection refused, etc.) */
+	/** HTTP or fetch-level failure (non-2xx status, connection refused, etc.) */
 	NETWORK_ERROR = 'NETWORK_ERROR',
 	/** The request was aborted because the configured timeout elapsed. */
 	TIMEOUT_ERROR = 'TIMEOUT_ERROR',
+	/** The request was aborted through a caller-supplied `AbortSignal`. */
+	ABORTED = 'ABORTED',
 	/** The response body was not a valid evaluation response. */
 	PARSE_ERROR = 'PARSE_ERROR',
 	/** The evaluation context contained complex values that cannot be serialized to query parameters. */
@@ -266,12 +312,20 @@ export enum FlagshipErrorCode {
  * Carries a `code` for programmatic handling and an optional `cause` which
  * is the underlying `Response` object for HTTP errors, allowing callers to
  * inspect the status code (e.g. to distinguish 404 → `FLAG_NOT_FOUND`).
+ *
+ * `retryable` tells callers whether the failure was transient. The SDK uses it
+ * to decide whether to retry; consumers can use it to distinguish
+ * "ask again later" (`true` — 408, 425, 429, 5xx, timeouts, connection
+ * failures) from a definitive answer (`false` — 400, 401, 403, 404, other
+ * terminal 4xx, caller aborts, unserializable context). Only a non-retryable
+ * failure is safe to treat as authoritative and cache.
  */
 export class FlagshipError extends Error {
 	constructor(
 		message: string,
 		public code: FlagshipErrorCode,
 		public cause?: unknown,
+		public readonly retryable: boolean = false,
 	) {
 		super(message);
 		this.name = 'FlagshipError';

@@ -25,6 +25,7 @@ const HTTP_ONLY_FIELDS = [
 	'authToken',
 	'baseUrl',
 	'fetchOptions',
+	'fetch',
 	'timeout',
 	'retries',
 	'retryDelay',
@@ -250,6 +251,7 @@ export class FlagshipServerProvider implements Provider {
 					errorCode = error.cause instanceof Response && error.cause.status === 404 ? ErrorCode.FLAG_NOT_FOUND : ErrorCode.GENERAL;
 					break;
 				case FlagshipErrorCode.TIMEOUT_ERROR:
+				case FlagshipErrorCode.ABORTED:
 					errorCode = ErrorCode.GENERAL;
 					break;
 				case FlagshipErrorCode.PARSE_ERROR:

@@ -77,6 +77,19 @@ test('reports no SDK changes after the release is tagged', () => {
 	git(repo, 'tag', '@cloudflare/flagship@0.2.0');
 	write(repo, 'README.md', 'docs\n');
 	commit(repo, 'update docs');
+	releaseCommit(repo, '0.3.0');
+
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false });
+});
+
+test('reports no changes when the head commit is not a release commit', () => {
+	const repo = createRepository();
+	write(repo, 'sdks/python/src/client.py', 'changed\n');
+	write(repo, 'sdks/go/client.go', 'changed\n');
+	write(repo, 'sdks/typescript/src/client.ts', 'changed\n');
+	commit(repo, 'feat: change every SDK without a changeset');
+	write(repo, 'README.md', 'unrelated\n');
+	commit(repo, 'docs: unrelated follow-up');
 
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false });
 });
@@ -99,6 +112,7 @@ test('fails safely when the canonical baseline tag is missing', () => {
 	git(repo, 'tag', '-d', '@cloudflare/flagship@0.1.0');
 	write(repo, 'README.md', 'changed\n');
 	commit(repo, 'change docs');
+	releaseCommit(repo, '0.2.0');
 
 	assert.throws(() => detectSdkChanges('HEAD', repo));
 });

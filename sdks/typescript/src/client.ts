@@ -212,9 +212,12 @@ function isRetryableStatus(status: number): boolean {
 
 /**
  * Combines signals into one. Prefers `AbortSignal.any` where available and
- * falls back to a manually linked `AbortController` on older runtimes.
+ * falls back to a manually linked `AbortController` on older runtimes. The
+ * fallback matches `AbortSignal.any` for inputs that are already aborted.
+ *
+ * @internal Exported for tests; not part of the package's public API.
  */
-function mergeSignals(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
+export function mergeSignals(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
 	if (signals.length === 1) {
 		return { signal: signals[0]!, dispose: noop };
 	}
@@ -224,6 +227,12 @@ function mergeSignals(signals: AbortSignal[]): { signal: AbortSignal; dispose: (
 	}
 
 	const controller = new AbortController();
+	const alreadyAborted = signals.find((signal) => signal.aborted);
+	if (alreadyAborted) {
+		controller.abort(alreadyAborted.reason);
+		return { signal: controller.signal, dispose: noop };
+	}
+
 	const onAbort = (event: Event): void => controller.abort((event.target as AbortSignal).reason);
 
 	for (const signal of signals) {

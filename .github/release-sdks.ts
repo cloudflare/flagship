@@ -3,9 +3,11 @@ import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const SDKS = ['typescript', 'python', 'go'] as const;
-const RELEASE_COMMIT_PATTERN = '^chore(release): version SDK packages';
+const RELEASE_COMMIT_SUBJECT = 'chore(release): version SDK packages';
+const RELEASE_COMMIT_PATTERN = `^${RELEASE_COMMIT_SUBJECT}`;
 type Sdk = (typeof SDKS)[number];
 export type SdkChanges = Record<Sdk, boolean>;
+const NO_CHANGES: SdkChanges = { typescript: false, python: false, go: false };
 
 export function classifySdkChanges(paths: string[]): SdkChanges {
 	const relative = (sdk: Sdk): string[] =>
@@ -33,6 +35,8 @@ export function classifySdkChanges(paths: string[]): SdkChanges {
 }
 
 export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): SdkChanges {
+	if (!isReleaseCommit(cwd, releaseCommit)) return { ...NO_CHANGES };
+
 	const releaseParent = `${releaseCommit}^1`;
 	const canonicalTag = describeTag(cwd, '@cloudflare/flagship@*', releaseParent);
 	const baselines: Record<Sdk, string> = {
@@ -56,6 +60,35 @@ export function publishCommands(changes: SdkChanges): ChangesetCommand[] {
 		];
 	if (changes.python || changes.go) return [['changeset', 'tag']];
 	return [];
+}
+
+/**
+ * Reports whether a commit merged the release PR. `has_changesets == false` holds
+ * for every push to `main` with an empty changeset queue, so without this gate an
+ * ordinary push would publish an unbumped version and stamp an SDK tag on a
+ * non-release commit, poisoning the baseline for later changes.
+ *
+ * Squash merges and direct pushes carry the subject; merge commits carry it on the
+ * second parent.
+ */
+function isReleaseCommit(cwd: string, commit: string): boolean {
+	const subjects = [subject(cwd, commit)];
+	if (revisionExists(cwd, `${commit}^2`)) subjects.push(subject(cwd, `${commit}^2`));
+
+	return subjects.some((value) => value.startsWith(RELEASE_COMMIT_SUBJECT));
+}
+
+function subject(cwd: string, commit: string): string {
+	return git(cwd, 'log', '-1', '--format=%s', commit);
+}
+
+function revisionExists(cwd: string, revision: string): boolean {
+	try {
+		git(cwd, 'rev-parse', '--verify', '--quiet', `${revision}^{commit}`);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /**

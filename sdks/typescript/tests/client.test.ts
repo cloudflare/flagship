@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { FlagshipClient } from '../src/client.js';
+import { FlagshipClient, mergeSignals } from '../src/client.js';
 import { FlagshipError, FlagshipErrorCode } from '../src/types.js';
 
 // Mock fetch globally
@@ -894,6 +894,63 @@ describe('FlagshipClient', () => {
 
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 			expect(error.retryable).toBe(true);
+		});
+	});
+
+	describe('mergeSignals', () => {
+		const withoutAbortSignalAny = (run: () => void): void => {
+			const original = AbortSignal.any;
+			(AbortSignal as any).any = undefined;
+			try {
+				run();
+			} finally {
+				(AbortSignal as any).any = original;
+			}
+		};
+
+		it.each([
+			['first', 0],
+			['last', 1],
+		])('aborts immediately when the %s input is already aborted', (_position, index) => {
+			const signals = [new AbortController().signal, new AbortController().signal];
+			const aborted = AbortSignal.abort('gone');
+			signals[index] = aborted;
+
+			expect(AbortSignal.any(signals).aborted).toBe(true);
+			withoutAbortSignalAny(() => {
+				const merged = mergeSignals(signals);
+				expect(merged.signal.aborted).toBe(true);
+				expect(merged.signal.reason).toBe('gone');
+				merged.dispose();
+			});
+		});
+
+		it('reports the first aborted reason when several inputs are aborted', () => {
+			const signals = [AbortSignal.abort('first'), AbortSignal.abort('second')];
+
+			expect(AbortSignal.any(signals).reason).toBe('first');
+			withoutAbortSignalAny(() => {
+				expect(mergeSignals(signals).signal.reason).toBe('first');
+			});
+		});
+
+		it('propagates a later abort and stops listening after dispose', () => {
+			withoutAbortSignalAny(() => {
+				const controller = new AbortController();
+				const other = new AbortController();
+				const merged = mergeSignals([controller.signal, other.signal]);
+
+				expect(merged.signal.aborted).toBe(false);
+				controller.abort('later');
+				expect(merged.signal.aborted).toBe(true);
+				expect(merged.signal.reason).toBe('later');
+
+				merged.dispose();
+				const disposed = mergeSignals([other.signal, new AbortController().signal]);
+				disposed.dispose();
+				other.abort('ignored');
+				expect(disposed.signal.aborted).toBe(false);
+			});
 		});
 	});
 });

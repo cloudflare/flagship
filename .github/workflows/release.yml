@@ -3,9 +3,13 @@ name: Release
 # On push to main:
 #   - If there are pending changesets, opens/updates a release PR that bumps
 #     versions and rewrites changelogs.
-#   - If the previous commit was a merge of that release PR (no pending
-#     changesets remain), publishes only the SDKs changed since their previous
-#     successful publication.
+#   - If this commit merged that release PR, publishes only the SDKs changed
+#     since their previous successful publication.
+#
+# Change detection reports nothing unless the pushed commit merged the release
+# PR, so ordinary pushes to `main` — which also have an empty changeset queue —
+# cannot publish an unbumped version. Re-running a failed release run repeats
+# the same commit, so partial publishes stay retryable.
 #
 # PR CI (`pull-request.yml`) is the source of truth for correctness; this
 # workflow does not re-run checks. Branch protection on `main` requires
@@ -72,8 +76,8 @@ jobs:
           version: pnpm tsx .github/changeset-version.ts
           publish: pnpm tsx .github/release-sdks.ts publish
           title: 'chore(release): version SDK packages'
-          # `.github/release-sdks.ts` matches this message to skip mechanical version
-          # bumps when detecting SDK changes. Keep both in sync.
+          # `.github/release-sdks.ts` matches this message to recognise release
+          # commits and skip their mechanical version bumps. Keep both in sync.
           commit: 'chore(release): version SDK packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

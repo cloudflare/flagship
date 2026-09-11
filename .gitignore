@@ -51,3 +51,9 @@ coverage
 
 # Misc
 .test_scripts/
+
+# .NET SDK build outputs
+sdks/dotnet/**/bin/
+sdks/dotnet/**/obj/
+sdks/dotnet/artifacts/
+sdks/dotnet/**/TestResults/

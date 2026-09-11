@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Changesets synchronizes this package.json with the canonical SDK version. -->
+    <SdkPackageJson>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)package.json'))</SdkPackageJson>
+    <Version>$([System.Text.RegularExpressions.Regex]::Match($(SdkPackageJson), '&quot;version&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</Version>
+    <Authors>Cloudflare</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/cloudflare/flagship</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

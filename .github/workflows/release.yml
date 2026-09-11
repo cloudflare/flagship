@@ -38,6 +38,7 @@ jobs:
       has_changesets: ${{ steps.changesets.outputs.hasChangesets }}
       python_changed: ${{ steps.sdk-changes.outputs.python }}
       go_changed: ${{ steps.sdk-changes.outputs.go }}
+      dotnet_changed: ${{ steps.sdk-changes.outputs.dotnet }}
     permissions:
       id-token: write
       contents: write
@@ -86,6 +87,7 @@ jobs:
           TYPESCRIPT_SDK_CHANGED: ${{ steps.sdk-changes.outputs.typescript }}
           PYTHON_SDK_CHANGED: ${{ steps.sdk-changes.outputs.python }}
           GO_SDK_CHANGED: ${{ steps.sdk-changes.outputs.go }}
+          DOTNET_SDK_CHANGED: ${{ steps.sdk-changes.outputs.dotnet }}
 
   tag-go:
     name: Tag Go SDK
@@ -122,3 +124,13 @@ jobs:
     permissions:
       contents: write
       id-token: write
+
+  publish-nuget:
+    name: Publish NuGet
+    needs: release
+    if: ${{ needs.release.outputs.has_changesets == 'false' && needs.release.outputs.dotnet_changed == 'true' }}
+    uses: ./.github/workflows/publish-nuget.yml
+    permissions:
+      contents: write
+    secrets:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

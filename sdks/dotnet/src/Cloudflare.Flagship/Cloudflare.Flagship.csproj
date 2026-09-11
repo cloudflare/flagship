@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>HTTP evaluation client for Cloudflare Flagship feature flags.</Description>
+  </PropertyGroup>
+</Project>

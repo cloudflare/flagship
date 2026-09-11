@@ -235,6 +235,29 @@ jobs:
       - working-directory: sdks/go
         run: go test ./...
 
+  dotnet:
+    name: .NET / Build, Test and Pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: sdks/dotnet
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet restore Flagship.sln
+      - run: dotnet format Flagship.sln --verify-no-changes --no-restore
+      - run: dotnet test Flagship.sln -c Release --no-restore
+      - run: dotnet pack Flagship.sln -c Release --no-build -o artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-packages
+          path: sdks/dotnet/artifacts/*.nupkg
+
   # ── Aggregator (required status check for branch protection) ──────────────
 
   ci-success:
@@ -257,6 +280,7 @@ jobs:
       - go-format
       - go-vet
       - go-test
+      - dotnet
     steps:
       - name: Check job results
         run: |

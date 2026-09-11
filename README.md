@@ -148,6 +148,11 @@ func main() {
 
 The Go SDK supports HTTP evaluation only.
 
+## .NET (C# 10)
+
+The [.NET SDK](sdks/dotnet) includes a standalone HTTP client and an optional OpenFeature server provider,
+with support for .NET 8 and .NET 10. See its README for local NuGet packaging and the runnable example.
+
 ## Repository Layout
 
 | Path                                     | Description                                                  |
@@ -155,6 +160,7 @@ The Go SDK supports HTTP evaluation only.
 | [`sdks/typescript`](sdks/typescript)     | TypeScript SDK source, tests, examples, and package metadata |
 | [`sdks/python`](sdks/python)             | Python SDK source, tests, examples, and package metadata     |
 | [`sdks/go`](sdks/go)                     | Go SDK source, tests, examples, and module metadata          |
+| [`sdks/dotnet`](sdks/dotnet)             | C# 10 HTTP client, OpenFeature provider, tests and examples  |
 | [`.changeset`](.changeset)               | Release intent files and Changesets configuration            |
 | [`.github/workflows`](.github/workflows) | Pull request checks and publish workflows                    |
 

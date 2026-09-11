@@ -2,12 +2,12 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const SDKS = ['typescript', 'python', 'go'] as const;
+const SDKS = ['typescript', 'python', 'go', 'dotnet'] as const;
 const RELEASE_COMMIT_SUBJECT = 'chore(release): version SDK packages';
 const RELEASE_COMMIT_PATTERN = `^${RELEASE_COMMIT_SUBJECT}`;
 type Sdk = (typeof SDKS)[number];
 export type SdkChanges = Record<Sdk, boolean>;
-const NO_CHANGES: SdkChanges = { typescript: false, python: false, go: false };
+const NO_CHANGES: SdkChanges = { typescript: false, python: false, go: false, dotnet: false };
 
 export function classifySdkChanges(paths: string[]): SdkChanges {
 	const relative = (sdk: Sdk): string[] =>
@@ -15,11 +15,16 @@ export function classifySdkChanges(paths: string[]): SdkChanges {
 	const typescript = relative('typescript');
 	const python = relative('python');
 	const go = relative('go');
+	const dotnet = relative('dotnet');
 
 	return {
 		typescript: typescript.some((path) => path.startsWith('src/') || ['package.json', 'tsconfig.json', 'tsdown.config.ts'].includes(path)),
 		python: python.some((path) => path.startsWith('src/') || path === 'pyproject.toml'),
 		go: go.some((path) => (!path.includes('/') && path.endsWith('.go') && !path.endsWith('_test.go')) || path === 'go.mod'),
+		dotnet: dotnet.some(
+			(path) =>
+				path.startsWith('src/') || ['Directory.Build.props', 'Directory.Build.targets', 'global.json', 'NuGet.Config'].includes(path),
+		),
 	};
 }
 
@@ -28,14 +33,23 @@ export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): S
 
 	const releaseParent = `${releaseCommit}^1`;
 	const canonicalTag = describeTag(cwd, '@cloudflare/flagship@*', releaseParent);
-	const baselines: Record<Sdk, string> = {
+	const baselines: Record<Sdk, string | undefined> = {
 		typescript: canonicalTag,
 		python: findSdkTag(cwd, 'sdks/python/v*', releaseParent) ?? canonicalTag,
 		go: findSdkTag(cwd, 'sdks/go/v*', releaseParent) ?? canonicalTag,
+		// No successful NuGet publication yet: retain eligibility even if releases
+		// advanced while NUGET_API_KEY was absent. Do not use the canonical tag.
+		dotnet: findSdkTag(cwd, 'sdks/dotnet/v*', releaseParent),
 	};
 
 	return Object.fromEntries(
-		SDKS.map((sdk) => [sdk, classifySdkChanges(changedPaths(cwd, baselines[sdk], releaseParent))[sdk]]),
+		SDKS.map((sdk) => {
+			const baseline = baselines[sdk];
+			const paths = baseline
+				? changedPaths(cwd, baseline, releaseParent)
+				: git(cwd, 'ls-tree', '-r', '--name-only', releaseParent, '--', `sdks/${sdk}/`).split('\n');
+			return [sdk, classifySdkChanges(paths)[sdk]];
+		}),
 	) as SdkChanges;
 }
 
@@ -47,7 +61,7 @@ export function publishCommands(changes: SdkChanges): ChangesetCommand[] {
 			['changeset', 'publish'],
 			['changeset', 'tag'],
 		];
-	if (changes.python || changes.go) return [['changeset', 'tag']];
+	if (changes.python || changes.go || changes.dotnet) return [['changeset', 'tag']];
 	return [];
 }
 

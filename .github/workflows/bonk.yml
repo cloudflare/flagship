@@ -10,7 +10,7 @@ jobs:
   bonk:
     if: github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
@@ -30,6 +30,6 @@ jobs:
           CLOUDFLARE_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_NAME }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
         with:
-          model: 'cloudflare-ai-gateway/anthropic/claude-opus-5-5'
+          model: 'cloudflare-ai-gateway/anthropic/claude-sonnet-5'
           opencode_version: '1.17.7'
           mentions: '/bonk,@ask-bonk'

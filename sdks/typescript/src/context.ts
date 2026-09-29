@@ -22,7 +22,7 @@ export function normalizeEvaluationContext(context: EvaluationContext): Normaliz
 	for (const [key, value] of Object.entries(context)) {
 		if (value === undefined) continue;
 		const result = normalizeContextValue(value, key, ancestors);
-		normalized[key] = result.value;
+		setOwn(normalized, key, result.value);
 		requiresPost ||= result.structured;
 	}
 
@@ -65,12 +65,16 @@ function normalizeContextValue(
 		const object: Record<string, NormalizedContextValue> = {};
 		for (const [key, item] of Object.entries(value)) {
 			if (item === undefined) throw invalidContext(`${path}.${key}`, 'undefined is not supported inside objects');
-			object[key] = normalizeContextValue(item, `${path}.${key}`, ancestors).value;
+			setOwn(object, key, normalizeContextValue(item, `${path}.${key}`, ancestors).value);
 		}
 		return { value: object, structured: true };
 	} finally {
 		ancestors.delete(value);
 	}
+}
+
+function setOwn(target: Record<string, NormalizedContextValue>, key: string, value: NormalizedContextValue): void {
+	Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
 function invalidContext(path: string, detail: string): FlagshipError {

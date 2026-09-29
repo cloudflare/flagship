@@ -108,7 +108,7 @@ const checkout = await client.getStringValue('checkout-flow', 'control', {
 });
 ```
 
-Primitive-only HTTP context keeps using GET query parameters. Structured context uses the JSON POST endpoint. Unsupported or cyclic values resolve with `INVALID_CONTEXT` without making a binding or HTTP call.
+Primitive-only HTTP context keeps using GET query parameters. Structured context, including `null`, uses the JSON POST endpoint; in browsers this adds a CORS preflight request. Only strings, numbers, booleans, `null`, dates, arrays, and plain objects are supported. Anything else, including cyclic values, resolves with `INVALID_CONTEXT` without making a binding or HTTP call.
 
 ## Caching
 

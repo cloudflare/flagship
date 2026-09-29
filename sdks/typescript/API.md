@@ -327,14 +327,14 @@ When the context changes, the entire cache is **cleared before re-fetching** all
 
 ## Evaluation context
 
-Primitive-only context is serialized as URL query parameters. Context containing objects, arrays, or `null` is sent as a JSON request body.
+Primitive-only context is serialized as URL query parameters. Context containing objects, arrays, or `null` is sent as a JSON request body, which adds a CORS preflight request in browsers.
 
 | Type                          | Serialization                                                |
 | ----------------------------- | ------------------------------------------------------------ |
 | `string`, `number`, `boolean` | Preserved; primitive-only context uses GET query parameters  |
 | `Date`                        | Recursively converted to ISO 8601 strings                    |
 | Objects, arrays, `null`       | Preserved recursively; evaluations use POST with a JSON body |
-| Unsupported or cyclic values  | Rejected before transport with `INVALID_CONTEXT`             |
+| Other values, cyclic values   | Rejected before transport with `INVALID_CONTEXT`             |
 
 `targetingKey` is the standard field for identifying the evaluation subject (user ID, session ID, etc.) and is treated like any other attribute.
 

@@ -346,6 +346,7 @@ export class FlagshipServerProvider implements Provider {
 		context: Record<string, NormalizedContextValue>,
 	): Promise<FlagshipBindingEvaluationDetails<T>> {
 		const binding = this.binding!;
+		// The published binding types are primitive-only, but the runtime accepts structured context.
 		const compatibleContext = context as Record<string, string | number | boolean>;
 
 		switch (expectedType) {
@@ -393,15 +394,12 @@ function isCacheable(details: ResolutionDetails<unknown>): boolean {
 /** Stable cache key over flag key, expected type, and the evaluation context. */
 function buildCacheKey(flagKey: string, expectedType: ExpectedType, context: EvaluationContext): string {
 	const entries = Object.entries(normalizeEvaluationContext(context).context)
-		.filter(([, value]) => value !== undefined && value !== null)
 		.map(([key, value]): [string, string] => [key, serializeContextValue(value)])
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 	return JSON.stringify([flagKey, expectedType, entries]);
 }
 
-function serializeContextValue(value: unknown): string {
-	if (value instanceof Date) return value.toISOString();
-	if (typeof value !== 'object') return String(value);
+function serializeContextValue(value: NormalizedContextValue): string {
 	// Sort object keys at every depth so semantically equal objects share a cache key.
 	return JSON.stringify(value, (_key, val) =>
 		val !== null && typeof val === 'object' && !Array.isArray(val)

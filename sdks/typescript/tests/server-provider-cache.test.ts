@@ -111,6 +111,28 @@ describe('FlagshipServerProvider caching', () => {
 		expect(global.fetch).toHaveBeenCalledTimes(2);
 	});
 
+	it('keeps separate cache entries for null and absent attributes', async () => {
+		mockResponse(true);
+		mockResponse(false);
+		const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', cacheTtl: 60_000 });
+
+		await provider.resolveBooleanEvaluation('flag', false, { targetingKey: 'u1', plan: null }, noopLogger);
+		await provider.resolveBooleanEvaluation('flag', false, { targetingKey: 'u1' }, noopLogger);
+
+		expect(global.fetch).toHaveBeenCalledTimes(2);
+	});
+
+	it('keeps separate cache entries for values of different primitive types', async () => {
+		mockResponse(true);
+		mockResponse(false);
+		const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', cacheTtl: 60_000 });
+
+		await provider.resolveBooleanEvaluation('flag', false, { age: 30 }, noopLogger);
+		await provider.resolveBooleanEvaluation('flag', false, { age: '30' }, noopLogger);
+
+		expect(global.fetch).toHaveBeenCalledTimes(2);
+	});
+
 	it('re-fetches after the TTL expires', async () => {
 		mockResponse(true);
 		mockResponse(true);

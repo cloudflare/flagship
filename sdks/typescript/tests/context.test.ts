@@ -311,6 +311,14 @@ describe('normalizeEvaluationContext', () => {
 		expect(() => normalizeEvaluationContext(context)).toThrow(expect.objectContaining({ code: FlagshipErrorCode.INVALID_CONTEXT }));
 	});
 
+	it('keeps __proto__ keys as own properties', () => {
+		const profile = JSON.parse('{"__proto__":{"admin":true},"plan":"free"}');
+		const { context } = normalizeEvaluationContext({ profile });
+
+		expect(Object.keys(context.profile as object)).toEqual(['__proto__', 'plan']);
+		expect(JSON.stringify(context)).toBe('{"profile":{"__proto__":{"admin":true},"plan":"free"}}');
+	});
+
 	it('rejects cyclic values', () => {
 		const profile: Record<string, unknown> = {};
 		profile.self = profile;

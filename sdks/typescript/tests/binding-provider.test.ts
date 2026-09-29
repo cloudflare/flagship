@@ -466,6 +466,26 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			expect(result.errorCode).toBe(ErrorCode.INVALID_CONTEXT);
 		});
 
+		it.each([
+			['PROVIDER_NOT_READY', ErrorCode.PROVIDER_NOT_READY],
+			['PROVIDER_FATAL', ErrorCode.PROVIDER_FATAL],
+			['TARGETING_KEY_MISSING', ErrorCode.TARGETING_KEY_MISSING],
+		] as const)('should map %s errorCode from binding', async (bindingCode, expectedCode) => {
+			const binding = createMockBinding();
+			(binding.getBooleanDetails as any).mockResolvedValueOnce({
+				flagKey: 'error-flag',
+				value: false,
+				errorCode: bindingCode,
+				errorMessage: bindingCode,
+				reason: 'ERROR',
+			});
+
+			const provider = new FlagshipServerProvider({ binding });
+			const result = await provider.resolveBooleanEvaluation('error-flag', false, {}, noopLogger);
+
+			expect(result.errorCode).toBe(expectedCode);
+		});
+
 		it('should map unknown errorCode from binding to GENERAL', async () => {
 			const binding = createMockBinding();
 			(binding.getBooleanDetails as any).mockResolvedValueOnce({

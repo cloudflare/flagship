@@ -446,12 +446,18 @@ function toBindingContext(context: EvaluationContext, logger: Logger): Record<st
  */
 function mapBindingErrorCode(code: string): ErrorCode {
 	switch (code) {
+		case 'PROVIDER_NOT_READY':
+			return ErrorCode.PROVIDER_NOT_READY;
+		case 'PROVIDER_FATAL':
+			return ErrorCode.PROVIDER_FATAL;
 		case 'FLAG_NOT_FOUND':
 			return ErrorCode.FLAG_NOT_FOUND;
 		case 'PARSE_ERROR':
 			return ErrorCode.PARSE_ERROR;
 		case 'TYPE_MISMATCH':
 			return ErrorCode.TYPE_MISMATCH;
+		case 'TARGETING_KEY_MISSING':
+			return ErrorCode.TARGETING_KEY_MISSING;
 		case 'INVALID_CONTEXT':
 			return ErrorCode.INVALID_CONTEXT;
 		default:

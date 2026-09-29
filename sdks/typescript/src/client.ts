@@ -1,5 +1,5 @@
 import type { EvaluationContext } from '@openfeature/core';
-import { buildEvaluationUrl } from './context.js';
+import { buildEvaluationUrl, normalizeEvaluationContext, type NormalizedContextValue } from './context.js';
 import {
 	FlagshipError,
 	FlagshipErrorCode,
@@ -17,6 +17,11 @@ interface ResolvedOptions {
 	timeout: number;
 	retries: number;
 	retryDelay: number;
+}
+
+interface EvaluationRequest {
+	url: string;
+	init: RequestInit;
 }
 
 /**
@@ -45,30 +50,25 @@ export class FlagshipClient {
 	/**
 	 * Evaluate a flag with the given context.
 	 *
-	 * Throws a `FlagshipError` with `FlagshipErrorCode.INVALID_CONTEXT` if the
-	 * evaluation context contains complex values (objects or arrays) that cannot
-	 * be serialized to query parameters.
+	 * Primitive-only context uses query parameters. Structured context uses a JSON
+	 * request body. Unsupported or cyclic values throw `FlagshipErrorCode.INVALID_CONTEXT`.
 	 *
 	 * `options.fetch` overrides the transport for this call, and
 	 * `options.signal` cancels the in-flight HTTP request — aborting rejects
 	 * with `FlagshipErrorCode.ABORTED` and is never retried.
 	 */
 	async evaluate(flagKey: string, context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipEvaluationResponse> {
-		const droppedKeys: string[] = [];
-		const url = buildEvaluationUrl(this.options.endpoint, flagKey, context, droppedKeys);
-
-		if (droppedKeys.length > 0) {
-			throw new FlagshipError(
-				`Evaluation context contains complex values that cannot be serialized for flag "${flagKey}". ` +
-					`Unsupported keys: ${droppedKeys.join(', ')}. Use primitive values (string, number, boolean) or Date objects.`,
-				FlagshipErrorCode.INVALID_CONTEXT,
-			);
-		}
-
+		const normalized = normalizeEvaluationContext(context);
+		const request = normalized.requiresPost
+			? buildPostRequest(this.options.endpoint, flagKey, normalized.context, this.options.fetchOptions)
+			: {
+					url: buildEvaluationUrl(this.options.endpoint, flagKey, normalized.context as EvaluationContext),
+					init: this.options.fetchOptions,
+				};
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
 
-		return this.fetchWithRetry(url, this.options.retries, transport, signals);
+		return this.fetchWithRetry(request, this.options.retries, transport, signals);
 	}
 
 	/**
@@ -77,13 +77,13 @@ export class FlagshipClient {
 	 * propagated immediately.
 	 */
 	private async fetchWithRetry(
-		url: string,
+		request: EvaluationRequest,
 		retriesLeft: number,
 		transport: typeof globalThis.fetch,
 		signals: AbortSignal[],
 	): Promise<FlagshipEvaluationResponse> {
 		try {
-			return await this.fetchWithTimeout(url, this.options.timeout, transport, signals);
+			return await this.fetchWithTimeout(request, this.options.timeout, transport, signals);
 		} catch (error) {
 			if (error instanceof FlagshipError && !error.retryable) {
 				throw error;
@@ -92,7 +92,7 @@ export class FlagshipClient {
 			if (retriesLeft > 0) {
 				discardResponse(error);
 				await waitForRetry(this.options.retryDelay, signals);
-				return this.fetchWithRetry(url, retriesLeft - 1, transport, signals);
+				return this.fetchWithRetry(request, retriesLeft - 1, transport, signals);
 			}
 
 			throw error;
@@ -104,7 +104,7 @@ export class FlagshipClient {
 	 * the timeout elapses or when any caller-supplied signal fires.
 	 */
 	private async fetchWithTimeout(
-		url: string,
+		request: EvaluationRequest,
 		timeout: number,
 		transport: typeof globalThis.fetch,
 		signals: AbortSignal[],
@@ -123,8 +123,8 @@ export class FlagshipClient {
 		const merged = mergeSignals([timeoutController.signal, ...signals]);
 
 		try {
-			const response = await transport(url, {
-				...this.options.fetchOptions,
+			const response = await transport(request.url, {
+				...request.init,
 				signal: merged.signal,
 			});
 
@@ -164,6 +164,25 @@ export class FlagshipClient {
 			merged.dispose();
 		}
 	}
+}
+
+function buildPostRequest(
+	url: string,
+	flagKey: string,
+	context: Record<string, NormalizedContextValue>,
+	fetchOptions: RequestInit,
+): EvaluationRequest {
+	const headers = new Headers(fetchOptions.headers);
+	if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+	return {
+		url,
+		init: {
+			...fetchOptions,
+			method: 'POST',
+			headers,
+			body: JSON.stringify({ flagKey, context }),
+		},
+	};
 }
 
 function abortedError(cause: unknown): FlagshipError {

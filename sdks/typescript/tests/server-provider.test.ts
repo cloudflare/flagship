@@ -433,27 +433,25 @@ describe('FlagshipServerProvider', () => {
 			expect(result.errorMessage).toContain('timeout');
 		});
 
-		it('should return INVALID_CONTEXT when context contains complex objects', async () => {
+		it('should evaluate structured context with a JSON request body', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true, variant: 'on', reason: 'TARGETING_MATCH' }),
+			});
 			const provider = new FlagshipServerProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
+			const context = {
+				targetingKey: 'user-123',
+				nested: { foo: 'bar' },
+			};
 
-			const result = await provider.resolveBooleanEvaluation(
-				'my-flag',
-				false,
-				{
-					targetingKey: 'user-123',
-					nested: { foo: 'bar' } as any,
-				},
-				noopLogger,
-			);
+			const result = await provider.resolveBooleanEvaluation('my-flag', false, context, noopLogger);
 
-			expect(result.value).toBe(false);
-			expect(result.errorCode).toBe(ErrorCode.INVALID_CONTEXT);
-			expect(result.errorMessage).toContain('nested');
-			expect(result.reason).toBe('ERROR');
-			// fetch should NOT have been called — error thrown before the request
-			expect(global.fetch).not.toHaveBeenCalled();
+			expect(result.value).toBe(true);
+			const [, init] = (global.fetch as any).mock.calls[0];
+			expect(init.method).toBe('POST');
+			expect(JSON.parse(init.body)).toEqual({ flagKey: 'my-flag', context });
 		});
 
 		it('should handle PARSE_ERROR', async () => {

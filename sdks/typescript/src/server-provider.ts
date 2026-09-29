@@ -2,6 +2,7 @@ import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, Provide
 import { ErrorCode, OpenFeatureEventEmitter } from '@openfeature/server-sdk';
 import { LRUCache } from 'lru-cache';
 import { FlagshipClient } from './client.js';
+import { normalizeEvaluationContext, type NormalizedContextValue } from './context.js';
 import {
 	FlagshipError,
 	FlagshipErrorCode,
@@ -188,7 +189,12 @@ export class FlagshipServerProvider implements Provider {
 			return this.resolve(flagKey, defaultValue, context, expectedType, logger);
 		}
 
-		const key = buildCacheKey(flagKey, expectedType, context);
+		let key: string;
+		try {
+			key = buildCacheKey(flagKey, expectedType, context);
+		} catch (error) {
+			return this.handleHttpError(flagKey, defaultValue, error, this.logger(logger));
+		}
 		const cached = this.cache.get(key) as ResolutionDetails<T> | undefined;
 		if (cached) {
 			return { ...cached, reason: 'CACHED' };
@@ -288,7 +294,7 @@ export class FlagshipServerProvider implements Provider {
 		try {
 			log.debug(`[Flagship] Evaluating flag "${flagKey}" via binding (expected: ${expectedType})`);
 
-			const bindingContext = toBindingContext(context, log);
+			const bindingContext = normalizeEvaluationContext(context).context;
 			const details = await this.evaluateBinding(flagKey, defaultValue, expectedType, bindingContext);
 
 			// If the binding signals an error, map it to an OpenFeature error response.
@@ -322,6 +328,7 @@ export class FlagshipServerProvider implements Provider {
 				flagMetadata: {},
 			};
 		} catch (error) {
+			if (error instanceof FlagshipError) return this.handleHttpError(flagKey, defaultValue, error, log);
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			log.error(`[Flagship] Flag "${flagKey}" binding evaluation failed (GENERAL): ${errorMessage}`);
 			return { value: defaultValue, errorCode: ErrorCode.GENERAL, errorMessage, reason: 'ERROR' };
@@ -336,25 +343,27 @@ export class FlagshipServerProvider implements Provider {
 		flagKey: string,
 		defaultValue: T,
 		expectedType: ExpectedType,
-		context: Record<string, string | number | boolean>,
+		context: Record<string, NormalizedContextValue>,
 	): Promise<FlagshipBindingEvaluationDetails<T>> {
 		const binding = this.binding!;
+		// The published binding types are primitive-only, but the runtime accepts structured context.
+		const compatibleContext = context as Record<string, string | number | boolean>;
 
 		switch (expectedType) {
 			case 'boolean':
-				return binding.getBooleanDetails(flagKey, defaultValue as unknown as boolean, context) as Promise<
+				return binding.getBooleanDetails(flagKey, defaultValue as unknown as boolean, compatibleContext) as Promise<
 					FlagshipBindingEvaluationDetails<T>
 				>;
 			case 'string':
-				return binding.getStringDetails(flagKey, defaultValue as unknown as string, context) as Promise<
+				return binding.getStringDetails(flagKey, defaultValue as unknown as string, compatibleContext) as Promise<
 					FlagshipBindingEvaluationDetails<T>
 				>;
 			case 'number':
-				return binding.getNumberDetails(flagKey, defaultValue as unknown as number, context) as Promise<
+				return binding.getNumberDetails(flagKey, defaultValue as unknown as number, compatibleContext) as Promise<
 					FlagshipBindingEvaluationDetails<T>
 				>;
 			case 'object':
-				return binding.getObjectDetails(flagKey, defaultValue as unknown as object, context) as Promise<
+				return binding.getObjectDetails(flagKey, defaultValue as unknown as object, compatibleContext) as Promise<
 					FlagshipBindingEvaluationDetails<T>
 				>;
 		}
@@ -384,60 +393,19 @@ function isCacheable(details: ResolutionDetails<unknown>): boolean {
 
 /** Stable cache key over flag key, expected type, and the evaluation context. */
 function buildCacheKey(flagKey: string, expectedType: ExpectedType, context: EvaluationContext): string {
-	const entries = Object.entries(context)
-		.filter(([, value]) => value !== undefined && value !== null)
+	const entries = Object.entries(normalizeEvaluationContext(context).context)
 		.map(([key, value]): [string, string] => [key, serializeContextValue(value)])
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 	return JSON.stringify([flagKey, expectedType, entries]);
 }
 
-function serializeContextValue(value: unknown): string {
-	if (value instanceof Date) return value.toISOString();
-	if (typeof value !== 'object') return String(value);
+function serializeContextValue(value: NormalizedContextValue): string {
 	// Sort object keys at every depth so semantically equal objects share a cache key.
 	return JSON.stringify(value, (_key, val) =>
 		val !== null && typeof val === 'object' && !Array.isArray(val)
 			? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 			: val,
 	);
-}
-
-/**
- * Converts an OpenFeature `EvaluationContext` to the flat primitive map that
- * the Flagship binding expects.
- *
- * - `string`, `number`, `boolean` → pass through
- * - `Date` → ISO-8601 string
- * - `null` / `undefined` → skipped
- * - objects / arrays → skipped with a warning (when logging is enabled)
- */
-function toBindingContext(context: EvaluationContext, logger: Logger): Record<string, string | number | boolean> {
-	const result: Record<string, string | number | boolean> = {};
-
-	for (const [key, value] of Object.entries(context)) {
-		if (value === undefined || value === null) {
-			continue;
-		}
-
-		if (value instanceof Date) {
-			result[key] = value.toISOString();
-			continue;
-		}
-
-		if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-			result[key] = value;
-			continue;
-		}
-
-		if (typeof value === 'object') {
-			logger.warn(
-				`[Flagship] Context key "${key}" is a complex object/array and cannot be passed to the binding. This value will be ignored.`,
-			);
-			continue;
-		}
-	}
-
-	return result;
 }
 
 /**

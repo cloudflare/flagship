@@ -126,24 +126,42 @@ describe('FlagshipClient', () => {
 			expect(url.searchParams.get('age')).toBe('25');
 		});
 
-		it('should throw INVALID_CONTEXT when context contains complex objects', async () => {
+		it('should send structured context as a JSON POST request', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true }),
+			});
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
+				authToken: 'secret',
+				fetchOptions: { headers: { 'X-Custom-Header': 'custom' } },
 			});
+			const context = {
+				targetingKey: 'user-123',
+				profile: { account: { plan: 'enterprise' } },
+				tags: ['beta', 42, true, null],
+			};
 
-			const error = await client
-				.evaluate('my-flag', {
-					targetingKey: 'user-123',
-					nested: { foo: 'bar' } as any,
-					arr: [1, 2, 3] as any,
-				})
-				.catch((e) => e);
+			await client.evaluate('my-flag', context);
 
-			expect(error).toBeInstanceOf(FlagshipError);
-			expect(error.code).toBe(FlagshipErrorCode.INVALID_CONTEXT);
-			expect(error.message).toContain('nested');
-			expect(error.message).toContain('arr');
-			// fetch should NOT have been called — error thrown before the request
+			const [url, init] = (global.fetch as any).mock.calls[0];
+			expect(url).toBe('https://api.example.com/evaluate');
+			expect(init.method).toBe('POST');
+			const headers = new Headers(init.headers);
+			expect(headers.get('Content-Type')).toBe('application/json');
+			expect(headers.get('Authorization')).toBe('Bearer secret');
+			expect(headers.get('X-Custom-Header')).toBe('custom');
+			expect(JSON.parse(init.body)).toEqual({ flagKey: 'my-flag', context });
+		});
+
+		it('should reject cyclic context before making a request', async () => {
+			const client = new FlagshipClient({ endpoint: 'https://api.example.com/evaluate' });
+			const profile: Record<string, unknown> = {};
+			profile.self = profile;
+
+			await expect(client.evaluate('my-flag', { profile } as any)).rejects.toMatchObject({
+				code: FlagshipErrorCode.INVALID_CONTEXT,
+			});
 			expect(global.fetch).not.toHaveBeenCalled();
 		});
 
@@ -213,6 +231,23 @@ describe('FlagshipClient', () => {
 
 			expect(result.value).toBe(true);
 			expect(global.fetch).toHaveBeenCalledTimes(2);
+		});
+
+		it('should reuse the same structured context body across retries', async () => {
+			(global.fetch as any).mockRejectedValueOnce(new Error('Network error')).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true }),
+			});
+			const client = new FlagshipClient({
+				endpoint: 'https://api.example.com/evaluate',
+				retries: 1,
+				retryDelay: 0,
+			});
+
+			await client.evaluate('my-flag', { profile: { plan: 'enterprise' } });
+
+			expect(global.fetch).toHaveBeenCalledTimes(2);
+			expect((global.fetch as any).mock.calls[0][1].body).toBe((global.fetch as any).mock.calls[1][1].body);
 		});
 
 		it('should not retry on 404', { timeout: 10000 }, async () => {

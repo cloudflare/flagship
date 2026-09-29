@@ -15,7 +15,9 @@ function createMockBinding(): FlagshipBinding {
 		getBooleanValue: vi.fn((_flagKey: string, defaultValue: boolean) => Promise.resolve(defaultValue)),
 		getStringValue: vi.fn((_flagKey: string, defaultValue: string) => Promise.resolve(defaultValue)),
 		getNumberValue: vi.fn((_flagKey: string, defaultValue: number) => Promise.resolve(defaultValue)),
-		getObjectValue: vi.fn(<T extends object>(_flagKey: string, defaultValue: T) => Promise.resolve(defaultValue)),
+		getObjectValue: vi.fn(<T extends object>(_flagKey: string, defaultValue: T) =>
+			Promise.resolve(defaultValue),
+		) as unknown as FlagshipBinding['getObjectValue'],
 		getBooleanDetails: vi.fn((flagKey: string, defaultValue: boolean): Promise<FlagshipBindingEvaluationDetails<boolean>> =>
 			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
 		),
@@ -27,7 +29,7 @@ function createMockBinding(): FlagshipBinding {
 		),
 		getObjectDetails: vi.fn(<T extends object>(flagKey: string, defaultValue: T): Promise<FlagshipBindingEvaluationDetails<T>> =>
 			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
-		),
+		) as unknown as FlagshipBinding['getObjectDetails'],
 	};
 }
 
@@ -652,7 +654,7 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			});
 		});
 
-		it('should skip null and undefined values', async () => {
+		it('should preserve null and skip top-level undefined values', async () => {
 			const binding = createMockBinding();
 			const provider = new FlagshipServerProvider({ binding });
 
@@ -665,44 +667,31 @@ describe('FlagshipServerProvider (binding mode)', () => {
 
 			expect(binding.getBooleanDetails).toHaveBeenCalledWith('my-flag', false, {
 				targetingKey: 'user-1',
+				nullVal: null,
 			});
 		});
 
-		it('should drop complex objects and warn when logging is enabled', async () => {
+		it('should pass nested objects and arrays through without warnings', async () => {
 			const binding = createMockBinding();
 			const provider = new FlagshipServerProvider({ binding, logging: true });
 			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-			await provider.resolveBooleanEvaluation('my-flag', false, { targetingKey: 'user-1', nested: { foo: 'bar' } as any }, spyLogger);
-
-			// The nested key should be excluded from the binding call
-			expect(binding.getBooleanDetails).toHaveBeenCalledWith('my-flag', false, {
-				targetingKey: 'user-1',
-			});
-			// A warning should have been emitted
-			expect(spyLogger.warn).toHaveBeenCalledWith(expect.stringContaining('nested'));
-		});
-
-		it('should drop arrays and warn when logging is enabled', async () => {
-			const binding = createMockBinding();
-			const provider = new FlagshipServerProvider({ binding, logging: true });
-			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-
-			await provider.resolveBooleanEvaluation('my-flag', false, { targetingKey: 'user-1', tags: ['a', 'b'] as any }, spyLogger);
+			await provider.resolveBooleanEvaluation(
+				'my-flag',
+				false,
+				{
+					targetingKey: 'user-1',
+					profile: { account: { plan: 'enterprise', createdAt: new Date('2025-06-15T10:30:00.000Z') } } as any,
+					tags: ['beta', 'internal'] as any,
+				},
+				spyLogger,
+			);
 
 			expect(binding.getBooleanDetails).toHaveBeenCalledWith('my-flag', false, {
 				targetingKey: 'user-1',
+				profile: { account: { plan: 'enterprise', createdAt: '2025-06-15T10:30:00.000Z' } },
+				tags: ['beta', 'internal'],
 			});
-			expect(spyLogger.warn).toHaveBeenCalledWith(expect.stringContaining('tags'));
-		});
-
-		it('should NOT warn about dropped keys when logging is disabled', async () => {
-			const binding = createMockBinding();
-			const provider = new FlagshipServerProvider({ binding, logging: false });
-			const spyLogger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-
-			await provider.resolveBooleanEvaluation('my-flag', false, { targetingKey: 'user-1', nested: { foo: 'bar' } as any }, spyLogger);
-
 			expect(spyLogger.warn).not.toHaveBeenCalled();
 		});
 

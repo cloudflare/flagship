@@ -327,15 +327,16 @@ When the context changes, the entire cache is **cleared before re-fetching** all
 
 ## Evaluation context
 
-Context attributes are serialized as URL query parameters and sent with each evaluation request. The following value types are supported:
+Primitive-only context is serialized as URL query parameters. Context containing objects, arrays, or `null` is sent as a JSON request body, which adds a CORS preflight request in browsers.
 
-| Type                          | Serialization                                                                                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `string`, `number`, `boolean` | Passed directly as a string                                                                                                                                    |
-| `Date`                        | Converted to ISO 8601                                                                                                                                          |
-| Objects, arrays               | **Not supported** — the provider throws `INVALID_CONTEXT`. Keys with complex values are dropped with a console warning if using `ContextTransformer` directly. |
+| Type                          | Serialization                                                |
+| ----------------------------- | ------------------------------------------------------------ |
+| `string`, `number`, `boolean` | Preserved; primitive-only context uses GET query parameters  |
+| `Date`                        | Recursively converted to ISO 8601 strings                    |
+| Objects, arrays, `null`       | Preserved recursively; evaluations use POST with a JSON body |
+| Other values, cyclic values   | Rejected before transport with `INVALID_CONTEXT`             |
 
-`targetingKey` is the standard OpenFeature field for identifying the evaluation subject (user ID, session ID, etc.) and is treated like any other attribute.
+`targetingKey` is the standard field for identifying the evaluation subject (user ID, session ID, etc.) and is treated like any other attribute.
 
 ## Authentication
 
@@ -501,7 +502,7 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 **`@cloudflare/flagship`** (core — no OpenFeature dependency):
 
 - `FlagshipClient` — HTTP client with retry, timeout, AbortController
-- `ContextTransformer` — converts evaluation context to query parameters
+- `ContextTransformer` — normalizes context and selects query or JSON transport
 - `FlagshipError` — error class with `code`, `cause`, and `retryable` properties
 - `FlagshipErrorCode` — enum: `NETWORK_ERROR`, `TIMEOUT_ERROR`, `ABORTED`, `PARSE_ERROR`, `INVALID_CONTEXT`
 - `isBindingOptions()` — type guard for binding options
@@ -526,15 +527,15 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
   FlagshipServerProvider             — OpenFeature Provider interface (server)
     ├─ TTL + LRU cache (opt-in)      — keyed by flag key, type, and context
     ├─ Binding mode (Workers)        — delegates to env.FLAGS via RPC
-    │   EvaluationContext → Record<string, string|number|boolean>
+    │   EvaluationContext → recursive JSON values over RPC
     └─ HTTP mode (Node.js, etc.)     — delegates to FlagshipClient
         FlagshipClient               — HTTP client with retry + timeout
-          ContextTransformer         — EvaluationContext → query parameters
+          ContextTransformer         — primitive context → GET; structured context → JSON POST
     LoggingHook / TelemetryHook      — OpenFeature hooks
 
 @cloudflare/flagship/web
   FlagshipClientProvider             — OpenFeature Provider interface (client)
     FlagshipClient                   — HTTP client (same as server)
-      ContextTransformer             — EvaluationContext → query parameters
+      ContextTransformer             — primitive context → GET; structured context → JSON POST
     In-memory cache                  — synchronous resolution layer
 ```

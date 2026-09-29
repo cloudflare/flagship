@@ -96,6 +96,20 @@ export default {
 };
 ```
 
+## Structured evaluation context
+
+Binding and HTTP modes support nested objects, arrays, and `null` in evaluation context. Dates are recursively converted to ISO-8601 strings.
+
+```typescript
+const checkout = await client.getStringValue('checkout-flow', 'control', {
+  targetingKey: 'user-123',
+  profile: { account: { plan: 'enterprise' } },
+  tags: ['beta', 'internal'],
+});
+```
+
+Primitive-only HTTP context keeps using GET query parameters. Structured context, including `null`, uses the JSON POST endpoint; in browsers this adds a CORS preflight request. Only strings, numbers, booleans, `null`, dates, arrays, and plain objects are supported. Anything else, including cyclic values, resolves with `INVALID_CONTEXT` without making a binding or HTTP call.
+
 ## Caching
 
 The server provider can cache evaluations to avoid a network round-trip (HTTP mode) or binding call (binding mode) for repeated flag/context pairs. Caching is **off by default** and enabled by setting `cacheTtl`:

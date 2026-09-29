@@ -160,7 +160,7 @@ The Go SDK supports HTTP evaluation only.
 
 ## Development
 
-This is a pnpm monorepo. Node.js 22+ and pnpm 10+ are required.
+This is a pnpm monorepo. Node.js 22+ and pnpm 12+ are required.
 
 ```sh
 pnpm install

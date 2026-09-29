@@ -47,7 +47,7 @@ sdks/
 pnpm install        # install all workspace dependencies
 ```
 
-Requires Node 22+ and pnpm 10+.
+Requires Node 22+ and pnpm 12+.
 
 ## Commands
 

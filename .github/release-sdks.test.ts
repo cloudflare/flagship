@@ -53,10 +53,10 @@ test('includes package and build configuration changes but excludes lockfiles', 
 test('publishes npm only for TypeScript changes', () => {
 	assert.deepEqual(publishCommands({ typescript: true, python: false, go: false }), [
 		['changeset', 'publish'],
-		['changeset', 'tag'],
+		['changeset', 'git-tag'],
 	]);
-	assert.deepEqual(publishCommands({ typescript: false, python: true, go: false }), [['changeset', 'tag']]);
-	assert.deepEqual(publishCommands({ typescript: false, python: false, go: true }), [['changeset', 'tag']]);
+	assert.deepEqual(publishCommands({ typescript: false, python: true, go: false }), [['changeset', 'git-tag']]);
+	assert.deepEqual(publishCommands({ typescript: false, python: false, go: true }), [['changeset', 'git-tag']]);
 	assert.deepEqual(publishCommands({ typescript: false, python: false, go: false }), []);
 });
 

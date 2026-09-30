@@ -39,15 +39,15 @@ export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): S
 	) as SdkChanges;
 }
 
-type ChangesetCommand = ['changeset', 'publish' | 'tag'];
+type ChangesetCommand = ['changeset', 'publish' | 'git-tag'];
 
 export function publishCommands(changes: SdkChanges): ChangesetCommand[] {
 	if (changes.typescript)
 		return [
 			['changeset', 'publish'],
-			['changeset', 'tag'],
+			['changeset', 'git-tag'],
 		];
-	if (changes.python || changes.go) return [['changeset', 'tag']];
+	if (changes.python || changes.go) return [['changeset', 'git-tag']];
 	return [];
 }
 

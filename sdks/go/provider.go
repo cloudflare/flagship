@@ -219,6 +219,8 @@ func buildCacheKey(flagKey string, expectedType string, flatCtx openfeature.Flat
 
 func mapReason(reason EvaluationReason) openfeature.Reason {
 	switch reason {
+	case ReasonStatic:
+		return openfeature.StaticReason
 	case ReasonTargetingMatch:
 		return openfeature.TargetingMatchReason
 	case ReasonSplit:

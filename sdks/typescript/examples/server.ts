@@ -58,7 +58,7 @@ async function main() {
 	console.log('Theme config:', themeConfig);
 
 	// 4. Detailed evaluation — reason reflects how the flag resolved
-	// ('TARGETING_MATCH', 'DEFAULT', 'DISABLED', 'SPLIT')
+	// ('STATIC', 'TARGETING_MATCH', 'DEFAULT', 'DISABLED', 'SPLIT')
 	const details = await client.getBooleanDetails('premium-features', false, context);
 	console.log('Premium features details:', {
 		value: details.value,

@@ -61,7 +61,7 @@ Use the `*_details` variants when you need the full resolution result:
 details = client.get_boolean_details("my-flag", False, context)
 
 print(details.value)          # resolved value (or default on error)
-print(details.reason)         # TARGETING_MATCH | SPLIT | DEFAULT | DISABLED | ERROR
+print(details.reason)         # STATIC | TARGETING_MATCH | SPLIT | DEFAULT | DISABLED | ERROR
 print(details.variant)        # variation key, e.g. "on", "off", "v2"
 print(details.error_code)     # set on error, e.g. FLAG_NOT_FOUND, TYPE_MISMATCH
 print(details.error_message)

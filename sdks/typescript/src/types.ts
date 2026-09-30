@@ -181,12 +181,13 @@ export interface FlagshipEvaluationResponse {
 	variant: string;
 	/**
 	 * Why this value was returned:
+	 * - `STATIC`          — the flag is enabled and has no rules; the default variation was served
 	 * - `TARGETING_MATCH` — a rule matched the evaluation context
 	 * - `SPLIT`           — a percentage rollout rule matched
 	 * - `DEFAULT`         — no rule matched; the default variation was served
 	 * - `DISABLED`        — the flag is disabled
 	 */
-	reason: 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT';
+	reason: 'STATIC' | 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT';
 }
 
 // ---------------------------------------------------------------------------

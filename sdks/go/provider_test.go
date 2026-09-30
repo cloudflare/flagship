@@ -175,6 +175,15 @@ func TestProviderObjectRejectsString(t *testing.T) {
 	requireResolutionErrorCode(t, d.ResolutionDetail(), openfeature.TypeMismatchCode)
 }
 
+func TestProviderStaticReasonPassesThrough(t *testing.T) {
+	provider, server := newProviderWithResponse(t, http.StatusOK, true, "on", "STATIC")
+	defer server.Close()
+	d := provider.BooleanEvaluation(context.Background(), "k", false, nil)
+	if d.Value != true || d.ResolutionDetail().ErrorCode != "" || d.Variant != "on" || d.Reason != openfeature.StaticReason {
+		t.Fatalf("detail = %#v", d)
+	}
+}
+
 func TestProviderDisabledReturnsDefaultWithoutError(t *testing.T) {
 	provider, server := newProviderWithResponse(t, http.StatusOK, true, "on", "DISABLED")
 	defer server.Close()

@@ -117,7 +117,16 @@ export class FlagshipServerProvider implements Provider {
 	private etag: string | undefined;
 	private lastFetch = 0;
 	private refreshInFlight: Promise<void> | undefined;
-	private closed = false;
+	/**
+	 * Generation counter for the local-evaluation lifecycle. Bumped on every
+	 * `initialize()` and `onClose()` so in-flight fetches from a previous
+	 * session cannot apply their result after close or re-init. Paired with
+	 * `localReady` to distinguish an active session from a closed one without
+	 * relying on a boolean that re-init would flip back too early for stale writes.
+	 */
+	private epoch = 0;
+	/** True only between a successful local `initialize()` and `onClose()`. */
+	private localReady = false;
 
 	private readonly resolve: <T>(
 		flagKey: string,
@@ -191,14 +200,30 @@ export class FlagshipServerProvider implements Provider {
 	 */
 	async initialize(): Promise<void> {
 		if (!this.localEvaluation || !this.client) return;
-		this.closed = false;
-		await this.fetchAndApplySnapshot(/* initial */ true);
+		// Bump the epoch so any refresh still in flight from a prior session is
+		// ignored when it resolves. Drop residual state before the blocking fetch.
+		this.epoch += 1;
+		this.localReady = false;
+		this.snapshot = undefined;
+		this.etag = undefined;
+		this.lastFetch = 0;
+		this.refreshInFlight = undefined;
+		const epoch = this.epoch;
+		await this.fetchAndApplySnapshot(/* initial */ true, undefined, epoch);
+		// Only mark ready if this initialize was not superseded by onClose/re-init.
+		if (epoch === this.epoch) this.localReady = true;
 	}
 
 	async onClose(): Promise<void> {
-		this.closed = true;
+		// Bump the epoch so in-flight fetches observe a stale generation and
+		// refuse to write. Clearing refreshInFlight is safe: the old promise
+		// finally handler only clears when it still owns the slot (identity check).
+		this.epoch += 1;
+		this.localReady = false;
 		this.snapshot = undefined;
 		this.etag = undefined;
+		this.lastFetch = 0;
+		this.refreshInFlight = undefined;
 		this.cache?.clear();
 	}
 
@@ -381,18 +406,24 @@ export class FlagshipServerProvider implements Provider {
 	 * so a down API isn't hammered on every evaluate.
 	 */
 	private maybeRefresh(log: Logger): void {
-		if (this.closed || this.refreshInFlight) return;
+		if (!this.localReady || this.refreshInFlight) return;
 		if (Date.now() - this.lastFetch < this.refreshInterval) return;
 
-		this.refreshInFlight = this.fetchAndApplySnapshot(false, log).finally(() => {
-			this.refreshInFlight = undefined;
+		const epoch = this.epoch;
+		const pending = this.fetchAndApplySnapshot(false, log, epoch);
+		this.refreshInFlight = pending;
+		void pending.finally(() => {
+			// Only clear the slot if we still own it — a later initialize/onClose
+			// may have started a different fetch or cleared the pointer.
+			if (this.refreshInFlight === pending) this.refreshInFlight = undefined;
 		});
 	}
 
-	private async fetchAndApplySnapshot(initial: boolean, log?: Logger): Promise<void> {
+	private async fetchAndApplySnapshot(initial: boolean, log: Logger | undefined, epoch: number): Promise<void> {
 		try {
 			const result = await this.client!.fetchDefinitions(this.etag);
-			if (this.closed) return;
+			// Stale session (closed or superseded by a newer initialize).
+			if (epoch !== this.epoch) return;
 
 			if (result === 'not-modified') {
 				this.lastFetch = Date.now();
@@ -410,7 +441,7 @@ export class FlagshipServerProvider implements Provider {
 			this.lastFetch = Date.now();
 			log?.debug(`[Flagship] Definitions snapshot updated (${Object.keys(this.snapshot).length} flags)`);
 		} catch (error) {
-			if (this.closed) return;
+			if (epoch !== this.epoch) return;
 			this.lastFetch = Date.now();
 			if (initial) throw error;
 			const message = error instanceof Error ? error.message : String(error);

@@ -705,5 +705,98 @@ describe('FlagshipServerProvider local evaluation', () => {
 			const result = await provider.resolveBooleanEvaluation('bool_flag', false, {}, noopLogger);
 			expect(result.errorCode).toBe(ErrorCode.PROVIDER_NOT_READY);
 		});
+
+		it('ignores stale in-flight refresh after close + re-initialize', async () => {
+			// Regression: a boolean `closed` flag is reset by initialize(), so a
+			// refresh that started before onClose can still write after re-init
+			// and silently overwrite the fresh snapshot. An epoch/generation
+			// guard is required.
+			const staleDefinitions = {
+				flags: {
+					bool_flag: {
+						key: 'bool_flag',
+						enabled: true,
+						default_variation: 'off',
+						variations: { on: true, off: false },
+						rules: [],
+					},
+				},
+			};
+			const freshDefinitions = {
+				flags: {
+					bool_flag: {
+						key: 'bool_flag',
+						enabled: true,
+						default_variation: 'on',
+						variations: { on: true, off: false },
+						rules: [],
+					},
+				},
+			};
+
+			let resolveStale!: (value: Response) => void;
+			let calls = 0;
+			const fetch = mockFetch({
+				definitions: () => {
+					calls += 1;
+					if (calls === 1) {
+						// First initialize — baseline snapshot (default off).
+						return {
+							ok: true,
+							status: 200,
+							headers: new Headers({ etag: '"v1"' }),
+							json: async () => staleDefinitions,
+						} as Response;
+					}
+					if (calls === 2) {
+						// Background refresh started before close — held open.
+						return new Promise<Response>((resolve) => {
+							resolveStale = resolve;
+						});
+					}
+					// Re-initialize after close — fresh snapshot (default on).
+					return {
+						ok: true,
+						status: 200,
+						headers: new Headers({ etag: '"v2"' }),
+						json: async () => freshDefinitions,
+					} as Response;
+				},
+			});
+
+			vi.useFakeTimers();
+			const provider = new FlagshipServerProvider({
+				appId: 'app-1',
+				accountId: 'acct-1',
+				localEvaluation: true,
+				fetch,
+				refreshInterval: 10,
+			});
+			await provider.initialize();
+
+			await vi.advanceTimersByTimeAsync(10);
+			await provider.resolveBooleanEvaluation('bool_flag', false, {}, noopLogger);
+			await Promise.resolve();
+
+			await provider.onClose();
+			await provider.initialize();
+
+			const before = await provider.resolveBooleanEvaluation('bool_flag', false, {}, noopLogger);
+			expect(before).toMatchObject({ value: true, reason: 'STATIC', variant: 'on' });
+
+			// Stale refresh from the previous session finally resolves with the
+			// old definitions. It must not overwrite the fresh snapshot.
+			resolveStale!({
+				ok: true,
+				status: 200,
+				headers: new Headers({ etag: '"stale"' }),
+				json: async () => staleDefinitions,
+			} as Response);
+			await Promise.resolve();
+			await Promise.resolve();
+
+			const after = await provider.resolveBooleanEvaluation('bool_flag', false, {}, noopLogger);
+			expect(after).toMatchObject({ value: true, reason: 'STATIC', variant: 'on' });
+		});
 	});
 });

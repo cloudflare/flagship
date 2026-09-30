@@ -123,6 +123,29 @@ describe('FlagshipServerProvider', () => {
 			expect(result.variant).toBe('enabled-variant');
 		});
 
+		it('passes through the STATIC reason for flags without rules', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({
+					flagKey: 'my-boolean-flag',
+					value: true,
+					reason: 'STATIC',
+					variant: 'on',
+				}),
+			});
+
+			const provider = new FlagshipServerProvider({
+				endpoint: 'https://api.example.com/evaluate',
+			});
+
+			const result = await provider.resolveBooleanEvaluation('my-boolean-flag', false, {}, noopLogger);
+
+			expect(result.value).toBe(true);
+			expect(result.reason).toBe('STATIC');
+			expect(result.variant).toBe('on');
+			expect(result.errorCode).toBeUndefined();
+		});
+
 		it('flagMetadata is always empty (API does not return metadata)', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,

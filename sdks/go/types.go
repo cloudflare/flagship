@@ -65,6 +65,7 @@ type Options struct {
 type EvaluationReason string
 
 const (
+	ReasonStatic         EvaluationReason = "STATIC"
 	ReasonTargetingMatch EvaluationReason = "TARGETING_MATCH"
 	ReasonDefault        EvaluationReason = "DEFAULT"
 	ReasonDisabled       EvaluationReason = "DISABLED"

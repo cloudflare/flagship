@@ -105,7 +105,7 @@ Use the `*Details` methods when you need the full resolution result — reason, 
 const details = await client.getBooleanDetails('my-flag', false, context);
 
 console.log(details.value); // resolved value (or default on error)
-console.log(details.reason); // 'TARGETING_MATCH' | 'SPLIT' | 'DEFAULT' | 'DISABLED' | 'ERROR'
+console.log(details.reason); // 'STATIC' | 'TARGETING_MATCH' | 'SPLIT' | 'DEFAULT' | 'DISABLED' | 'ERROR'
 console.log(details.variant); // variation key, e.g. 'on', 'off', 'v2'
 console.log(details.errorCode); // set on error, e.g. 'FLAG_NOT_FOUND', 'TYPE_MISMATCH'
 console.log(details.errorMessage); // human-readable description of the error

@@ -65,7 +65,7 @@ def main() -> None:
     print("Theme config:", theme_config)
 
     # 4. Detailed evaluation — reason reflects how the flag resolved
-    # ('TARGETING_MATCH', 'DEFAULT', 'DISABLED', 'SPLIT')
+    # ('STATIC', 'TARGETING_MATCH', 'DEFAULT', 'DISABLED', 'SPLIT')
     details = client.get_boolean_details("premium-features", False, context)
     print("Premium features details:")
     print("  value:  ", details.value)

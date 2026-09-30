@@ -4,7 +4,7 @@ import pytest
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.exception import InvalidContextError
 
-from flagship.context import context_to_query_params
+from flagship.context import context_to_query_params, normalize_context
 
 
 def test_primitives_are_serialised() -> None:
@@ -29,9 +29,10 @@ def test_primitives_are_serialised() -> None:
     }
 
 
-def test_none_values_are_skipped() -> None:
+def test_none_values_require_post_and_are_preserved() -> None:
     ctx = EvaluationContext(targeting_key=None, attributes={"a": None, "b": "x"})
-    assert context_to_query_params(ctx) == {"b": "x"}
+    assert normalize_context(ctx).values == {"a": None, "b": "x"}
+    assert normalize_context(ctx).requires_post is True
 
 
 def test_datetime_is_serialised_as_iso() -> None:
@@ -40,16 +41,34 @@ def test_datetime_is_serialised_as_iso() -> None:
     assert context_to_query_params(ctx)["signed_up"] == dt.isoformat()
 
 
-def test_complex_value_raises_invalid_context() -> None:
-    ctx = EvaluationContext(attributes={"obj": {"nested": 1}})
-    with pytest.raises(InvalidContextError):
-        context_to_query_params(ctx)
+def test_nested_objects_arrays_and_dates_are_normalised() -> None:
+    dt = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    ctx = EvaluationContext(
+        attributes={
+            "profile": {"account": {"plan": "enterprise", "created_at": dt}},
+            "tags": ["beta", 42, True, None],
+        }
+    )
+
+    normalized = normalize_context(ctx)
+
+    assert normalized.requires_post is True
+    assert normalized.values == {
+        "profile": {"account": {"plan": "enterprise", "created_at": dt.isoformat()}},
+        "tags": ["beta", 42, True, None],
+    }
 
 
-def test_list_raises_invalid_context() -> None:
-    ctx = EvaluationContext(attributes={"arr": [1, 2, 3]})
+def test_cyclic_context_raises_invalid_context() -> None:
+    profile: dict[str, object] = {}
+    profile["self"] = profile
     with pytest.raises(InvalidContextError):
-        context_to_query_params(ctx)
+        normalize_context(EvaluationContext(attributes={"profile": profile}))
+
+
+def test_non_finite_context_number_raises_invalid_context() -> None:
+    with pytest.raises(InvalidContextError):
+        normalize_context(EvaluationContext(attributes={"score": float("nan")}))
 
 
 def test_none_context_returns_empty() -> None:

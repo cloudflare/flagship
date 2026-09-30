@@ -56,6 +56,20 @@ def test_separate_entry_per_context() -> None:
 
 
 @respx.mock
+def test_equivalent_nested_objects_share_a_cache_entry() -> None:
+    route = respx.post(url__regex=ENDPOINT_REGEX).mock(return_value=_resp(True))
+    provider = _provider(cache_ttl=60)
+    first = EvaluationContext(attributes={"profile": {"plan": "enterprise", "region": "us"}})
+    second = EvaluationContext(attributes={"profile": {"region": "us", "plan": "enterprise"}})
+
+    provider.resolve_boolean_details("k", False, first)
+    result = provider.resolve_boolean_details("k", False, second)
+
+    assert route.call_count == 1
+    assert result.reason == Reason.CACHED
+
+
+@respx.mock
 def test_cache_expires_after_ttl() -> None:
     route = respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=_resp(True))
     provider = _provider(cache_ttl=0.05)

@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
@@ -12,7 +13,7 @@ from openfeature.exception import (
 )
 
 from ._types import FlagshipEvaluationResponse
-from .context import context_to_query_params
+from .context import JsonValue, context_to_query_params, normalize_context
 
 __all__ = ["FLAGSHIP_DEFAULT_BASE_URL", "FlagshipClient"]
 
@@ -24,6 +25,13 @@ _MAX_RETRY_DELAY = 30.0
 
 class _BadRequestError(GeneralError):
     """400 Bad Request — terminal, never retried."""
+
+
+@dataclass(frozen=True)
+class _EvaluationRequest:
+    method: str
+    params: dict[str, str] | None = None
+    body: dict[str, str | dict[str, JsonValue]] | None = None
 
 
 class FlagshipClient:
@@ -69,14 +77,15 @@ class FlagshipClient:
     def evaluate(self, flag_key: str, context: EvaluationContext | None = None) -> FlagshipEvaluationResponse:
         """Evaluate a flag synchronously.
 
-        Raises :class:`openfeature.exception.InvalidContextError` if the context
-        contains complex values that cannot be serialized to query parameters.
+        Primitive-only context uses query parameters. Structured context uses a
+        JSON request body. Unsupported or cyclic values raise
+        :class:`openfeature.exception.InvalidContextError`.
         Raises :class:`openfeature.exception.FlagNotFoundError` on 404.
         Raises :class:`openfeature.exception.GeneralError` on network or server errors.
         Raises :class:`openfeature.exception.ParseError` on malformed responses.
         """
-        params = self._build_params(flag_key, context)
-        return self._fetch_with_retry_sync(params, retries_left=self.retries)
+        request = self._build_request(flag_key, context)
+        return self._fetch_with_retry_sync(request, retries_left=self.retries)
 
     async def evaluate_async(
         self, flag_key: str, context: EvaluationContext | None = None
@@ -85,21 +94,30 @@ class FlagshipClient:
 
         Same error contract as :meth:`evaluate`.
         """
-        params = self._build_params(flag_key, context)
-        return await self._fetch_with_retry_async(params, retries_left=self.retries)
+        request = self._build_request(flag_key, context)
+        return await self._fetch_with_retry_async(request, retries_left=self.retries)
 
-    def _build_params(self, flag_key: str, context: EvaluationContext | None) -> dict[str, str]:
+    def _build_request(self, flag_key: str, context: EvaluationContext | None) -> _EvaluationRequest:
+        normalized = normalize_context(context)
+        if normalized.requires_post:
+            return _EvaluationRequest("POST", body={"flagKey": flag_key, "context": normalized.values})
         params: dict[str, str] = {"flagKey": flag_key}
         params.update(context_to_query_params(context))
-        return params
+        return _EvaluationRequest("GET", params=params)
 
     def _headers(self) -> dict[str, str] | None:
         return self._headers_factory() if self._headers_factory else None
 
-    def _fetch_with_retry_sync(self, params: dict[str, str], retries_left: int) -> FlagshipEvaluationResponse:
+    def _fetch_with_retry_sync(self, request: _EvaluationRequest, retries_left: int) -> FlagshipEvaluationResponse:
         try:
             try:
-                response = self._sync_client.get(self.endpoint, params=params, headers=self._headers())
+                response = self._sync_client.request(
+                    request.method,
+                    self.endpoint,
+                    params=request.params,
+                    json=request.body,
+                    headers=self._headers(),
+                )
             except httpx.TimeoutException as e:
                 raise GeneralError(f"Request timeout after {self.timeout}s") from e
             except httpx.HTTPError as e:
@@ -113,13 +131,21 @@ class FlagshipClient:
                 import time
 
                 time.sleep(self.retry_delay)
-                return self._fetch_with_retry_sync(params, retries_left - 1)
+                return self._fetch_with_retry_sync(request, retries_left - 1)
             raise
 
-    async def _fetch_with_retry_async(self, params: dict[str, str], retries_left: int) -> FlagshipEvaluationResponse:
+    async def _fetch_with_retry_async(
+        self, request: _EvaluationRequest, retries_left: int
+    ) -> FlagshipEvaluationResponse:
         try:
             try:
-                response = await self._async_client.get(self.endpoint, params=params, headers=self._headers())
+                response = await self._async_client.request(
+                    request.method,
+                    self.endpoint,
+                    params=request.params,
+                    json=request.body,
+                    headers=self._headers(),
+                )
             except httpx.TimeoutException as e:
                 raise GeneralError(f"Request timeout after {self.timeout}s") from e
             except httpx.HTTPError as e:
@@ -131,7 +157,7 @@ class FlagshipClient:
         except Exception:
             if retries_left > 0:
                 await asyncio.sleep(self.retry_delay)
-                return await self._fetch_with_retry_async(params, retries_left - 1)
+                return await self._fetch_with_retry_async(request, retries_left - 1)
             raise
 
 

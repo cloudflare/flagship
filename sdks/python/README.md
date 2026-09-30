@@ -134,14 +134,15 @@ The cache is shared by the sync and async APIs and guarded by a lock for thread-
 
 ## Evaluation context
 
-Context attributes are sent as URL query parameters. Supported types:
+Primitive-only context is sent as URL query parameters. Context containing nested values or `None` uses a JSON POST request.
 
-| Type                  | Serialisation                                    |
-| --------------------- | ------------------------------------------------ |
-| `str`, `int`, `float` | Passed as a string                               |
-| `bool`                | `"true"` or `"false"`                            |
-| `datetime`            | ISO 8601                                         |
-| `dict`, `list`, other | **Not supported** — raises `InvalidContextError` |
+| Type                         | Serialisation                                      |
+| ---------------------------- | -------------------------------------------------- |
+| `str`, `int`, `float`        | Preserved; primitive-only context uses GET         |
+| `bool`                       | `"true"` or `"false"` in GET query parameters     |
+| `datetime`                   | Recursively converted to ISO 8601                  |
+| `dict`, `list`, tuple, `None` | Preserved recursively in a JSON POST body          |
+| Unsupported or cyclic values | Rejected before transport with `InvalidContextError` |
 
 ## Async
 
@@ -173,7 +174,7 @@ The provider never throws from a resolution method. On error the OpenFeature SDK
 | ----------------- | -------------------------------------------------------------- |
 | `FLAG_NOT_FOUND`  | Flag key does not exist (HTTP 404)                             |
 | `TYPE_MISMATCH`   | The flag's resolved type does not match the requested type     |
-| `INVALID_CONTEXT` | The evaluation context contains unsupported types (dict, list) |
+| `INVALID_CONTEXT` | The evaluation context contains unsupported or cyclic values  |
 | `PARSE_ERROR`     | The API response was not a valid evaluation response           |
 | `GENERAL`         | Network error, timeout, or any other transient failure         |
 

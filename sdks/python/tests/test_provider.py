@@ -162,7 +162,9 @@ def test_parse_error(provider: FlagshipServerProvider) -> None:
 
 
 def test_invalid_context(provider: FlagshipServerProvider) -> None:
-    ctx = EvaluationContext(attributes={"obj": {"x": 1}})
+    profile: dict[str, object] = {}
+    profile["self"] = profile
+    ctx = EvaluationContext(attributes={"profile": profile})
     with pytest.raises(InvalidContextError):
         provider.resolve_boolean_details("k", False, ctx)
 

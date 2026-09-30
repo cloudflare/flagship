@@ -1,3 +1,4 @@
+import json
 import logging
 import threading
 from collections.abc import Callable, Hashable, Mapping, Sequence
@@ -20,7 +21,7 @@ from openfeature.hook import Hook
 from openfeature.provider import AbstractProvider, Metadata
 
 from .client import FLAGSHIP_DEFAULT_BASE_URL, FlagshipClient
-from .context import context_to_query_params
+from .context import normalize_context
 
 __all__ = ["FlagshipServerProvider"]
 
@@ -244,8 +245,9 @@ class FlagshipServerProvider(AbstractProvider):
     ) -> Hashable | None:
         if self._cache is None:
             return None
-        params = context_to_query_params(evaluation_context)
-        return (flag_key, flag_type, frozenset(params.items()))
+        context = normalize_context(evaluation_context).values
+        serialized = json.dumps(context, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return (flag_key, flag_type, serialized)
 
     def _cache_get(self, key: Hashable) -> FlagResolutionDetails[Any] | None:
         assert self._cache is not None

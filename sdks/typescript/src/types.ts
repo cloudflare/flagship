@@ -271,14 +271,42 @@ export interface FlagshipCacheOptions {
 }
 
 /**
+ * Local in-process evaluation options for `FlagshipServerProvider`.
+ *
+ * When enabled, the provider downloads flag definitions once at initialize,
+ * evaluates flags in-process, and refreshes definitions in the background
+ * (lazy stale-while-revalidate on evaluate).
+ *
+ * Requires a token with app **read** permission (not evaluate). Local mode is
+ * incompatible with `binding` and with `cacheTtl`.
+ */
+export interface FlagshipLocalEvaluationOptions {
+	/**
+	 * Enable local in-process evaluation.
+	 * @default false
+	 */
+	localEvaluation?: boolean;
+
+	/**
+	 * Minimum interval between background definition refreshes, in milliseconds.
+	 * Refresh is lazy (triggered on evaluate) rather than a background timer,
+	 * so it works in both Node and Cloudflare Workers.
+	 * @default 30_000
+	 */
+	refreshInterval?: number;
+}
+
+/**
  * Options accepted by `FlagshipServerProvider`.
  *
  * Provide **either** HTTP configuration (`appId`/`endpoint` + credentials) **or**
  * a wrangler `binding` — never both. The provider detects which mode to use
  * based on the presence of the `binding` field. Caching options apply to both
- * modes.
+ * modes. Local evaluation options apply only to HTTP mode.
  */
-export type FlagshipServerProviderOptions = (FlagshipProviderOptions | FlagshipBindingProviderOptions) & FlagshipCacheOptions;
+export type FlagshipServerProviderOptions = (FlagshipProviderOptions | FlagshipBindingProviderOptions) &
+	FlagshipCacheOptions &
+	FlagshipLocalEvaluationOptions;
 
 /**
  * Type guard: returns `true` when the options use binding mode.

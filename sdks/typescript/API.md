@@ -18,12 +18,13 @@ npm install @cloudflare/flagship @openfeature/web-sdk
 
 ## Server-side usage
 
-`FlagshipServerProvider` supports two modes of operation:
+`FlagshipServerProvider` supports three modes of operation:
 
 - **Binding mode** (recommended for Cloudflare Workers) — evaluates flags via a wrangler binding (`env.FLAGS`). No HTTP overhead, no auth tokens.
 - **HTTP mode** — evaluates flags via HTTP requests to the Flagship API. Works in any server environment.
+- **Local evaluation mode** — downloads flag definitions once, evaluates in-process, and refreshes definitions lazily. Requires `localEvaluation: true` plus HTTP config.
 
-The constructor accepts a discriminated union: provide **either** a `binding` **or** HTTP config (`appId`/`endpoint`, `accountId`, etc.) — never both. Providing both throws immediately.
+The constructor accepts a discriminated union: provide **either** a `binding` **or** HTTP config (`appId`/`endpoint`, `accountId`, etc.) — never both. Providing both throws immediately. Local evaluation is HTTP-only and incompatible with `binding` and `cacheTtl`.
 
 ### Quick start — Cloudflare Workers
 
@@ -161,8 +162,14 @@ new FlagshipServerProvider({
   // fetch: env.FLAGS_SERVICE.fetch.bind(env.FLAGS_SERVICE),
 
   // Caching — opt-in, off by default. See "Caching" below.
+  // Incompatible with localEvaluation.
   cacheTtl: 30000, // ms; enables the cache when > 0
   cacheMaxSize: 1000, // max cached entries (default: 1000)
+
+  // Local evaluation — download definitions once and evaluate in-process.
+  // Requires a token with app **read** permission. See "Local evaluation" below.
+  // localEvaluation: true,
+  // refreshInterval: 30000, // ms between lazy background refreshes (default 30000)
 });
 ```
 
@@ -207,6 +214,47 @@ new FlagshipServerProvider({
 | Any error (not found, timeout, etc.)          | `ERROR`                            | no                |
 
 Each entry is keyed by flag key, expected type, and the **full evaluation context**, so distinct contexts never share a cached value. Because freshness is TTL-based, a flag change in Flagship takes effect once the entry expires (up to `cacheTtl` later). The cache is per-provider-instance and is cleared on `onClose()`.
+
+### Local evaluation
+
+When `localEvaluation: true`, the provider fetches flag definitions during `initialize()` (blocking), evaluates flags in-process, and refreshes definitions lazily on evaluate once `refreshInterval` has elapsed. Refresh uses `If-None-Match` / `304`. Failures keep the last good snapshot.
+
+```typescript
+new FlagshipServerProvider({
+  appId: 'your-app-id',
+  accountId: 'your-account-id', // required — rollout hash seed
+  authToken: 'your-read-token', // app **read** permission
+  localEvaluation: true,
+  refreshInterval: 30_000, // default 30_000
+});
+```
+
+| Option            | Type      | Default  | Description                                                            |
+| ----------------- | --------- | -------- | ---------------------------------------------------------------------- |
+| `localEvaluation` | `boolean` | `false`  | Enable in-process evaluation from downloaded definitions.              |
+| `refreshInterval` | `number`  | `30_000` | Minimum ms between background definition refreshes (lazy on evaluate). |
+
+| Constraint                           | Behaviour                                                  |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `localEvaluation` + `binding`        | Throws at construction                                     |
+| `localEvaluation` + `cacheTtl`       | Throws at construction                                     |
+| Missing `accountId`                  | Throws at construction                                     |
+| `endpoint` not ending in `/evaluate` | Throws at construction (definitions URL cannot be derived) |
+
+Error mapping in local mode:
+
+| Condition                                   | OpenFeature error    |
+| ------------------------------------------- | -------------------- |
+| Flag key not in snapshot                    | `FLAG_NOT_FOUND`     |
+| Missing / invalid variation on the flag     | `PARSE_ERROR`        |
+| No snapshot yet (before init / after close) | `PROVIDER_NOT_READY` |
+| Wrong type vs requested OpenFeature type    | `TYPE_MISMATCH`      |
+
+Notes:
+
+- Local evaluations do **not** appear in server-side analytics.
+- Context is normalized with the same rules as HTTP mode (dates → ISO strings). Server request-size limits are **not** re-applied locally — a known difference from the network path.
+- Reason `STATIC` is returned when a flag has no rules (also surfaced in HTTP mode when the API returns it).
 
 ### Cloudflare Workers example (binding)
 

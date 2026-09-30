@@ -129,7 +129,7 @@ The cache is per-provider instance, guarded by a mutex for concurrent use, and c
 
 ## Evaluation Context
 
-Context attributes are sent as URL query parameters. Supported values are `string`, numeric types, `bool`, and `time.Time`. `nil` values are skipped. Maps, slices, structs, and other complex values return `INVALID_CONTEXT` through OpenFeature and do not trigger an HTTP request.
+Primitive-only context is sent as URL query parameters. Context containing maps, slices, arrays, or `nil` uses a JSON POST request. Nested values are preserved recursively, and `time.Time` values are converted to RFC3339Nano strings. Unsupported map keys, structs, cyclic values, and non-finite numbers return `INVALID_CONTEXT` before transport.
 
 ## Flag Types
 

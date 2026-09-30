@@ -213,7 +213,9 @@ func TestProviderParseError(t *testing.T) {
 func TestProviderInvalidContext(t *testing.T) {
 	provider, server := newProviderWithResponse(t, http.StatusOK, true, "on", "DEFAULT")
 	defer server.Close()
-	d := provider.BooleanEvaluation(context.Background(), "k", false, openfeature.FlattenedContext{"obj": map[string]any{"x": 1}})
+	profile := map[string]any{}
+	profile["self"] = profile
+	d := provider.BooleanEvaluation(context.Background(), "k", false, openfeature.FlattenedContext{"profile": profile})
 	requireResolutionErrorCode(t, d.ResolutionDetail(), openfeature.InvalidContextCode)
 }
 

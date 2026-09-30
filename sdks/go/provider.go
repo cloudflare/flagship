@@ -202,11 +202,15 @@ func resolveTyped[T any](
 }
 
 func buildCacheKey(flagKey string, expectedType string, flatCtx openfeature.FlattenedContext) (string, error) {
-	params, err := contextToQueryParams(flatCtx)
+	normalized, err := normalizeContext(flatCtx)
 	if err != nil {
 		return "", err
 	}
-	encoded, err := json.Marshal([]string{flagKey, expectedType, params.Encode()})
+	contextJSON, err := json.Marshal(normalized.values)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal([]string{flagKey, expectedType, string(contextJSON)})
 	if err != nil {
 		return "", err
 	}

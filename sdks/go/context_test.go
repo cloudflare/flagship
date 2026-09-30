@@ -1,6 +1,8 @@
 package flagship
 
 import (
+	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -41,13 +43,13 @@ func TestContextToQueryParamsSerializesPrimitives(t *testing.T) {
 	}
 }
 
-func TestContextToQueryParamsSkipsNil(t *testing.T) {
-	params, err := contextToQueryParams(openfeature.FlattenedContext{"a": nil, "b": "x"})
+func TestNormalizeContextPreservesNil(t *testing.T) {
+	normalized, err := normalizeContext(openfeature.FlattenedContext{"a": nil, "b": "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if params.Encode() != "b=x" {
-		t.Fatalf("params = %q", params.Encode())
+	if !normalized.requiresPost || normalized.values["a"] != nil || normalized.values["b"] != "x" {
+		t.Fatalf("normalized = %#v", normalized)
 	}
 }
 
@@ -62,13 +64,45 @@ func TestContextToQueryParamsSerializesTime(t *testing.T) {
 	}
 }
 
-func TestContextToQueryParamsRejectsComplexValues(t *testing.T) {
-	_, err := contextToQueryParams(openfeature.FlattenedContext{"obj": map[string]any{"nested": 1}})
+func TestNormalizeContextTreatsTypedNilCollectionsAsNull(t *testing.T) {
+	var values []string
+	var object map[string]any
+	normalized, err := normalizeContext(openfeature.FlattenedContext{"values": values, "object": object})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !normalized.requiresPost || normalized.values["values"] != nil || normalized.values["object"] != nil {
+		t.Fatalf("normalized = %#v", normalized)
+	}
+}
+
+func TestNormalizeContextPreservesNestedObjectsArraysAndTimes(t *testing.T) {
+	ts := time.Date(2024, 1, 2, 3, 4, 5, 600, time.UTC)
+	normalized, err := normalizeContext(openfeature.FlattenedContext{
+		"profile": map[string]any{"account": map[string]any{"plan": "enterprise", "createdAt": ts}},
+		"tags":    []any{"beta", 42, true, nil},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"profile": map[string]any{"account": map[string]any{"plan": "enterprise", "createdAt": ts.Format(time.RFC3339Nano)}},
+		"tags":    []any{"beta", 42, true, nil},
+	}
+	if !normalized.requiresPost || !reflect.DeepEqual(normalized.values, want) {
+		t.Fatalf("normalized = %#v, want %#v", normalized, want)
+	}
+}
+
+func TestNormalizeContextRejectsCycles(t *testing.T) {
+	profile := map[string]any{}
+	profile["self"] = profile
+	_, err := normalizeContext(openfeature.FlattenedContext{"profile": profile})
 	requireFlagshipErrorCode(t, err, ErrorCodeInvalidContext)
 }
 
-func TestContextToQueryParamsRejectsSlices(t *testing.T) {
-	_, err := contextToQueryParams(openfeature.FlattenedContext{"arr": []int{1, 2, 3}})
+func TestNormalizeContextRejectsNonFiniteNumbers(t *testing.T) {
+	_, err := normalizeContext(openfeature.FlattenedContext{"score": math.NaN()})
 	requireFlagshipErrorCode(t, err, ErrorCodeInvalidContext)
 }
 

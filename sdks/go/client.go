@@ -27,6 +27,12 @@ type FlagshipClient struct {
 	headersFactory HeaderFactory
 }
 
+type evaluationRequest struct {
+	method string
+	url    string
+	body   []byte
+}
+
 // NewClient constructs a Flagship HTTP client.
 func NewClient(options Options) (*FlagshipClient, error) {
 	endpoint, err := resolveEndpoint(options)
@@ -112,32 +118,46 @@ func (c *FlagshipClient) Evaluate(ctx context.Context, flagKey string, evalCtx o
 // EvaluateFlat evaluates a flag using the flattened context passed to
 // OpenFeature providers.
 func (c *FlagshipClient) EvaluateFlat(ctx context.Context, flagKey string, flatCtx openfeature.FlattenedContext) (EvaluationResponse, error) {
-	u, err := c.buildURL(flagKey, flatCtx)
+	request, err := c.buildRequest(flagKey, flatCtx)
 	if err != nil {
 		return EvaluationResponse{}, err
 	}
-	return c.fetchWithRetry(ctx, u)
+	return c.fetchWithRetry(ctx, request)
 }
 
-func (c *FlagshipClient) buildURL(flagKey string, flatCtx openfeature.FlattenedContext) (string, error) {
-	u, err := url.Parse(c.endpoint)
+func (c *FlagshipClient) buildRequest(flagKey string, flatCtx openfeature.FlattenedContext) (evaluationRequest, error) {
+	normalized, err := normalizeContext(flatCtx)
 	if err != nil {
-		return "", newError(ErrorCodeGeneral, fmt.Sprintf("invalid endpoint URL: %s", c.endpoint), 0, err)
+		return evaluationRequest{}, err
+	}
+	if normalized.requiresPost {
+		body, err := json.Marshal(struct {
+			FlagKey string         `json:"flagKey"`
+			Context map[string]any `json:"context"`
+		}{FlagKey: flagKey, Context: normalized.values})
+		if err != nil {
+			return evaluationRequest{}, newError(ErrorCodeInvalidContext, fmt.Sprintf("failed to serialize evaluation context: %v", err), 0, err)
+		}
+		return evaluationRequest{method: http.MethodPost, url: c.endpoint, body: body}, nil
 	}
 
+	u, err := url.Parse(c.endpoint)
+	if err != nil {
+		return evaluationRequest{}, newError(ErrorCodeGeneral, fmt.Sprintf("invalid endpoint URL: %s", c.endpoint), 0, err)
+	}
 	params, err := contextToQueryParams(flatCtx)
 	if err != nil {
-		return "", err
+		return evaluationRequest{}, err
 	}
 	params.Set("flagKey", flagKey)
 	u.RawQuery = params.Encode()
-	return u.String(), nil
+	return evaluationRequest{method: http.MethodGet, url: u.String()}, nil
 }
 
-func (c *FlagshipClient) fetchWithRetry(ctx context.Context, requestURL string) (EvaluationResponse, error) {
+func (c *FlagshipClient) fetchWithRetry(ctx context.Context, request evaluationRequest) (EvaluationResponse, error) {
 	var lastErr error
 	for attempt := 0; attempt <= c.retries; attempt++ {
-		result, err := c.fetch(ctx, requestURL)
+		result, err := c.fetch(ctx, request)
 		if err == nil {
 			return result, nil
 		}
@@ -152,7 +172,7 @@ func (c *FlagshipClient) fetchWithRetry(ctx context.Context, requestURL string) 
 	return EvaluationResponse{}, lastErr
 }
 
-func (c *FlagshipClient) fetch(ctx context.Context, requestURL string) (EvaluationResponse, error) {
+func (c *FlagshipClient) fetch(ctx context.Context, request evaluationRequest) (EvaluationResponse, error) {
 	requestCtx := ctx
 	cancel := func() {}
 	if c.timeout > 0 {
@@ -160,7 +180,11 @@ func (c *FlagshipClient) fetch(ctx context.Context, requestURL string) (Evaluati
 	}
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, requestURL, nil)
+	var body io.Reader
+	if request.body != nil {
+		body = bytes.NewReader(request.body)
+	}
+	req, err := http.NewRequestWithContext(requestCtx, request.method, request.url, body)
 	if err != nil {
 		return EvaluationResponse{}, newError(ErrorCodeGeneral, fmt.Sprintf("failed to build request: %v", err), 0, err)
 	}
@@ -170,6 +194,9 @@ func (c *FlagshipClient) fetch(ctx context.Context, requestURL string) (Evaluati
 		return EvaluationResponse{}, err
 	}
 	req.Header = headers
+	if request.method == http.MethodPost && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

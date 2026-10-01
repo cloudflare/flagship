@@ -11,6 +11,8 @@ import {
 
 interface ResolvedOptions {
 	endpoint: string;
+	/** Definitions URL used by local evaluation. `undefined` when not derived. */
+	definitionsEndpoint: string | undefined;
 	fetchOptions: RequestInit;
 	signal: AbortSignal | undefined;
 	fetch: typeof globalThis.fetch | undefined;
@@ -38,6 +40,7 @@ export class FlagshipClient {
 		const fetchOptions = buildFetchOptions(options);
 		this.options = {
 			endpoint: resolveEndpoint(options),
+			definitionsEndpoint: tryResolveDefinitionsEndpoint(options),
 			fetchOptions,
 			signal: fetchOptions.signal ?? undefined,
 			fetch: options.fetch,
@@ -68,7 +71,42 @@ export class FlagshipClient {
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
 
-		return this.fetchWithRetry(request, this.options.retries, transport, signals);
+		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseEvaluationResponse);
+	}
+
+	/**
+	 * Fetch the app's flag definitions for local evaluation.
+	 *
+	 * Sends `If-None-Match` when `etag` is provided. A `304` response yields
+	 * `'not-modified'`; a `200` yields the parsed flags map and the new ETag.
+	 *
+	 * @internal
+	 */
+	async fetchDefinitions(
+		etag?: string,
+		options?: FlagshipRequestOptions,
+	): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
+		const endpoint = this.options.definitionsEndpoint;
+		if (!endpoint) {
+			// Configuration problem, not an evaluation failure — mirror the constructor's plain Errors.
+			throw new Error('Flagship: definitions endpoint is not configured. Provide appId+accountId, or an endpoint ending in /evaluate.');
+		}
+
+		const headers = new Headers(this.options.fetchOptions.headers);
+		if (etag) headers.set('If-None-Match', etag);
+
+		const request: EvaluationRequest = {
+			url: endpoint,
+			init: {
+				...this.options.fetchOptions,
+				method: 'GET',
+				headers,
+			},
+		};
+		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
+		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
+
+		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseDefinitionsResponse);
 	}
 
 	/**
@@ -76,14 +114,15 @@ export class FlagshipClient {
 	 * terminal responses (400, 401, 403, 404, …) and caller aborts are
 	 * propagated immediately.
 	 */
-	private async fetchWithRetry(
+	private async fetchWithRetry<T>(
 		request: EvaluationRequest,
 		retriesLeft: number,
 		transport: typeof globalThis.fetch,
 		signals: AbortSignal[],
-	): Promise<FlagshipEvaluationResponse> {
+		parse: (response: Response) => Promise<T>,
+	): Promise<T> {
 		try {
-			return await this.fetchWithTimeout(request, this.options.timeout, transport, signals);
+			return await this.fetchWithTimeout(request, this.options.timeout, transport, signals, parse);
 		} catch (error) {
 			if (error instanceof FlagshipError && !error.retryable) {
 				throw error;
@@ -92,7 +131,7 @@ export class FlagshipClient {
 			if (retriesLeft > 0) {
 				discardResponse(error);
 				await waitForRetry(this.options.retryDelay, signals);
-				return this.fetchWithRetry(request, retriesLeft - 1, transport, signals);
+				return this.fetchWithRetry(request, retriesLeft - 1, transport, signals, parse);
 			}
 
 			throw error;
@@ -103,12 +142,13 @@ export class FlagshipClient {
 	 * Issues a single request against the resolved transport, aborting it when
 	 * the timeout elapses or when any caller-supplied signal fires.
 	 */
-	private async fetchWithTimeout(
+	private async fetchWithTimeout<T>(
 		request: EvaluationRequest,
 		timeout: number,
 		transport: typeof globalThis.fetch,
 		signals: AbortSignal[],
-	): Promise<FlagshipEvaluationResponse> {
+		parse: (response: Response) => Promise<T>,
+	): Promise<T> {
 		const alreadyAborted = signals.find((signal) => signal.aborted);
 		if (alreadyAborted) {
 			throw abortedError(alreadyAborted.reason);
@@ -128,22 +168,7 @@ export class FlagshipClient {
 				signal: merged.signal,
 			});
 
-			if (!response.ok) {
-				throw new FlagshipError(
-					`HTTP ${response.status}: ${response.statusText}`,
-					FlagshipErrorCode.NETWORK_ERROR,
-					response,
-					isRetryableStatus(response.status),
-				);
-			}
-
-			const data = await response.json();
-
-			if (!data || typeof data !== 'object' || !('flagKey' in data) || !('value' in data)) {
-				throw new FlagshipError('Invalid response format from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
-			}
-
-			return data as FlagshipEvaluationResponse;
+			return await parse(response);
 		} catch (error) {
 			if (error instanceof FlagshipError) {
 				throw error;
@@ -164,6 +189,55 @@ export class FlagshipClient {
 			merged.dispose();
 		}
 	}
+}
+
+async function parseEvaluationResponse(response: Response): Promise<FlagshipEvaluationResponse> {
+	if (!response.ok) {
+		throw new FlagshipError(
+			`HTTP ${response.status}: ${response.statusText}`,
+			FlagshipErrorCode.NETWORK_ERROR,
+			response,
+			isRetryableStatus(response.status),
+		);
+	}
+
+	const data = await response.json();
+
+	if (!data || typeof data !== 'object' || !('flagKey' in data) || !('value' in data)) {
+		throw new FlagshipError('Invalid response format from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
+	}
+
+	return data as FlagshipEvaluationResponse;
+}
+
+async function parseDefinitionsResponse(response: Response): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
+	if (response.status === 304) {
+		return 'not-modified';
+	}
+
+	if (!response.ok) {
+		throw new FlagshipError(
+			`HTTP ${response.status}: ${response.statusText}`,
+			FlagshipErrorCode.NETWORK_ERROR,
+			response,
+			isRetryableStatus(response.status),
+		);
+	}
+
+	const data: unknown = await response.json();
+	if (
+		!data ||
+		typeof data !== 'object' ||
+		!('flags' in data) ||
+		typeof (data as { flags: unknown }).flags !== 'object' ||
+		(data as { flags: unknown }).flags === null ||
+		Array.isArray((data as { flags: unknown }).flags)
+	) {
+		throw new FlagshipError('Invalid definitions response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
+	}
+
+	const etag = response.headers.get('etag') ?? '';
+	return { etag, flags: (data as { flags: Record<string, unknown> }).flags };
 }
 
 function buildPostRequest(
@@ -328,5 +402,66 @@ function resolveEndpoint(options: FlagshipProviderOptions): string {
 		return new URL(resolved).toString();
 	} catch {
 		throw new Error(`Flagship: resolved endpoint is not a valid URL: ${resolved}`);
+	}
+}
+
+/**
+ * Derive the definitions URL from provider options.
+ * - With `appId`: `…/apps/{appId}/definitions`
+ * - With `endpoint`: replace a trailing `/evaluate` with `/definitions`
+ *
+ * Returns `undefined` when the endpoint cannot be derived (caller decides whether that's fatal).
+ */
+function tryResolveDefinitionsEndpoint(options: FlagshipProviderOptions): string | undefined {
+	try {
+		return resolveDefinitionsEndpoint(options);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * @internal Exported for tests and the server provider constructor validation.
+ */
+export function resolveDefinitionsEndpoint(options: FlagshipProviderOptions): string {
+	const { appId, endpoint, baseUrl, accountId } = options;
+
+	if (appId && endpoint) {
+		throw new Error('Flagship: provide either "appId" or "endpoint", not both');
+	}
+
+	if (endpoint) {
+		let url: URL;
+		try {
+			url = new URL(endpoint);
+		} catch {
+			throw new Error(`Flagship: invalid endpoint URL: ${endpoint}`);
+		}
+		// Strip trailing slashes from the path, then require it ends with /evaluate.
+		const path = url.pathname.replace(/\/+$/, '');
+		if (!path.endsWith('/evaluate')) {
+			throw new Error(
+				'Flagship: when localEvaluation is enabled with "endpoint", the URL path must end in "/evaluate" so the definitions URL can be derived',
+			);
+		}
+		url.pathname = `${path.slice(0, -'/evaluate'.length)}/definitions`;
+		return url.toString();
+	}
+
+	if (!appId) {
+		throw new Error('Flagship: either "appId" or "endpoint" is required');
+	}
+
+	if (!accountId) {
+		throw new Error('Flagship: "accountId" is required when using "appId"');
+	}
+
+	const base = (baseUrl || FLAGSHIP_DEFAULT_BASE_URL).replace(/\/+$/, '');
+	const resolved = `${base}/client/v4/accounts/${encodeURIComponent(accountId)}/flagship/apps/${encodeURIComponent(appId)}/definitions`;
+
+	try {
+		return new URL(resolved).toString();
+	} catch {
+		throw new Error(`Flagship: resolved definitions endpoint is not a valid URL: ${resolved}`);
 	}
 }

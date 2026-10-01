@@ -1,0 +1,3113 @@
+{
+	"version": 1,
+	"generatedBy": "spec/local-evaluation/generate.ts",
+	"accountId": "aaaabbbbccccdddd1111222233334444",
+	"cases": [
+		{
+			"name": "static-no-rules",
+			"definitions": {
+				"flags": {
+					"static": {
+						"key": "static",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"off": false,
+							"on": true
+						},
+						"rules": []
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "static",
+			"context": {
+				"targetingKey": "u1"
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "STATIC"
+			}
+		},
+		{
+			"name": "disabled-flag",
+			"definitions": {
+				"flags": {
+					"disabled": {
+						"key": "disabled",
+						"enabled": false,
+						"default_variation": "off",
+						"variations": {
+							"off": false,
+							"on": true
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "x",
+										"operator": "equals",
+										"value": "1"
+									}
+								],
+								"serve_variation": "on"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "disabled",
+			"context": {
+				"x": "1"
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "DISABLED"
+			}
+		},
+		{
+			"name": "default-no-match",
+			"definitions": {
+				"flags": {
+					"default": {
+						"key": "default",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"off": "control",
+							"on": "treatment"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "plan",
+										"operator": "equals",
+										"value": "pro"
+									}
+								],
+								"serve_variation": "on"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "default",
+			"context": {
+				"plan": "free"
+			},
+			"expected": {
+				"value": "control",
+				"variant": "off",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "string-equals-match",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "plan",
+										"operator": "equals",
+										"value": "pro"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"plan": "pro"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-equals-mismatch",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "plan",
+										"operator": "equals",
+										"value": "pro"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"plan": "free"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "string-equals-bool-string",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "flag",
+										"operator": "equals",
+										"value": true
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"flag": "true"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-equals-number-string",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "n",
+										"operator": "equals",
+										"value": 1
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"n": "1"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-equals-1e21",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "n",
+										"operator": "equals",
+										"value": 1e21
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"n": "1e+21"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-equals-neg-zero",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "n",
+										"operator": "equals",
+										"value": 0
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"n": "0"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-not-equals-match",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "plan",
+										"operator": "not_equals",
+										"value": "pro"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"plan": "free"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-not-equals-null",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "plan",
+										"operator": "not_equals",
+										"value": "pro"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"plan": null
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-not-equals-equal",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "plan",
+										"operator": "not_equals",
+										"value": "pro"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"plan": "pro"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "string-contains-match",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "email",
+										"operator": "contains",
+										"value": "@corp"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"email": "a@corp.com"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-contains-miss",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "email",
+										"operator": "contains",
+										"value": "@corp"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"email": "a@gmail.com"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "string-contains-null",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "email",
+										"operator": "contains",
+										"value": "@corp"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"email": null
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "string-starts-with-match",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "id",
+										"operator": "starts_with",
+										"value": "beta_"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"id": "beta_1"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-starts-with-miss",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "id",
+										"operator": "starts_with",
+										"value": "beta_"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"id": "prod_1"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "string-ends-with-match",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "email",
+										"operator": "ends_with",
+										"value": ".edu"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"email": "a@mit.edu"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "string-ends-with-miss",
+			"definitions": {
+				"flags": {
+					"string_ops": {
+						"key": "string_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "email",
+										"operator": "ends_with",
+										"value": ".edu"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "string_ops",
+			"context": {
+				"email": "a@ex.com"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "order-gt-num",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": 10
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": 15
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-gt-num-eq",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": 10
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": 10
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "order-lt-num",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "less_than",
+										"value": 10
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": 5
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-lt-num-eq",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "less_than",
+										"value": 10
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": 10
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "order-gte-num",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than_or_equals",
+										"value": 10
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": 10
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-lte-num",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "less_than_or_equals",
+										"value": 10
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": 10
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-gt-string-num",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": 10
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": "15"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-gt-hex",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": 15
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": "0x10"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-gt-whitespace-empty",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": 0
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": "   "
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "order-gt-bool-true",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": 0
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": true
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-iso-lt",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "less_than",
+										"value": "2030-01-01T00:00:00Z"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": "2025-01-01T00:00:00Z"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-iso-gt",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": "2030-01-01T00:00:00Z"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": "2031-01-01T00:00:00Z"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-iso-eq",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than_or_equals",
+										"value": "2030-01-01T00:00:00Z"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": "2030-01-01T00:00:00Z"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-iso-offset",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "less_than",
+										"value": "2030-01-01T00:00:00Z"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": "2025-01-01T00:00:00+00:00"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-iso-ms",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "less_than",
+										"value": "2030-01-01T00:00:00Z"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": "2025-01-01T00:00:00.123Z"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "order-array-attr",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": 1
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": [5]
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "order-array-target",
+			"definitions": {
+				"flags": {
+					"order_ops": {
+						"key": "order_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "v",
+										"operator": "greater_than",
+										"value": [1]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order_ops",
+			"context": {
+				"v": 5
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "in-match",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "country",
+										"operator": "in",
+										"value": ["US", "CA", 1, true]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"country": "US"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "in-mixed-number",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "country",
+										"operator": "in",
+										"value": ["US", "CA", 1, true]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"country": 1
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "in-mixed-bool",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "country",
+										"operator": "in",
+										"value": ["US", "CA", 1, true]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"country": true
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "in-miss",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "country",
+										"operator": "in",
+										"value": ["US", "CA"]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"country": "GB"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "in-null",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "country",
+										"operator": "in",
+										"value": ["US"]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"country": null
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "not-in-null",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "country",
+										"operator": "not_in",
+										"value": ["US"]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"country": null
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "not-in-match",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "country",
+										"operator": "not_in",
+										"value": ["US", "CA"]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"country": "GB"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "in-non-array-target",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "country",
+										"operator": "in",
+										"value": "US"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"country": "US"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "has-match",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "tags",
+										"operator": "has",
+										"value": "beta"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"tags": ["alpha", "beta", 3]
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "has-miss",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "tags",
+										"operator": "has",
+										"value": "gamma"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"tags": ["alpha", "beta"]
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "not-has-match",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "tags",
+										"operator": "not_has",
+										"value": "gamma"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"tags": ["alpha"]
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "has-non-array-attr",
+			"definitions": {
+				"flags": {
+					"set_ops": {
+						"key": "set_ops",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "tags",
+										"operator": "has",
+										"value": "beta"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "set_ops",
+			"context": {
+				"tags": "beta"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "missing-attr",
+			"definitions": {
+				"flags": {
+					"path": {
+						"key": "path",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "missing",
+										"operator": "equals",
+										"value": "x"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "path",
+			"context": {},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "dotted-path-match",
+			"definitions": {
+				"flags": {
+					"path": {
+						"key": "path",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "user.profile.plan",
+										"operator": "equals",
+										"value": "pro"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "path",
+			"context": {
+				"user": {
+					"profile": {
+						"plan": "pro"
+					}
+				}
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "exact-key-wins-over-dotted",
+			"definitions": {
+				"flags": {
+					"path": {
+						"key": "path",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "user.plan",
+										"operator": "equals",
+										"value": "exact"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "path",
+			"context": {
+				"user.plan": "exact",
+				"user": {
+					"plan": "nested"
+				}
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "dotted-path-too-deep",
+			"definitions": {
+				"flags": {
+					"path": {
+						"key": "path",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "a.b.c.d.e.f",
+										"operator": "equals",
+										"value": "x"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "path",
+			"context": {
+				"a": {
+					"b": {
+						"c": {
+							"d": {
+								"e": {
+									"f": "x"
+								}
+							}
+						}
+					}
+				}
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "dotted-path-depth-5",
+			"definitions": {
+				"flags": {
+					"path": {
+						"key": "path",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "a.b.c.d.e",
+										"operator": "equals",
+										"value": "x"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "path",
+			"context": {
+				"a": {
+					"b": {
+						"c": {
+							"d": {
+								"e": "x"
+							}
+						}
+					}
+				}
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "and-match",
+			"definitions": {
+				"flags": {
+					"logic": {
+						"key": "logic",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "role",
+										"operator": "equals",
+										"value": "admin"
+									},
+									{
+										"attribute": "region",
+										"operator": "equals",
+										"value": "us"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "logic",
+			"context": {
+				"role": "admin",
+				"region": "us"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "and-partial",
+			"definitions": {
+				"flags": {
+					"logic": {
+						"key": "logic",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "role",
+										"operator": "equals",
+										"value": "admin"
+									},
+									{
+										"attribute": "region",
+										"operator": "equals",
+										"value": "us"
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "logic",
+			"context": {
+				"role": "admin",
+				"region": "eu"
+			},
+			"expected": {
+				"value": "none",
+				"variant": "none",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "or-match",
+			"definitions": {
+				"flags": {
+					"logic": {
+						"key": "logic",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"logical_operator": "OR",
+										"clauses": [
+											{
+												"attribute": "a",
+												"operator": "equals",
+												"value": "1"
+											},
+											{
+												"attribute": "b",
+												"operator": "equals",
+												"value": "2"
+											}
+										]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "logic",
+			"context": {
+				"b": "2"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "nested-and-or",
+			"definitions": {
+				"flags": {
+					"logic": {
+						"key": "logic",
+						"enabled": true,
+						"default_variation": "none",
+						"variations": {
+							"none": "none",
+							"hit": "hit"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"logical_operator": "AND",
+										"clauses": [
+											{
+												"attribute": "role",
+												"operator": "equals",
+												"value": "admin"
+											},
+											{
+												"logical_operator": "OR",
+												"clauses": [
+													{
+														"attribute": "region",
+														"operator": "equals",
+														"value": "us"
+													},
+													{
+														"attribute": "region",
+														"operator": "equals",
+														"value": "eu"
+													}
+												]
+											}
+										]
+									}
+								],
+								"serve_variation": "hit"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "logic",
+			"context": {
+				"role": "admin",
+				"region": "eu"
+			},
+			"expected": {
+				"value": "hit",
+				"variant": "hit",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "rule-order-first-wins",
+			"definitions": {
+				"flags": {
+					"order": {
+						"key": "order",
+						"enabled": true,
+						"default_variation": "def",
+						"variations": {
+							"a": "a",
+							"b": "b",
+							"def": "def"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "tier",
+										"operator": "equals",
+										"value": "vip"
+									}
+								],
+								"serve_variation": "a"
+							},
+							{
+								"conditions": [
+									{
+										"attribute": "tier",
+										"operator": "equals",
+										"value": "vip"
+									}
+								],
+								"serve_variation": "b"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "order",
+			"context": {
+				"tier": "vip"
+			},
+			"expected": {
+				"value": "a",
+				"variant": "a",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "split-50-key-\"0\"",
+			"definitions": {
+				"flags": {
+					"rollout_test": {
+						"key": "rollout_test",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_test",
+			"context": {
+				"targetingKey": "0"
+			},
+			"expected": {
+				"value": true,
+				"variant": "on",
+				"reason": "SPLIT"
+			}
+		},
+		{
+			"name": "split-50-key-\"1\"",
+			"definitions": {
+				"flags": {
+					"rollout_test": {
+						"key": "rollout_test",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_test",
+			"context": {
+				"targetingKey": "1"
+			},
+			"expected": {
+				"value": true,
+				"variant": "on",
+				"reason": "SPLIT"
+			}
+		},
+		{
+			"name": "split-50-key-\"2\"",
+			"definitions": {
+				"flags": {
+					"rollout_test": {
+						"key": "rollout_test",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_test",
+			"context": {
+				"targetingKey": "2"
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "split-50-key-\"user-a\"",
+			"definitions": {
+				"flags": {
+					"rollout_test": {
+						"key": "rollout_test",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_test",
+			"context": {
+				"targetingKey": "user-a"
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "split-50-key-\"日本語\"",
+			"definitions": {
+				"flags": {
+					"rollout_test": {
+						"key": "rollout_test",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_test",
+			"context": {
+				"targetingKey": "日本語"
+			},
+			"expected": {
+				"value": true,
+				"variant": "on",
+				"reason": "SPLIT"
+			}
+		},
+		{
+			"name": "split-50-key-\"héllo\"",
+			"definitions": {
+				"flags": {
+					"rollout_test": {
+						"key": "rollout_test",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_test",
+			"context": {
+				"targetingKey": "héllo"
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "split-50-key-\"🚀\"",
+			"definitions": {
+				"flags": {
+					"rollout_test": {
+						"key": "rollout_test",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_test",
+			"context": {
+				"targetingKey": "🚀"
+			},
+			"expected": {
+				"value": true,
+				"variant": "on",
+				"reason": "SPLIT"
+			}
+		},
+		{
+			"name": "split-50-key-\"\"",
+			"definitions": {
+				"flags": {
+					"rollout_test": {
+						"key": "rollout_test",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_test",
+			"context": {
+				"targetingKey": ""
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "split-100-is-targeting-match",
+			"definitions": {
+				"flags": {
+					"rollout_full": {
+						"key": "rollout_full",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 100
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_full",
+			"context": {
+				"targetingKey": "anyone"
+			},
+			"expected": {
+				"value": true,
+				"variant": "on",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "split-0-never",
+			"definitions": {
+				"flags": {
+					"rollout_none": {
+						"key": "rollout_none",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 0
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_none",
+			"context": {
+				"targetingKey": "anyone"
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "split-custom-attr",
+			"definitions": {
+				"flags": {
+					"rollout_custom": {
+						"key": "rollout_custom",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "userId"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_custom",
+			"context": {
+				"userId": "0",
+				"targetingKey": "ignored"
+			},
+			"expected": {
+				"value": true,
+				"variant": "on",
+				"reason": "SPLIT"
+			}
+		},
+		{
+			"name": "split-non-scalar-attr",
+			"definitions": {
+				"flags": {
+					"rollout_obj": {
+						"key": "rollout_obj",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 100,
+									"attribute": "obj"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_obj",
+			"context": {
+				"obj": {
+					"a": 1
+				}
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "split-missing-attr-random",
+			"definitions": {
+				"flags": {
+					"rollout_random": {
+						"key": "rollout_random",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_random",
+			"context": {},
+			"expected": {
+				"reasonOneOf": ["SPLIT", "DEFAULT"]
+			}
+		},
+		{
+			"name": "split-null-attr-random",
+			"definitions": {
+				"flags": {
+					"rollout_null": {
+						"key": "rollout_null",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_null",
+			"context": {
+				"targetingKey": null
+			},
+			"expected": {
+				"reasonOneOf": ["SPLIT", "DEFAULT"]
+			}
+		},
+		{
+			"name": "split-fractional-percentage",
+			"definitions": {
+				"flags": {
+					"rollout_frac": {
+						"key": "rollout_frac",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 0.5,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_frac",
+			"context": {
+				"targetingKey": "0"
+			},
+			"expected": {
+				"value": false,
+				"variant": "off",
+				"reason": "DEFAULT"
+			}
+		},
+		{
+			"name": "split-with-conditions",
+			"definitions": {
+				"flags": {
+					"rollout_cond": {
+						"key": "rollout_cond",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true,
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "plan",
+										"operator": "equals",
+										"value": "pro"
+									}
+								],
+								"serve_variation": "on",
+								"rollout": {
+									"percentage": 50,
+									"attribute": "targetingKey"
+								}
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "rollout_cond",
+			"context": {
+				"plan": "pro",
+				"targetingKey": "0"
+			},
+			"expected": {
+				"value": true,
+				"variant": "on",
+				"reason": "SPLIT"
+			}
+		},
+		{
+			"name": "missing-serve-variation",
+			"definitions": {
+				"flags": {
+					"bad_serve": {
+						"key": "bad_serve",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"off": false
+						},
+						"rules": [
+							{
+								"conditions": [],
+								"serve_variation": "missing"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "bad_serve",
+			"context": {},
+			"expected": {
+				"error": "PARSE_ERROR"
+			}
+		},
+		{
+			"name": "missing-default-variation",
+			"definitions": {
+				"flags": {
+					"bad_default": {
+						"key": "bad_default",
+						"enabled": true,
+						"default_variation": "off",
+						"variations": {
+							"on": true
+						},
+						"rules": []
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "bad_default",
+			"context": {},
+			"expected": {
+				"error": "PARSE_ERROR"
+			}
+		},
+		{
+			"name": "value-string",
+			"definitions": {
+				"flags": {
+					"types": {
+						"key": "types",
+						"enabled": true,
+						"default_variation": "a",
+						"variations": {
+							"a": "hello",
+							"b": "world"
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "x",
+										"operator": "equals",
+										"value": "1"
+									}
+								],
+								"serve_variation": "b"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "types",
+			"context": {
+				"x": "1"
+			},
+			"expected": {
+				"value": "world",
+				"variant": "b",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "value-number",
+			"definitions": {
+				"flags": {
+					"types": {
+						"key": "types",
+						"enabled": true,
+						"default_variation": "a",
+						"variations": {
+							"a": 1,
+							"b": 2.5
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "x",
+										"operator": "equals",
+										"value": "1"
+									}
+								],
+								"serve_variation": "b"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "types",
+			"context": {
+				"x": "1"
+			},
+			"expected": {
+				"value": 2.5,
+				"variant": "b",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "value-object",
+			"definitions": {
+				"flags": {
+					"types": {
+						"key": "types",
+						"enabled": true,
+						"default_variation": "a",
+						"variations": {
+							"a": {
+								"k": 1
+							},
+							"b": {
+								"k": 2,
+								"nested": true
+							}
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "x",
+										"operator": "equals",
+										"value": "1"
+									}
+								],
+								"serve_variation": "b"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "types",
+			"context": {
+				"x": "1"
+			},
+			"expected": {
+				"value": {
+					"k": 2,
+					"nested": true
+				},
+				"variant": "b",
+				"reason": "TARGETING_MATCH"
+			}
+		},
+		{
+			"name": "value-array",
+			"definitions": {
+				"flags": {
+					"types": {
+						"key": "types",
+						"enabled": true,
+						"default_variation": "a",
+						"variations": {
+							"a": [1],
+							"b": [1, 2, "x"]
+						},
+						"rules": [
+							{
+								"conditions": [
+									{
+										"attribute": "x",
+										"operator": "equals",
+										"value": "1"
+									}
+								],
+								"serve_variation": "b"
+							}
+						]
+					}
+				}
+			},
+			"accountId": "aaaabbbbccccdddd1111222233334444",
+			"flagKey": "types",
+			"context": {
+				"x": "1"
+			},
+			"expected": {
+				"value": [1, 2, "x"],
+				"variant": "b",
+				"reason": "TARGETING_MATCH"
+			}
+		}
+	],
+	"murmur": [
+		{
+			"name": "murmur-empty",
+			"kind": "murmur",
+			"input": "",
+			"seed": 0,
+			"expected": 0
+		},
+		{
+			"name": "murmur-hello",
+			"kind": "murmur",
+			"input": "hello",
+			"seed": 0,
+			"expected": 613153351
+		},
+		{
+			"name": "murmur-hello-seed",
+			"kind": "murmur",
+			"input": "hello",
+			"seed": 42,
+			"expected": 3806057185
+		},
+		{
+			"name": "murmur-emoji",
+			"kind": "murmur",
+			"input": "🚀🎉",
+			"seed": 0,
+			"expected": 727794551
+		},
+		{
+			"name": "murmur-jp",
+			"kind": "murmur",
+			"input": "日本語",
+			"seed": 45,
+			"expected": 1482885209
+		},
+		{
+			"name": "murmur-account-flag",
+			"kind": "murmur",
+			"input": "aaaabbbbccccdddd1111222233334444:rollout_test",
+			"seed": 0,
+			"expected": 3744267545
+		},
+		{
+			"name": "murmur-long",
+			"kind": "murmur",
+			"input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"seed": 7,
+			"expected": 4253212744
+		}
+	]
+}

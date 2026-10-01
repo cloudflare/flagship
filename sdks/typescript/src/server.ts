@@ -4,9 +4,10 @@
  * OpenFeature server provider and hooks for Flagship feature flags.
  * Requires `@openfeature/server-sdk` as a peer dependency.
  *
- * The provider supports two modes:
+ * The provider supports three modes:
  * - **Binding mode** (recommended for Workers) — uses a wrangler binding, no HTTP.
  * - **HTTP mode** — makes HTTP requests to the Flagship API.
+ * - **Local evaluation mode** — downloads definitions once and evaluates in-process.
  *
  * @example Binding mode (Cloudflare Workers)
  * ```typescript
@@ -52,6 +53,7 @@ export type {
 	FlagshipBindingProviderOptions,
 	FlagshipServerProviderOptions,
 	FlagshipCacheOptions,
+	FlagshipLocalEvaluationOptions,
 } from './index.js';
 
 // Export server provider

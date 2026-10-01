@@ -103,11 +103,38 @@ provider, err := flagship.NewProvider(flagship.Options{
 | `Retries`        | Retry attempts on transient errors; defaults to 1 and is capped at 10.         |
 | `DisableRetries` | Disables retries when set to true.                                             |
 | `RetryDelay`     | Delay between retries; defaults to 1 second and is capped at 30 seconds.       |
-| `CacheTTL`       | Cache TTL; enables response caching when greater than 0.                       |
-| `CacheMaxSize`   | Maximum cached entries; defaults to 1000 when `CacheTTL` is set.               |
-| `Logging`        | Enables provider debug/error logs; off by default.                             |
-| `Logger`         | Optional `slog`-compatible logger.                                             |
-| `Hooks`          | Provider-level OpenFeature hooks.                                              |
+| `CacheTTL`         | Cache TTL; enables response caching when greater than 0.                       |
+| `CacheMaxSize`     | Maximum cached entries; defaults to 1000 when `CacheTTL` is set.               |
+| `LocalEvaluation`  | Downloads definitions once and evaluates flags in-process; off by default.     |
+| `RefreshInterval`  | Background definitions refresh period in local mode; defaults to 30s.          |
+| `Logging`          | Enables provider debug/error logs; off by default.                             |
+| `Logger`           | Optional `slog`-compatible logger.                                             |
+| `Hooks`            | Provider-level OpenFeature hooks.                                              |
+
+## Local Evaluation
+
+When `LocalEvaluation` is enabled, the provider downloads the app's flag definitions once during `Init` / `SetProviderAndWait`, evaluates flags in-process with no network call per evaluation, and refreshes definitions in the background on `RefreshInterval` (default 30s).
+
+```go
+provider, err := flagship.NewProvider(flagship.Options{
+	AppID:           "your-app-id",
+	AccountID:       "your-account-id", // required — used as the rollout hash seed
+	AuthToken:       "your-read-token", // needs app **read** permission (not evaluate)
+	LocalEvaluation: true,
+	RefreshInterval: 30 * time.Second,
+})
+```
+
+Requirements and constraints:
+
+- `AccountID` is always required in local mode (including when `Endpoint` is used).
+- The auth token needs app **read** permission, not `evaluate`.
+- `Endpoint`, when set, must end in `/evaluate` so the definitions URL can be derived.
+- Incompatible with `CacheTTL` — there is nothing to cache per evaluation.
+- Local evaluations do **not** appear in server-side analytics.
+- Init fails (and puts the OpenFeature provider in `ERROR`) if the first definitions fetch fails. Later refresh failures keep the last good snapshot.
+
+See `examples/local` for a full program.
 
 ## Response Caching
 
@@ -151,13 +178,14 @@ Provider resolution methods return the default value plus an OpenFeature resolut
 
 | Error code        | Cause                                               |
 | ----------------- | --------------------------------------------------- |
-| `FLAG_NOT_FOUND`  | Flag key does not exist (HTTP 404)                  |
-| `BAD_REQUEST`     | Evaluation request was invalid (HTTP 400)           |
-| `INVALID_CONTEXT` | Evaluation context contains unsupported value types |
-| `NETWORK_ERROR`   | Network request failed                              |
-| `TIMEOUT_ERROR`   | Request timed out                                   |
-| `PARSE_ERROR`     | API response was not a valid evaluation response    |
-| `GENERAL`         | Any other transient or unexpected failure           |
+| `FLAG_NOT_FOUND`     | Flag key does not exist (HTTP 404 or missing from local definitions) |
+| `BAD_REQUEST`        | Evaluation request was invalid (HTTP 400)                            |
+| `INVALID_CONTEXT`    | Evaluation context contains unsupported value types                  |
+| `NETWORK_ERROR`      | Network request failed                                               |
+| `TIMEOUT_ERROR`      | Request timed out                                                    |
+| `PARSE_ERROR`        | API response or local flag definition was invalid                    |
+| `PROVIDER_NOT_READY` | Local evaluation used before init or after shutdown                  |
+| `GENERAL`            | Any other transient or unexpected failure                            |
 
 400 and 404 responses are never retried. Other failures are retried up to `Retries` times unless `DisableRetries` is set.
 

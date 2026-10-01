@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,14 +16,15 @@ import (
 
 // FlagshipClient evaluates flags through the Flagship HTTP API.
 type FlagshipClient struct {
-	endpoint       string
-	httpClient     *http.Client
-	timeout        time.Duration
-	retries        int
-	retryDelay     time.Duration
-	authToken      string
-	headers        http.Header
-	headersFactory HeaderFactory
+	endpoint            string
+	definitionsEndpoint string
+	httpClient          *http.Client
+	timeout             time.Duration
+	retries             int
+	retryDelay          time.Duration
+	authToken           string
+	headers             http.Header
+	headersFactory      HeaderFactory
 }
 
 type evaluationRequest struct {
@@ -77,14 +77,15 @@ func NewClient(options Options) (*FlagshipClient, error) {
 	}
 
 	return &FlagshipClient{
-		endpoint:       endpoint,
-		httpClient:     httpClient,
-		timeout:        timeout,
-		retries:        retries,
-		retryDelay:     retryDelay,
-		authToken:      options.AuthToken,
-		headers:        cloneHeader(options.Headers),
-		headersFactory: options.HeadersFactory,
+		endpoint:            endpoint,
+		definitionsEndpoint: tryResolveDefinitionsEndpoint(options),
+		httpClient:          httpClient,
+		timeout:             timeout,
+		retries:             retries,
+		retryDelay:          retryDelay,
+		authToken:           options.AuthToken,
+		headers:             cloneHeader(options.Headers),
+		headersFactory:      options.HeadersFactory,
 	}, nil
 }
 
@@ -155,59 +156,7 @@ func (c *FlagshipClient) buildRequest(flagKey string, flatCtx openfeature.Flatte
 }
 
 func (c *FlagshipClient) fetchWithRetry(ctx context.Context, request evaluationRequest) (EvaluationResponse, error) {
-	var lastErr error
-	for attempt := 0; attempt <= c.retries; attempt++ {
-		result, err := c.fetch(ctx, request)
-		if err == nil {
-			return result, nil
-		}
-		lastErr = err
-		if !isRetryable(err) || attempt == c.retries {
-			return EvaluationResponse{}, err
-		}
-		if err := sleepWithContext(ctx, c.retryDelay); err != nil {
-			return EvaluationResponse{}, err
-		}
-	}
-	return EvaluationResponse{}, lastErr
-}
-
-func (c *FlagshipClient) fetch(ctx context.Context, request evaluationRequest) (EvaluationResponse, error) {
-	requestCtx := ctx
-	cancel := func() {}
-	if c.timeout > 0 {
-		requestCtx, cancel = context.WithTimeout(ctx, c.timeout)
-	}
-	defer cancel()
-
-	var body io.Reader
-	if request.body != nil {
-		body = bytes.NewReader(request.body)
-	}
-	req, err := http.NewRequestWithContext(requestCtx, request.method, request.url, body)
-	if err != nil {
-		return EvaluationResponse{}, newError(ErrorCodeGeneral, fmt.Sprintf("failed to build request: %v", err), 0, err)
-	}
-
-	headers, err := c.requestHeaders(ctx)
-	if err != nil {
-		return EvaluationResponse{}, err
-	}
-	req.Header = headers
-	if request.method == http.MethodPost && req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
-			return EvaluationResponse{}, newError(ErrorCodeTimeout, fmt.Sprintf("request timeout after %s", c.timeout), 0, err)
-		}
-		return EvaluationResponse{}, newError(ErrorCodeNetwork, fmt.Sprintf("network error: %v", err), 0, err)
-	}
-	defer resp.Body.Close()
-
-	return parseResponse(resp)
+	return fetchWithRetry(ctx, c, request, "", parseResponse)
 }
 
 func (c *FlagshipClient) requestHeaders(ctx context.Context) (http.Header, error) {

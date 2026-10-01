@@ -1,5 +1,71 @@
 # @cloudflare/flagship
 
+## 0.6.0
+
+### Minor Changes
+
+- [#37](https://github.com/cloudflare/flagship/pull/37) [`cd59b99`](https://github.com/cloudflare/flagship/commit/cd59b99bdc9f873481498b3d52917bfd1ec72fa5) Thanks [@karishnu](https://github.com/karishnu)! - Support nested objects, arrays, null, and recursively serialized dates in binding and HTTP evaluation context.
+  
+  Context values other than strings, numbers, booleans, `null`, dates, arrays and plain objects now resolve with `INVALID_CONTEXT` instead of being silently dropped.
+
+- [#40](https://github.com/cloudflare/flagship/pull/40) [`fcc1094`](https://github.com/cloudflare/flagship/commit/fcc10940441a8420aaf63828e59f2aa426480d26) Thanks [@karishnu](https://github.com/karishnu)! - Support nested objects, arrays, null, and recursively serialized times in HTTP evaluation context.
+
+- [#45](https://github.com/cloudflare/flagship/pull/45) [`7d3af0b`](https://github.com/cloudflare/flagship/commit/7d3af0bebfddbaffa1dc4433c67f4b20a0a9ab94) Thanks [@vaibhavshn](https://github.com/vaibhavshn)! - Add local in-process evaluation for `ServerProvider`.
+  
+  When `LocalEvaluation: true`, the provider downloads flag definitions at initialize, evaluates flags without a network call per evaluation, and refreshes definitions in the background. Requires `AccountID` and a token with app **read** permission. Incompatible with `CacheTTL`.
+
+- [#44](https://github.com/cloudflare/flagship/pull/44) [`7d2d2dc`](https://github.com/cloudflare/flagship/commit/7d2d2dc8ed6901e7c68642e745ba560cce968368) Thanks [@vaibhavshn](https://github.com/vaibhavshn)! - Add local in-process evaluation for `FlagshipServerProvider`.
+  
+  When `local_evaluation=True`, the provider downloads flag definitions at initialize, evaluates flags without a network call per evaluation, and refreshes definitions in the background on a daemon thread. Requires `account_id` and a token with app **read** permission. Incompatible with `cache_ttl`.
+
+- [#43](https://github.com/cloudflare/flagship/pull/43) [`8a873d9`](https://github.com/cloudflare/flagship/commit/8a873d938f1486d8a201b23bccc6ff834e20d308) Thanks [@vaibhavshn](https://github.com/vaibhavshn)! - Add local in-process evaluation for `FlagshipServerProvider`.
+  
+  When `localEvaluation: true`, the provider downloads flag definitions at initialize, evaluates flags without a network call per evaluation, and refreshes definitions lazily (stale-while-revalidate). Requires `accountId` and a token with app **read** permission. Incompatible with binding mode and `cacheTtl`.
+  
+  Also maps reason `STATIC` (flag has no rules) on evaluation responses.
+
+- [#39](https://github.com/cloudflare/flagship/pull/39) [`a942982`](https://github.com/cloudflare/flagship/commit/a942982d2d761c0ff1c3b85b4230f06d1ae29352) Thanks [@karishnu](https://github.com/karishnu)! - Support nested objects, arrays, null, and recursively serialized datetimes in HTTP evaluation context.
+
+### Patch Changes
+
+- [#42](https://github.com/cloudflare/flagship/pull/42) [`84fd1c4`](https://github.com/cloudflare/flagship/commit/84fd1c45920efdbbf3d631a2e253211734b19dce) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Add the `STATIC` evaluation reason to the SDK types and docs. Flagship now reports `STATIC` instead of `DEFAULT` for an enabled flag with no targeting rules. The SDKs already passed unknown reasons through unchanged, so runtime behaviour is the same.
+  
+  - TypeScript: `FlagshipEvaluationResponse['reason']` includes `'STATIC'`.
+  - Python: `EvaluationReason` includes `"STATIC"`; it resolves to `Reason.STATIC`.
+  - Go: new `ReasonStatic` constant, mapped to `openfeature.StaticReason`.
+  
+  Code that checks `reason === 'DEFAULT'` to detect rule-less flags should also handle `STATIC`.
+
+- [`86a4dda`](https://github.com/cloudflare/flagship/commit/86a4dda72ff80e248ef1292328c01981fca568e2) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Upgrade SDK dependencies and tooling across TypeScript, Python, and Go. No public API or runtime behaviour changes.
+  
+  TypeScript:
+  
+  - `lru-cache` 11.5.2 → 11.5.3 (runtime dependency).
+  - `typescript` 5.9.3 → 7.0.2, `tsdown` 0.22.14 → 0.23.0, `vitest` and `@vitest/coverage-v8` 4.1.10 → 5.0.2, `@cloudflare/workers-types` 4 → 5, `tsx` 4.23.8 → 4.23.15, `@types/node` 24.13.3 → 24.19.0 (Node stays on 24).
+  - Repo tooling: `oxlint` 1.77 → 1.85, `oxfmt` 0.62 → 0.70, `lint-staged` 17.3 → 17.6, `pkg-pr-new` 0.0.87 → 0.0.88, `@decimalturn/toml-patch` 2.1 → 3.3, `@changesets/cli` 2.31 → 3.0, `@changesets/read` 0.6 → 1.0, `@changesets/types` 6.1 → 7.0, `@changesets/changelog-github` 0.7 → 1.0.
+  - pnpm 11 → 12, with the lockfile regenerated.
+  - Declaration output changes shape only: classes are now exported inline. The exported names and types are unchanged for both ESM and CJS consumers.
+  
+  Python:
+  
+  - The lockfile moves to `cachetools` 7.2.0, `pytest-mock` 3.16.0, `ruff` 0.16.9, and `ty` 0.0.84. The published dependency ranges are unchanged.
+  - Build backend `uv_build` moves to `>=0.12.19,<0.13.0`.
+  - Ruff no longer formats Markdown code blocks, so README examples keep their hand-aligned layout.
+  
+  Go:
+  
+  - `github.com/open-feature/go-sdk` v1.17.2 → v1.18.0. The minimum Go version stays at 1.25.
+  - `go-logr/logr` 1.4.3 → 1.4.4. It is no longer a direct requirement.
+  
+  CI:
+  
+  - `actions/checkout` v7, `actions/setup-node` v7, `actions/setup-go` v7, `actions/cache` v6.
+  - `astral-sh/setup-uv` v10.2.0, pinned by SHA.
+  - `pnpm/action-setup` v6.1.0, the first release with pnpm 12 support.
+  - `changesets/action` v1.9.0 → v2.1.2, required by Changesets CLI 3. The release workflow uses the renamed inputs and outputs and keeps pushing through the Git CLI. The release script now calls `changeset git-tag`, the new name of `changeset tag`.
+
+- [#38](https://github.com/cloudflare/flagship/pull/38) [`19e8220`](https://github.com/cloudflare/flagship/commit/19e8220577dd9c961a94fca179e19aa76820fbe5) Thanks [@karishnu](https://github.com/karishnu)! - Preserve provider readiness, fatal, and missing targeting-key error codes returned by the Workers binding.
+
 ## 0.5.0
 
 ### Minor Changes

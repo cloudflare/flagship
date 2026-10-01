@@ -89,27 +89,27 @@ provider, err := flagship.NewProvider(flagship.Options{
 })
 ```
 
-| Option           | Description                                                                    |
-| ---------------- | ------------------------------------------------------------------------------ |
-| `AppID`          | Flagship app ID. Mutually exclusive with `Endpoint`.                           |
-| `AccountID`      | Required with `AppID`.                                                         |
-| `BaseURL`        | Base URL override used with `AppID`; defaults to `https://api.cloudflare.com`. |
-| `Endpoint`       | Full absolute evaluation endpoint URL.                                         |
-| `AuthToken`      | Adds `Authorization: Bearer <token>` to each request.                          |
-| `Headers`        | Static headers. Explicit `Authorization` overrides `AuthToken`.                |
-| `HeadersFactory` | Dynamic per-request headers. Values override `Headers` and `AuthToken`.        |
-| `HTTPClient`     | Custom HTTP client.                                                            |
-| `Timeout`        | Per-attempt timeout; defaults to 5 seconds.                                    |
-| `Retries`        | Retry attempts on transient errors; defaults to 1 and is capped at 10.         |
-| `DisableRetries` | Disables retries when set to true.                                             |
-| `RetryDelay`     | Delay between retries; defaults to 1 second and is capped at 30 seconds.       |
-| `CacheTTL`         | Cache TTL; enables response caching when greater than 0.                       |
-| `CacheMaxSize`     | Maximum cached entries; defaults to 1000 when `CacheTTL` is set.               |
-| `LocalEvaluation`  | Downloads definitions once and evaluates flags in-process; off by default.     |
-| `RefreshInterval`  | Background definitions refresh period in local mode; defaults to 30s.          |
-| `Logging`          | Enables provider debug/error logs; off by default.                             |
-| `Logger`           | Optional `slog`-compatible logger.                                             |
-| `Hooks`            | Provider-level OpenFeature hooks.                                              |
+| Option            | Description                                                                    |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `AppID`           | Flagship app ID. Mutually exclusive with `Endpoint`.                           |
+| `AccountID`       | Required with `AppID`.                                                         |
+| `BaseURL`         | Base URL override used with `AppID`; defaults to `https://api.cloudflare.com`. |
+| `Endpoint`        | Full absolute evaluation endpoint URL.                                         |
+| `AuthToken`       | Adds `Authorization: Bearer <token>` to each request.                          |
+| `Headers`         | Static headers. Explicit `Authorization` overrides `AuthToken`.                |
+| `HeadersFactory`  | Dynamic per-request headers. Values override `Headers` and `AuthToken`.        |
+| `HTTPClient`      | Custom HTTP client.                                                            |
+| `Timeout`         | Per-attempt timeout; defaults to 5 seconds.                                    |
+| `Retries`         | Retry attempts on transient errors; defaults to 1 and is capped at 10.         |
+| `DisableRetries`  | Disables retries when set to true.                                             |
+| `RetryDelay`      | Delay between retries; defaults to 1 second and is capped at 30 seconds.       |
+| `CacheTTL`        | Cache TTL; enables response caching when greater than 0.                       |
+| `CacheMaxSize`    | Maximum cached entries; defaults to 1000 when `CacheTTL` is set.               |
+| `LocalEvaluation` | Downloads definitions once and evaluates flags in-process; off by default.     |
+| `RefreshInterval` | Background definitions refresh period in local mode; defaults to 30s.          |
+| `Logging`         | Enables provider debug/error logs; off by default.                             |
+| `Logger`          | Optional `slog`-compatible logger.                                             |
+| `Hooks`           | Provider-level OpenFeature hooks.                                              |
 
 ## Local Evaluation
 
@@ -176,8 +176,8 @@ Use `*ValueDetails` methods when you need reason, variant, metadata, or error co
 
 Provider resolution methods return the default value plus an OpenFeature resolution error when evaluation fails. The lower-level `FlagshipClient` returns `*flagship.Error` with a typed `Code`, HTTP `StatusCode`, and wrapped cause when available.
 
-| Error code        | Cause                                               |
-| ----------------- | --------------------------------------------------- |
+| Error code           | Cause                                                                |
+| -------------------- | -------------------------------------------------------------------- |
 | `FLAG_NOT_FOUND`     | Flag key does not exist (HTTP 404 or missing from local definitions) |
 | `BAD_REQUEST`        | Evaluation request was invalid (HTTP 400)                            |
 | `INVALID_CONTEXT`    | Evaluation context contains unsupported value types                  |

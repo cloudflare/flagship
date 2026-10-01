@@ -97,23 +97,29 @@ FlagshipServerProvider(
     # Response caching — opt-in, off by default (see "Caching")
     # cache_ttl=30.0,      # seconds; enables caching when set
     # cache_max_size=1000, # max cached entries, LRU-evicted (default: 1000)
+
+    # Local evaluation — download definitions once, evaluate in-process (see "Local evaluation")
+    # local_evaluation=True,
+    # refresh_interval=30.0,  # seconds between background definition refreshes
 )
 ```
 
-| Option            | Type                           | Default                      | Description                                              |
-| ----------------- | ------------------------------ | ---------------------------- | -------------------------------------------------------- |
-| `app_id`          | `str`                          | —                            | Flagship app ID (mutually exclusive with `endpoint`)     |
-| `account_id`      | `str`                          | —                            | Required with `app_id`                                   |
-| `base_url`        | `str`                          | `https://api.cloudflare.com` | Base URL override (only used with `app_id`)              |
-| `endpoint`        | `str`                          | —                            | Full evaluation URL (mutually exclusive with `app_id`)   |
-| `auth_token`      | `str`                          | —                            | Bearer token added to every request                      |
-| `headers_factory` | `Callable[[], dict[str, str]]` | —                            | Called per request; takes precedence over `auth_token`   |
-| `timeout`         | `float`                        | `5.0`                        | Request timeout in seconds                               |
-| `retries`         | `int`                          | `1`                          | Retry attempts on transient errors; capped at `10`       |
-| `retry_delay`     | `float`                        | `1.0`                        | Delay between retries in seconds; capped at `30.0`       |
-| `logging`         | `bool`                         | `False`                      | Enable SDK-level debug output via the `flagship` logger  |
-| `cache_ttl`       | `float`                        | —                            | Cache TTL in seconds; enables caching when set           |
-| `cache_max_size`  | `int`                          | `1000`                       | Maximum cached entries; least-recently-used is evicted   |
+| Option              | Type                           | Default                      | Description                                                         |
+| ------------------- | ------------------------------ | ---------------------------- | ------------------------------------------------------------------- |
+| `app_id`            | `str`                          | —                            | Flagship app ID (mutually exclusive with `endpoint`)                |
+| `account_id`        | `str`                          | —                            | Required with `app_id`; always required when `local_evaluation`     |
+| `base_url`          | `str`                          | `https://api.cloudflare.com` | Base URL override (only used with `app_id`)                         |
+| `endpoint`          | `str`                          | —                            | Full evaluation URL (mutually exclusive with `app_id`)              |
+| `auth_token`        | `str`                          | —                            | Bearer token added to every request                                 |
+| `headers_factory`   | `Callable[[], dict[str, str]]` | —                            | Called per request; takes precedence over `auth_token`              |
+| `timeout`           | `float`                        | `5.0`                        | Request timeout in seconds                                          |
+| `retries`           | `int`                          | `1`                          | Retry attempts on transient errors; capped at `10`                  |
+| `retry_delay`       | `float`                        | `1.0`                        | Delay between retries in seconds; capped at `30.0`                  |
+| `logging`           | `bool`                         | `False`                      | Enable SDK-level debug output via the `flagship` logger             |
+| `cache_ttl`         | `float`                        | —                            | Cache TTL in seconds; enables caching when set                      |
+| `cache_max_size`    | `int`                          | `1000`                       | Maximum cached entries; least-recently-used is evicted              |
+| `local_evaluation`  | `bool`                         | `False`                      | Evaluate flags in-process from downloaded definitions               |
+| `refresh_interval`  | `float`                        | `30.0`                       | Seconds between background definition refreshes (local mode only)   |
 
 ## Caching
 
@@ -131,6 +137,38 @@ FlagshipServerProvider(
 Each entry is keyed by flag key, type, and the **full evaluation context**, so distinct contexts never share a value. Cache hits resolve with `reason == Reason.CACHED`. Disabled flags and errors are never cached. Because freshness is TTL-based, a flag change in Flagship takes effect after the entry expires.
 
 The cache is shared by the sync and async APIs and guarded by a lock for thread-safe sync use.
+
+## Local evaluation
+
+Server providers can download flag definitions once and evaluate flags in-process with no network call per evaluation. Definitions refresh in the background on a daemon thread.
+
+```python
+api.set_provider_and_wait(
+    FlagshipServerProvider(
+        app_id="your-app-id",
+        account_id="your-account-id",  # required — used as the rollout hash seed
+        auth_token="your-read-token",  # needs app **read** permission, not evaluate
+        local_evaluation=True,
+        refresh_interval=30.0,         # seconds between background refreshes (default 30s)
+    )
+)
+```
+
+| Option              | Type    | Default | Description                                                          |
+| ------------------- | ------- | ------- | -------------------------------------------------------------------- |
+| `local_evaluation`  | `bool`  | `False` | Enable in-process evaluation from downloaded definitions             |
+| `refresh_interval`  | `float` | `30.0`  | Seconds between background definition refreshes                      |
+
+Notes:
+
+- Incompatible with `cache_ttl` (there is nothing to cache).
+- `account_id` is always required in local mode, including when `endpoint` is used.
+- With `endpoint`, the URL path must end in `/evaluate` so `/definitions` can be derived.
+- Local evaluations do **not** appear in server-side analytics.
+- Use `set_provider_and_wait` (or call `provider.initialize` yourself) so the first definitions fetch completes before evaluating flags.
+- See [`examples/local_evaluation.py`](examples/local_evaluation.py).
+
+**Context size limits:** the data plane enforces request-size limits on the network hop. Local evaluation does not re-implement those limits; very large contexts that the HTTP API would reject are still evaluated in-process. This is a known difference.
 
 ## Evaluation context
 
@@ -202,7 +240,7 @@ from openfeature.event import ProviderEvent
 api.add_handler(ProviderEvent.PROVIDER_READY, lambda _: print("ready"))
 ```
 
-Initialization does not perform network I/O. Flag evaluation requests happen only when resolving flags.
+In HTTP mode, initialization does not perform network I/O — flag evaluation requests happen only when resolving flags. In local evaluation mode, `initialize` blocks on the first definitions fetch; failure puts the provider in `ERROR`.
 
 ## Development
 

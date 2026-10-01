@@ -10,6 +10,7 @@ import pytest
 
 from flagship._evaluate import (
     FlagConfigError,
+    _parse_iso_ms,
     evaluate_flag,
     js_number,
     js_str,
@@ -145,5 +146,46 @@ def test_orders_infinity_via_js_number() -> None:
         ],
     }
     result = evaluate_flag(flag_def, {"v": float("inf")}, "acct")
+    assert result["reason"] == "TARGETING_MATCH"
+    assert result["value"] == "hit"
+
+
+def test_iso_date_truncates_fractional_seconds_like_date_parse() -> None:
+    """Date.parse keeps only 3 fractional digits (truncate, not round).
+
+    Without flooring, Python's microsecond-preserving parse would treat
+    ``.1236789Z`` as greater than ``.123Z``, diverging from the server.
+    """
+    assert _parse_iso_ms("2023-01-01T00:00:00.1236789Z") == _parse_iso_ms("2023-01-01T00:00:00.123Z")
+    assert _parse_iso_ms("2023-01-01T00:00:00.123999Z") == _parse_iso_ms("2023-01-01T00:00:00.123Z")
+    assert _parse_iso_ms("2023-01-01T00:00:00.1234Z") == _parse_iso_ms("2023-01-01T00:00:00.123Z")
+    # Fewer than 3 digits still pad as Date.parse does (via the parsed value).
+    assert _parse_iso_ms("2023-01-01T00:00:00.12Z") == 1672531200120.0
+
+    flag_def = {
+        "key": "iso",
+        "enabled": True,
+        "default_variation": "none",
+        "variations": {"none": "none", "hit": "hit"},
+        "rules": [
+            {
+                "conditions": [
+                    {
+                        "attribute": "t",
+                        "operator": "greater_than",
+                        "value": "2023-01-01T00:00:00.123Z",
+                    }
+                ],
+                "serve_variation": "hit",
+            }
+        ],
+    }
+    # Sub-ms extra digits must NOT make the attribute greater than the target.
+    result = evaluate_flag(flag_def, {"t": "2023-01-01T00:00:00.1236789Z"}, "acct")
+    assert result["reason"] == "DEFAULT"
+    assert result["value"] == "none"
+
+    # A true later millisecond still matches.
+    result = evaluate_flag(flag_def, {"t": "2023-01-01T00:00:00.124Z"}, "acct")
     assert result["reason"] == "TARGETING_MATCH"
     assert result["value"] == "hit"

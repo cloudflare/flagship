@@ -228,7 +228,12 @@ def _evaluate_string_operator(operator: str, attr_value: Any, target: Any) -> bo
 
 
 def _parse_iso_ms(value: str) -> float:
-    """Parse an ISO-8601 string to epoch milliseconds, matching ``Date.parse``."""
+    """Parse an ISO-8601 string to epoch milliseconds, matching ``Date.parse``.
+
+    JS ``Date.parse`` keeps only the first 3 fractional-second digits (truncates,
+    does not round). ``datetime.fromisoformat`` preserves microseconds, so we
+    floor to whole milliseconds after converting to epoch ms.
+    """
     try:
         # Python 3.10 needs Z → +00:00; 3.11+ accepts Z natively.
         normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
@@ -237,7 +242,8 @@ def _parse_iso_ms(value: str) -> float:
             # Naive strings shouldn't reach here (regex requires offset), but
             # treat as UTC to stay defensive.
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.timestamp() * 1000.0
+        # Floor — not round — so sub-ms fractional seconds match Date.parse.
+        return math.floor(dt.timestamp() * 1000.0)
     except ValueError:
         return float("nan")
 

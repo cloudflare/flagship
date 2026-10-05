@@ -5,6 +5,9 @@ import { pathToFileURL } from 'node:url';
 const SDKS = ['typescript', 'python', 'go'] as const;
 const RELEASE_COMMIT_SUBJECT = 'chore(release): version SDK packages';
 const RELEASE_COMMIT_PATTERN = `^${RELEASE_COMMIT_SUBJECT}`;
+// Python 0.4.0 was published to PyPI from this canonical release. Until the
+// first Python SDK tag is pushed, keep this baseline even across failed releases.
+const PYTHON_INITIAL_BASELINE = '@cloudflare/flagship@0.4.0';
 type Sdk = (typeof SDKS)[number];
 export type SdkChanges = Record<Sdk, boolean>;
 const NO_CHANGES: SdkChanges = { typescript: false, python: false, go: false };
@@ -30,7 +33,7 @@ export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): S
 	const canonicalTag = describeTag(cwd, '@cloudflare/flagship@*', releaseParent);
 	const baselines: Record<Sdk, string> = {
 		typescript: canonicalTag,
-		python: findSdkTag(cwd, 'sdks/python/v*', releaseParent) ?? canonicalTag,
+		python: findSdkTag(cwd, 'sdks/python/v*', releaseParent) ?? describeTag(cwd, PYTHON_INITIAL_BASELINE, releaseParent),
 		go: findSdkTag(cwd, 'sdks/go/v*', releaseParent) ?? canonicalTag,
 	};
 

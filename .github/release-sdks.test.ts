@@ -145,6 +145,21 @@ test('retains unpublished SDK changes across canonical releases', () => {
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: true });
 });
 
+test('retains Python changes after an unsuccessful first publish without a Python tag', () => {
+	const repo = createRepository();
+	git(repo, 'tag', '-d', 'sdks/python/v0.1.0');
+	git(repo, 'tag', '@cloudflare/flagship@0.4.0');
+	write(repo, 'sdks/python/src/client.py', 'changed\n');
+	commit(repo, 'change python');
+	releaseCommit(repo, '0.5.0');
+	git(repo, 'tag', '@cloudflare/flagship@0.5.0');
+	write(repo, 'README.md', 'next release\n');
+	commit(repo, 'prepare next release');
+	releaseCommit(repo, '0.6.0');
+
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false });
+});
+
 test('ignores release commits inside a stale SDK baseline window', () => {
 	const repo = createRepository();
 	git(repo, 'tag', 'sdks/go/v0.1.0');
@@ -182,6 +197,7 @@ function createRepository(): string {
 	}
 	commit(repo, 'initial release');
 	git(repo, 'tag', '@cloudflare/flagship@0.1.0');
+	git(repo, 'tag', 'sdks/python/v0.1.0');
 	return repo;
 }
 

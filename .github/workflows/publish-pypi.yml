@@ -26,15 +26,6 @@ jobs:
         with:
           working-directory: sdks/python
 
-      - name: Bootstrap Python release baseline
-        run: |
-          if [ -z "$(git tag --list 'sdks/python/v*')" ]; then
-            BASE=$(git describe --first-parent --tags --match '@cloudflare/flagship@*' --exclude '*-*' --abbrev=0 "${GITHUB_SHA}^1")
-            TAG="sdks/python/v${BASE##*@}"
-            git tag "${TAG}" "${BASE}"
-            git push origin "${TAG}"
-          fi
-
       - name: Build
         working-directory: sdks/python
         run: uv build

@@ -377,6 +377,44 @@ describe('FlagshipServerProvider', () => {
 	});
 
 	describe('error handling', () => {
+		it.each([
+			[
+				400,
+				'INVALID_CONTEXT',
+				ErrorCode.INVALID_CONTEXT,
+				{ success: false, error: 'bad context', errorMessage: 'bad context', errorCode: 'INVALID_CONTEXT' },
+			],
+			[500, 'PARSE_ERROR', ErrorCode.PARSE_ERROR, { success: false, errors: [{ message: 'bad config' }], errorCode: 'PARSE_ERROR' }],
+			[404, 'FLAG_NOT_FOUND', ErrorCode.FLAG_NOT_FOUND, { success: false, errorMessage: 'missing', errorCode: 'FLAG_NOT_FOUND' }],
+		])('should map the %i body errorCode %s', async (status, _code, expected, body) => {
+			(global.fetch as any).mockResolvedValue(Response.json(body, { status }));
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const result = await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
+
+			expect(result.errorCode).toBe(expected);
+			expect(result.errorMessage).toContain(String((body as any).errorMessage ?? (body as any).error ?? (body as any).errors[0].message));
+		});
+
+		it('should fall back to GENERAL for an unknown body errorCode', async () => {
+			(global.fetch as any).mockResolvedValue(Response.json({ errorCode: 'SOMETHING_NEW' }, { status: 400 }));
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const result = await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
+
+			expect(result.errorCode).toBe(ErrorCode.GENERAL);
+		});
+
+		it('should fall back to the status code when the error body is not JSON', async () => {
+			(global.fetch as any).mockResolvedValue(new Response('oops', { status: 404, statusText: 'Not Found' }));
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const result = await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
+
+			expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
+			expect(result.errorMessage).toBe('HTTP 404: Not Found');
+		});
+
 		it('should handle FLAG_NOT_FOUND error (404)', { timeout: 10000 }, async () => {
 			// Must use a real Response so `instanceof Response` succeeds in handleError().
 			const mockResponse = new Response(null, { status: 404, statusText: 'Not Found' });

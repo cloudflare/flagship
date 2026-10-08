@@ -324,7 +324,11 @@ export class FlagshipServerProvider implements Provider {
 
 			switch (error.code) {
 				case FlagshipErrorCode.NETWORK_ERROR:
-					errorCode = error.cause instanceof Response && error.cause.status === 404 ? ErrorCode.FLAG_NOT_FOUND : ErrorCode.GENERAL;
+					errorCode = error.errorCode
+						? mapErrorCode(error.errorCode)
+						: error.cause instanceof Response && error.cause.status === 404
+							? ErrorCode.FLAG_NOT_FOUND
+							: ErrorCode.GENERAL;
 					break;
 				case FlagshipErrorCode.TIMEOUT_ERROR:
 				case FlagshipErrorCode.ABORTED:
@@ -469,7 +473,7 @@ export class FlagshipServerProvider implements Provider {
 
 			// If the binding signals an error, map it to an OpenFeature error response.
 			if (details.errorCode) {
-				const errorCode = mapBindingErrorCode(details.errorCode);
+				const errorCode = mapErrorCode(details.errorCode);
 				const errorMessage = details.errorMessage ?? `Binding error: ${details.errorCode}`;
 				log.error(`[Flagship] Flag "${flagKey}" evaluation failed (${errorCode}): ${errorMessage}`);
 				return { value: defaultValue, errorCode, errorMessage, reason: details.reason ?? 'ERROR' };
@@ -589,11 +593,8 @@ function serializeContextValue(value: NormalizedContextValue): string {
 	);
 }
 
-/**
- * Maps an error code string from the binding's `EvaluationDetails` to an
- * OpenFeature `ErrorCode`.
- */
-function mapBindingErrorCode(code: string): ErrorCode {
+/** Maps an error code string from the binding or an HTTP error body to an OpenFeature `ErrorCode`. */
+function mapErrorCode(code: string): ErrorCode {
 	switch (code) {
 		case 'PROVIDER_NOT_READY':
 			return ErrorCode.PROVIDER_NOT_READY;

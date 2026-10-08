@@ -1,9 +1,9 @@
 /**
  * Example: Client-side usage (Browser)
  *
- * The FlagshipClientProvider implements caching to support synchronous flag
- * resolution in the browser. Flags are pre-fetched when the evaluation context
- * changes and cached in memory for instant access.
+ * The FlagshipClientProvider supports synchronous flag resolution in the
+ * browser. All flags are evaluated in one bulk request when the evaluation
+ * context changes and cached in memory for instant access.
  *
  * NOTE: This is an example file. Type checking may show errors in editors
  * due to dynamic imports, but the code works at runtime.
@@ -27,11 +27,10 @@ async function basicClientSetup() {
 			appId: FLAGSHIP_APP_ID,
 			accountId: FLAGSHIP_ACCOUNT_ID,
 			authToken: 'your-token',
-			prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads', 'theme-config'],
 		}),
 	);
 
-	// Setting context triggers pre-fetching of the configured flags
+	// Setting context evaluates all flags
 	await OpenFeature.setContext({
 		targetingKey: 'user-123',
 		email: 'user@example.com',
@@ -41,7 +40,7 @@ async function basicClientSetup() {
 
 	const client = OpenFeature.getClient();
 
-	// Flags are resolved synchronously from cache after pre-fetch
+	// Flags are resolved synchronously from cache after evaluation
 	const darkMode = client.getBooleanValue('dark-mode', false);
 	const welcomeMsg = client.getStringValue('welcome-message', 'Welcome!');
 	const maxUploads = client.getNumberValue('max-uploads', 5);
@@ -89,7 +88,7 @@ async function checkEvaluationDetails() {
 
 	console.log('Evaluation details:');
 	console.log('- Value:', details.value);
-	console.log('- Reason:', details.reason); // 'CACHED' on success, 'ERROR' on cache miss or type mismatch
+	console.log('- Reason:', details.reason); // The evaluation reason on success, 'ERROR' on a missing flag or type mismatch
 	console.log('- Variant:', details.variant);
 	console.log('- Metadata:', details.flagMetadata);
 
@@ -98,11 +97,14 @@ async function checkEvaluationDetails() {
 	}
 
 	switch (details.reason) {
-		case 'CACHED':
-			console.log('✓ Flag resolved from cache');
-			break;
+		case 'TARGETING_MATCH':
+		case 'SPLIT':
+		case 'STATIC':
 		case 'DEFAULT':
-			console.warn('⚠ Flag not in cache, using default value');
+			console.log(`✓ Flag resolved: ${details.reason}`);
+			break;
+		case 'DISABLED':
+			console.warn('⚠ Flag is disabled, using default value');
 			break;
 		case 'ERROR':
 			console.error('✗ Error resolving flag:', details.errorMessage);
@@ -122,7 +124,6 @@ async function progressiveEnhancement() {
 			appId: FLAGSHIP_APP_ID,
 			accountId: FLAGSHIP_ACCOUNT_ID,
 			authToken: 'your-token',
-			prefetchFlags: ['premium-features', 'beta-access'],
 		}),
 	);
 
@@ -169,27 +170,23 @@ async function cacheMonitoring() {
 		new FlagshipClientProvider({
 			appId: FLAGSHIP_APP_ID,
 			accountId: FLAGSHIP_ACCOUNT_ID,
-			prefetchFlags: ['flag1', 'flag2', 'flag3'],
 		}),
 	);
 
 	await OpenFeature.setContext({ targetingKey: 'user-123' });
 
 	const client = OpenFeature.getClient();
-	const flags = ['flag1', 'flag2', 'flag3', 'flag4']; // flag4 not in prefetchFlags — returns FLAG_NOT_FOUND
+	const flags = ['flag1', 'flag2', 'flag3', 'missing-flag']; // missing-flag is not in the app — returns FLAG_NOT_FOUND
 	const stats = { hits: 0, errors: 0 };
 
 	flags.forEach((flagKey) => {
 		const details = client.getBooleanDetails(flagKey, false);
-		switch (details.reason) {
-			case 'CACHED':
-				stats.hits++;
-				console.log(`✓ Cache HIT: ${flagKey}`);
-				break;
-			case 'ERROR':
-				stats.errors++;
-				console.error(`✗ ${details.errorCode}: ${flagKey} - ${details.errorMessage}`);
-				break;
+		if (details.errorCode) {
+			stats.errors++;
+			console.error(`✗ ${details.errorCode}: ${flagKey} - ${details.errorMessage}`);
+		} else {
+			stats.hits++;
+			console.log(`✓ Cache HIT: ${flagKey}`);
 		}
 	});
 
@@ -205,19 +202,18 @@ async function productionClientApp() {
 	const { FlagshipClientProvider } = await import('@cloudflare/flagship/web');
 
 	try {
-		// Initialize provider and pre-fetch flags
+		// Initialize provider
 		await OpenFeature.setProviderAndWait(
 			new FlagshipClientProvider({
 				appId: FLAGSHIP_APP_ID,
 				accountId: FLAGSHIP_ACCOUNT_ID,
 				authToken: 'your-token',
-				prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads', 'premium-features', 'beta-access', 'theme-config'],
 				timeout: 5000,
 				retries: 1,
 			}),
 		);
 
-		// Set user context — triggers flag pre-fetch
+		// Set user context — evaluates all flags
 		await OpenFeature.setContext({
 			targetingKey: getCurrentUserId(),
 			email: getUserEmail(),

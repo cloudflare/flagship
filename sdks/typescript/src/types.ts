@@ -148,26 +148,30 @@ export interface FlagshipRequestOptions {
  */
 export interface FlagshipClientProviderOptions extends FlagshipProviderOptions {
 	/**
-	 * Flag keys to fetch during `initialize()` and on every `onContextChange()`.
-	 * Fetched flags are stored in an in-memory cache and resolved synchronously
-	 * by the OpenFeature web SDK. Any flag key not listed here will return
-	 * `ErrorCode.FLAG_NOT_FOUND` at resolution time.
-	 *
-	 * @example
-	 * prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads']
+	 * @deprecated Ignored. The provider evaluates every flag in a single request
+	 * during `initialize()` and on every `onContextChange()`.
 	 */
 	prefetchFlags?: string[];
 }
 
 /**
- * A single entry in the client provider's in-memory flag cache.
- * Fields mirror the data-plane's `EvaluateResult`.
+ * One entry of a bulk evaluation response. A failed flag carries `errorCode`
+ * and `errorDetails`; a disabled flag omits `value` and `variant`.
  */
-export interface CachedFlag {
-	value: unknown;
-	reason: string;
-	variant: string;
+export interface FlagshipBulkEvaluationResult {
+	key: string;
+	value?: unknown;
+	variant?: string;
+	reason?: string;
+	metadata?: Record<string, string | number | boolean>;
+	errorCode?: string;
+	errorDetails?: string;
 }
+
+/**
+ * A single entry in the client provider's in-memory flag cache.
+ */
+export type CachedFlag = Omit<FlagshipBulkEvaluationResult, 'key'>;
 
 /**
  * Shape of a successful response from the Flagship evaluation API.

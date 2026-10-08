@@ -601,6 +601,62 @@ describe('FlagshipClient', () => {
 		});
 	});
 
+	describe('evaluateAll', () => {
+		const bulkUrl = 'https://api.example.com/v1/acct/apps/app/ofrep/v1/evaluate/flags';
+		const client = (retries = 0) =>
+			new FlagshipClient({ endpoint: 'https://api.example.com/v1/acct/apps/app/evaluate', authToken: 'token', retries });
+
+		it('posts the context to the OFREP bulk endpoint and returns the flag results', async () => {
+			const flags = [
+				{ key: 'a', value: true, reason: 'STATIC', variant: 'on' },
+				{ key: 'b', errorCode: 'PARSE_ERROR', errorDetails: 'bad config' },
+			];
+			(global.fetch as any).mockResolvedValueOnce(Response.json({ flags }));
+
+			const result = await client().evaluateAll({ targetingKey: 'user-1', nested: { plan: 'pro' } });
+
+			expect(result).toEqual(flags);
+			const [url, init] = (global.fetch as any).mock.calls[0];
+			expect(url).toBe(bulkUrl);
+			expect(init.method).toBe('POST');
+			expect(init.headers.get('Authorization')).toBe('Bearer token');
+			expect(JSON.parse(init.body)).toEqual({ context: { targetingKey: 'user-1', nested: { plan: 'pro' } } });
+		});
+
+		it('derives the bulk endpoint from appId and accountId', async () => {
+			(global.fetch as any).mockResolvedValueOnce(Response.json({ flags: [] }));
+
+			await new FlagshipClient({ appId: 'app-1', accountId: 'acct-1', baseUrl: 'http://localhost:8787' }).evaluateAll({});
+
+			expect((global.fetch as any).mock.calls[0][0]).toBe(
+				'http://localhost:8787/client/v4/accounts/acct-1/flagship/apps/app-1/ofrep/v1/evaluate/flags',
+			);
+		});
+
+		it('throws when the endpoint does not end in /evaluate', async () => {
+			await expect(new FlagshipClient({ endpoint: 'https://api.example.com/flags' }).evaluateAll({})).rejects.toThrow(
+				/bulk evaluation requires/,
+			);
+			expect(global.fetch).not.toHaveBeenCalled();
+		});
+
+		it('rejects an unexpected response shape with PARSE_ERROR', async () => {
+			(global.fetch as any).mockResolvedValueOnce(Response.json({ flags: {} }));
+
+			await expect(client().evaluateAll({})).rejects.toMatchObject({ code: FlagshipErrorCode.PARSE_ERROR });
+		});
+
+		it('surfaces the OpenFeature error code of a failed request', async () => {
+			(global.fetch as any).mockResolvedValueOnce(Response.json({ errorCode: 'INVALID_CONTEXT', errorDetails: 'bad' }, { status: 400 }));
+
+			await expect(client().evaluateAll({})).rejects.toMatchObject({
+				code: FlagshipErrorCode.NETWORK_ERROR,
+				errorCode: 'INVALID_CONTEXT',
+				message: 'HTTP 400: bad',
+			});
+		});
+	});
+
 	describe('injectable transport', () => {
 		const okResponse = () => ({ ok: true, json: async () => ({ flagKey: 'my-flag', value: true }) }) as unknown as Response;
 

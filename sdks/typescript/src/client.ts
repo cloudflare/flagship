@@ -1,9 +1,10 @@
 import type { EvaluationContext } from '@openfeature/core';
-import { buildEvaluationUrl, normalizeEvaluationContext, type NormalizedContextValue } from './context.js';
+import { buildEvaluationUrl, normalizeEvaluationContext } from './context.js';
 import {
 	FlagshipError,
 	FlagshipErrorCode,
 	FLAGSHIP_DEFAULT_BASE_URL,
+	type FlagshipBulkEvaluationResult,
 	type FlagshipEvaluationResponse,
 	type FlagshipProviderOptions,
 	type FlagshipRequestOptions,
@@ -13,6 +14,7 @@ interface ResolvedOptions {
 	endpoint: string;
 	/** Definitions URL used by local evaluation. `undefined` when not derived. */
 	definitionsEndpoint: string | undefined;
+	bulkEndpoint: string | undefined;
 	fetchOptions: RequestInit;
 	signal: AbortSignal | undefined;
 	fetch: typeof globalThis.fetch | undefined;
@@ -38,9 +40,11 @@ export class FlagshipClient {
 
 	constructor(options: FlagshipProviderOptions) {
 		const fetchOptions = buildFetchOptions(options);
+		const endpoint = resolveEndpoint(options);
 		this.options = {
-			endpoint: resolveEndpoint(options),
+			endpoint,
 			definitionsEndpoint: tryResolveDefinitionsEndpoint(options),
+			bulkEndpoint: resolveBulkEndpoint(endpoint),
 			fetchOptions,
 			signal: fetchOptions.signal ?? undefined,
 			fetch: options.fetch,
@@ -63,7 +67,7 @@ export class FlagshipClient {
 	async evaluate(flagKey: string, context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipEvaluationResponse> {
 		const normalized = normalizeEvaluationContext(context);
 		const request = normalized.requiresPost
-			? buildPostRequest(this.options.endpoint, flagKey, normalized.context, this.options.fetchOptions)
+			? buildPostRequest(this.options.endpoint, { flagKey, context: normalized.context }, this.options.fetchOptions)
 			: {
 					url: buildEvaluationUrl(this.options.endpoint, flagKey, normalized.context as EvaluationContext),
 					init: this.options.fetchOptions,
@@ -72,6 +76,27 @@ export class FlagshipClient {
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
 
 		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseEvaluationResponse);
+	}
+
+	/**
+	 * Evaluate every flag in the app for one context with a single OFREP bulk request.
+	 *
+	 * Per-flag failures are returned as items with an `errorCode`; request-level
+	 * failures throw like `evaluate`.
+	 *
+	 * @internal
+	 */
+	async evaluateAll(context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipBulkEvaluationResult[]> {
+		const endpoint = this.options.bulkEndpoint;
+		if (!endpoint) {
+			throw new Error('Flagship: bulk evaluation requires an endpoint ending in /evaluate, or appId and accountId.');
+		}
+
+		const request = buildPostRequest(endpoint, { context: normalizeEvaluationContext(context).context }, this.options.fetchOptions);
+		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
+		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
+
+		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseBulkResponse);
 	}
 
 	/**
@@ -203,6 +228,17 @@ async function parseEvaluationResponse(response: Response): Promise<FlagshipEval
 	return data as FlagshipEvaluationResponse;
 }
 
+async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResult[]> {
+	if (!response.ok) throw await httpError(response);
+
+	const data = (await response.json()) as { flags?: unknown } | null;
+	if (!data || !Array.isArray(data.flags)) {
+		throw new FlagshipError('Invalid bulk evaluation response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
+	}
+
+	return data.flags as FlagshipBulkEvaluationResult[];
+}
+
 async function parseDefinitionsResponse(response: Response): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
 	if (response.status === 304) {
 		return 'not-modified';
@@ -257,12 +293,7 @@ async function readErrorBody(response: Response): Promise<{ message?: string; er
 	}
 }
 
-function buildPostRequest(
-	url: string,
-	flagKey: string,
-	context: Record<string, NormalizedContextValue>,
-	fetchOptions: RequestInit,
-): EvaluationRequest {
+function buildPostRequest(url: string, body: object, fetchOptions: RequestInit): EvaluationRequest {
 	const headers = new Headers(fetchOptions.headers);
 	if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
 	return {
@@ -271,9 +302,17 @@ function buildPostRequest(
 			...fetchOptions,
 			method: 'POST',
 			headers,
-			body: JSON.stringify({ flagKey, context }),
+			body: JSON.stringify(body),
 		},
 	};
+}
+
+function resolveBulkEndpoint(endpoint: string): string | undefined {
+	const url = new URL(endpoint);
+	const path = url.pathname.replace(/\/+$/, '');
+	if (!path.endsWith('/evaluate')) return undefined;
+	url.pathname = `${path.slice(0, -'/evaluate'.length)}/ofrep/v1/evaluate/flags`;
+	return url.toString();
 }
 
 function abortedError(cause: unknown): FlagshipError {

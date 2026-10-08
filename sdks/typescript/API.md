@@ -217,7 +217,7 @@ Each entry is keyed by flag key, expected type, and the **full evaluation contex
 
 ### Local evaluation
 
-When `localEvaluation: true`, the provider fetches flag definitions during `initialize()` (blocking), evaluates flags in-process, and refreshes definitions lazily on evaluate once `refreshInterval` has elapsed. Refresh uses `If-None-Match` / `304`. Failures keep the last good snapshot.
+When `localEvaluation: true`, the provider fetches flag definitions during `initialize()` (blocking), evaluates flags in-process, and refreshes definitions lazily on evaluate once `refreshInterval` has elapsed. Refresh uses `If-None-Match` / `304`. Failures keep the last good snapshot and emit `PROVIDER_STALE`; the next successful refresh emits `PROVIDER_READY`. An initial fetch that fails rejects `initialize()`, with `PROVIDER_FATAL` on a 401 or 403.
 
 ```typescript
 new FlagshipServerProvider({
@@ -355,7 +355,7 @@ const uploads = client.getNumberValue('max-uploads', 5);
 | Flag not in `prefetchFlags`, or fetch failed | `ERROR`  | `FLAG_NOT_FOUND` | Default value  |
 | Cached value's type doesn't match the call   | `ERROR`  | `TYPE_MISMATCH`  | Default value  |
 
-When the context changes, the entire cache is **cleared before re-fetching** all `prefetchFlags`. A failed re-fetch returns `FLAG_NOT_FOUND` rather than serving stale values from the previous context.
+When the context changes, the entire cache is **cleared before re-fetching** all `prefetchFlags`. A failed re-fetch returns `FLAG_NOT_FOUND` rather than serving stale values from the previous context, and reports `PROVIDER_ERROR` when every fetch fails.
 
 ### Configuration options
 
@@ -534,7 +534,7 @@ await OpenFeature.setProviderAndWait(provider);
 
 **Server provider (binding mode):** Initialization does not call binding methods. Binding evaluation requests happen only when resolving flags.
 
-**Client provider:** During initialization, the provider fetches all `prefetchFlags` using `Promise.allSettled`. Even if some or all fetches fail, the provider transitions to `READY` status. Failed flags return `FLAG_NOT_FOUND` when resolved.
+**Client provider:** During initialization, the provider fetches all `prefetchFlags` using `Promise.allSettled`. Individual failures are tolerated and those flags return `FLAG_NOT_FOUND` when resolved. If every fetch fails, `initialize()` rejects and the provider reports `PROVIDER_ERROR` (`PROVIDER_FATAL` on a 401 or 403). `onContextChange` behaves the same way.
 
 To shut down providers and release resources:
 

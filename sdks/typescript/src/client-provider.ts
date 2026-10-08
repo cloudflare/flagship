@@ -1,6 +1,6 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/web-sdk';
-import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderStatus } from '@openfeature/web-sdk';
-import { FlagshipClient } from './client.js';
+import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError, ProviderStatus } from '@openfeature/web-sdk';
+import { FlagshipClient, isAuthFailure } from './client.js';
 import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js';
 
 /**
@@ -57,8 +57,8 @@ export class FlagshipClientProvider implements Provider {
 
 	/**
 	 * Fetches all `prefetchFlags` in parallel and populates the cache.
-	 * Individual flag fetch failures are logged when `logging` is enabled but
-	 * do not prevent the provider from reaching READY.
+	 * Individual flag fetch failures are logged when `logging` is enabled and
+	 * tolerated; initialization fails only when every fetch fails.
 	 */
 	async initialize(context: EvaluationContext = {}): Promise<void> {
 		await this.fetchAll(context, 'initialization');
@@ -109,7 +109,8 @@ export class FlagshipClientProvider implements Provider {
 
 	/**
 	 * Fetches all `prefetchFlags` in parallel using `Promise.allSettled`.
-	 * Failures are logged individually when `logging` is enabled.
+	 * Failures are logged individually when `logging` is enabled. Throws when
+	 * every fetch fails, with `PROVIDER_FATAL` if any failure was a 401 or 403.
 	 */
 	private async fetchAll(context: EvaluationContext, phase: string): Promise<void> {
 		if (this.prefetchFlags.length === 0) return;
@@ -133,6 +134,13 @@ export class FlagshipClientProvider implements Provider {
 				}
 			});
 		}
+
+		const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+		if (failures.length < results.length) return;
+
+		const unauthorized = failures.find((failure) => isAuthFailure(failure.reason));
+		const cause = (unauthorized ?? failures[0]!).reason;
+		throw unauthorized ? new ProviderFatalError(cause instanceof Error ? cause.message : String(cause)) : cause;
 	}
 
 	private resolveFromCache<T>(flagKey: string, defaultValue: T, expectedType: string, logger: Logger): ResolutionDetails<T> {

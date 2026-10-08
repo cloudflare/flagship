@@ -226,6 +226,11 @@ async function parseDefinitionsResponse(response: Response): Promise<{ etag: str
 	return { etag, flags: (data as { flags: Record<string, unknown> }).flags };
 }
 
+export function isAuthFailure(error: unknown): boolean {
+	const status = error instanceof FlagshipError ? (error.cause as { status?: unknown } | undefined)?.status : undefined;
+	return status === 401 || status === 403;
+}
+
 async function httpError(response: Response): Promise<FlagshipError> {
 	const { message, errorCode } = await readErrorBody(response);
 	return new FlagshipError(

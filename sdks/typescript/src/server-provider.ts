@@ -1,7 +1,7 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/server-sdk';
-import { ErrorCode, OpenFeatureEventEmitter } from '@openfeature/server-sdk';
+import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError } from '@openfeature/server-sdk';
 import { LRUCache } from 'lru-cache';
-import { FlagshipClient, resolveDefinitionsEndpoint } from './client.js';
+import { FlagshipClient, isAuthFailure, resolveDefinitionsEndpoint } from './client.js';
 import { normalizeEvaluationContext, type NormalizedContextValue } from './context.js';
 import { evaluateFlag, FlagConfigError, type EvalFlag } from './local/evaluate.js';
 import {
@@ -127,6 +127,7 @@ export class FlagshipServerProvider implements Provider {
 	private epoch = 0;
 	/** True only between a successful local `initialize()` and `onClose()`. */
 	private localReady = false;
+	private stale = false;
 
 	private readonly resolve: <T>(
 		flagKey: string,
@@ -204,6 +205,7 @@ export class FlagshipServerProvider implements Provider {
 		// ignored when it resolves. Drop residual state before the blocking fetch.
 		this.epoch += 1;
 		this.localReady = false;
+		this.stale = false;
 		this.snapshot = undefined;
 		this.etag = undefined;
 		this.lastFetch = 0;
@@ -220,6 +222,7 @@ export class FlagshipServerProvider implements Provider {
 		// finally handler only clears when it still owns the slot (identity check).
 		this.epoch += 1;
 		this.localReady = false;
+		this.stale = false;
 		this.snapshot = undefined;
 		this.etag = undefined;
 		this.lastFetch = 0;
@@ -431,6 +434,7 @@ export class FlagshipServerProvider implements Provider {
 
 			if (result === 'not-modified') {
 				this.lastFetch = Date.now();
+				this.recover();
 				log?.debug('[Flagship] Definitions not modified (304)');
 				return;
 			}
@@ -443,14 +447,28 @@ export class FlagshipServerProvider implements Provider {
 				log?.debug('[Flagship] Definitions response had no ETag; conditional refresh (304) is unavailable');
 			}
 			this.lastFetch = Date.now();
+			this.recover();
 			log?.debug(`[Flagship] Definitions snapshot updated (${Object.keys(this.snapshot).length} flags)`);
 		} catch (error) {
 			if (epoch !== this.epoch) return;
 			this.lastFetch = Date.now();
-			if (initial) throw error;
 			const message = error instanceof Error ? error.message : String(error);
+			if (initial) throw isAuthFailure(error) ? new ProviderFatalError(message) : error;
+			this.markStale(message);
 			log?.warn(`[Flagship] Definitions refresh failed; keeping last good snapshot: ${message}`);
 		}
+	}
+
+	private markStale(message: string): void {
+		if (this.stale) return;
+		this.stale = true;
+		this.events.emit(ProviderEvents.Stale, { message });
+	}
+
+	private recover(): void {
+		if (!this.stale) return;
+		this.stale = false;
+		this.events.emit(ProviderEvents.Ready);
 	}
 
 	// ---------------------------------------------------------------------------

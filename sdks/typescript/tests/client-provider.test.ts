@@ -595,6 +595,42 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.status).toBe(ProviderStatus.READY);
 		});
 
+		it('status is ERROR after a failed initialize, and FATAL on 401 or 403', async () => {
+			const { ProviderStatus } = require('@openfeature/web-sdk');
+			const failWith = (error: Error) =>
+				(FlagshipClient as any).mockImplementation(function () {
+					return { evaluate: vi.fn().mockRejectedValue(error) };
+				});
+
+			failWith(new Error('network'));
+			const failed = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate', prefetchFlags: ['f'] });
+			await expect(failed.initialize()).rejects.toThrow();
+			expect(failed.status).toBe(ProviderStatus.ERROR);
+
+			failWith(new FlagshipError('HTTP 403: Forbidden', FlagshipErrorCode.NETWORK_ERROR, { status: 403 }));
+			const fatal = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate', prefetchFlags: ['f'] });
+			await expect(fatal.initialize()).rejects.toThrow();
+			expect(fatal.status).toBe(ProviderStatus.FATAL);
+		});
+
+		it('status follows context changes: ERROR on failure, READY once it succeeds again', async () => {
+			const { ProviderStatus } = require('@openfeature/web-sdk');
+			const result = { flagKey: 'f', value: true, reason: 'DEFAULT', variant: 'on' };
+			(FlagshipClient as any).mockImplementation(function () {
+				return {
+					evaluate: vi.fn().mockResolvedValueOnce(result).mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(result),
+				};
+			});
+
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate', prefetchFlags: ['f'] });
+			await provider.initialize();
+			await expect(provider.onContextChange({}, { targetingKey: 'user-1' })).rejects.toThrow('network');
+			expect(provider.status).toBe(ProviderStatus.ERROR);
+
+			await provider.onContextChange({ targetingKey: 'user-1' }, { targetingKey: 'user-2' });
+			expect(provider.status).toBe(ProviderStatus.READY);
+		});
+
 		it('status resets to NOT_READY after onClose', async () => {
 			const { ProviderStatus } = require('@openfeature/web-sdk');
 			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });

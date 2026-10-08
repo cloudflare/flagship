@@ -61,8 +61,7 @@ export class FlagshipClientProvider implements Provider {
 	 * tolerated; initialization fails only when every fetch fails.
 	 */
 	async initialize(context: EvaluationContext = {}): Promise<void> {
-		await this.fetchAll(context, 'initialization');
-		this.currentStatus = ProviderStatus.READY;
+		await this.load(context, 'initialization');
 		this.events.emit(ProviderEvents.Ready);
 	}
 
@@ -78,7 +77,7 @@ export class FlagshipClientProvider implements Provider {
 	 */
 	async onContextChange(_oldContext: EvaluationContext, newContext: EvaluationContext = {}): Promise<void> {
 		this.cache.clear();
-		await this.fetchAll(newContext, 'context change');
+		await this.load(newContext, 'context change');
 	}
 
 	resolveBooleanEvaluation(
@@ -105,6 +104,16 @@ export class FlagshipClientProvider implements Provider {
 		logger: Logger,
 	): ResolutionDetails<T> {
 		return this.resolveFromCache(flagKey, defaultValue, 'object', logger);
+	}
+
+	private async load(context: EvaluationContext, phase: string): Promise<void> {
+		try {
+			await this.fetchAll(context, phase);
+			this.currentStatus = ProviderStatus.READY;
+		} catch (error) {
+			this.currentStatus = error instanceof ProviderFatalError ? ProviderStatus.FATAL : ProviderStatus.ERROR;
+			throw error;
+		}
 	}
 
 	/**

@@ -386,6 +386,7 @@ describe('FlagshipServerProvider', () => {
 			],
 			[500, 'PARSE_ERROR', ErrorCode.PARSE_ERROR, { success: false, errors: [{ message: 'bad config' }], errorCode: 'PARSE_ERROR' }],
 			[404, 'FLAG_NOT_FOUND', ErrorCode.FLAG_NOT_FOUND, { success: false, errorMessage: 'missing', errorCode: 'FLAG_NOT_FOUND' }],
+			[400, 'TYPE_MISMATCH', ErrorCode.TYPE_MISMATCH, { key: 'flag', errorDetails: 'wrong type', errorCode: 'TYPE_MISMATCH' }],
 		])('should map the %i body errorCode %s', async (status, _code, expected, body) => {
 			(global.fetch as any).mockResolvedValue(Response.json(body, { status }));
 
@@ -393,7 +394,9 @@ describe('FlagshipServerProvider', () => {
 			const result = await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
 
 			expect(result.errorCode).toBe(expected);
-			expect(result.errorMessage).toContain(String((body as any).errorMessage ?? (body as any).error ?? (body as any).errors[0].message));
+			expect(result.errorMessage).toContain(
+				String((body as any).errorMessage ?? (body as any).errorDetails ?? (body as any).error ?? (body as any).errors[0].message),
+			);
 		});
 
 		it('should fall back to GENERAL for an unknown body errorCode', async () => {

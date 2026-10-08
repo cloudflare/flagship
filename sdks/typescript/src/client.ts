@@ -242,7 +242,7 @@ async function readErrorBody(response: Response): Promise<{ message?: string; er
 		const body = (await response.json()) as Record<string, unknown> | null;
 		if (!body || typeof body !== 'object') return {};
 		const errors = Array.isArray(body.errors) ? (body.errors[0] as { message?: unknown } | undefined) : undefined;
-		const message = [body.errorMessage, body.error, errors?.message].find((value) => typeof value === 'string');
+		const message = [body.errorMessage, body.errorDetails, body.error, errors?.message].find((value) => typeof value === 'string');
 		return {
 			message: message as string | undefined,
 			errorCode: typeof body.errorCode === 'string' ? body.errorCode : undefined,

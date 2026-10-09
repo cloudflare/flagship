@@ -359,6 +359,14 @@ When the context changes, the entire cache is **cleared before re-evaluating**. 
 
 The bulk request requires an endpoint ending in `/evaluate`, or `appId` and `accountId`.
 
+### Polling for changes
+
+Set `pollInterval` (milliseconds) to re-evaluate every flag for the current context in the background. When any result differs, the provider replaces the cache and emits `PROVIDER_CONFIGURATION_CHANGED` with the changed keys in `flagsChanged`. A failed refresh keeps serving the cached values and is retried on the next interval. Polling is off by default and stops when the provider is closed.
+
+```typescript
+new FlagshipClientProvider({ ..., pollInterval: 30_000 });
+```
+
 ### Configuration options
 
 | Option         | Type          | Default                      | Description                                           |

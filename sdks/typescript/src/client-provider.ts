@@ -43,6 +43,8 @@ export class FlagshipClientProvider implements Provider {
 	private cache: Map<string, CachedFlag> = new Map();
 	private client: FlagshipClient;
 	private readonly logging: boolean;
+	private readonly pollInterval: number;
+	private timer?: ReturnType<typeof setTimeout>;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
 	private epoch = 0;
 
@@ -50,6 +52,7 @@ export class FlagshipClientProvider implements Provider {
 		this.metadata = { name: 'Flagship Client Provider' };
 		this.client = new FlagshipClient(resolveRelativeEndpoint(options));
 		this.logging = options.logging ?? false;
+		this.pollInterval = options.pollInterval ?? 0;
 	}
 
 	get status(): ProviderStatus {
@@ -62,6 +65,7 @@ export class FlagshipClientProvider implements Provider {
 
 	async onClose(): Promise<void> {
 		this.epoch += 1;
+		clearTimeout(this.timer);
 		this.cache.clear();
 		this.currentStatus = ProviderStatus.NOT_READY;
 	}
@@ -105,11 +109,13 @@ export class FlagshipClientProvider implements Provider {
 	/** Resolves to false when `onClose()` or a newer load superseded this one. */
 	private async load(context: EvaluationContext, phase: string): Promise<boolean> {
 		const epoch = ++this.epoch;
+		clearTimeout(this.timer);
 		try {
 			const flags = await this.fetchAll(context, phase);
 			if (epoch !== this.epoch) return false;
 			this.cache = flags;
 			this.currentStatus = ProviderStatus.READY;
+			this.schedulePoll(context, epoch);
 			return true;
 		} catch (error) {
 			if (epoch === this.epoch) {
@@ -117,6 +123,20 @@ export class FlagshipClientProvider implements Provider {
 			}
 			throw error;
 		}
+	}
+
+	private schedulePoll(context: EvaluationContext, epoch: number): void {
+		if (this.pollInterval <= 0) return;
+		this.timer = setTimeout(async () => {
+			const flags = await this.fetchAll(context, 'refresh').catch(() => undefined);
+			if (epoch !== this.epoch) return;
+			if (flags) {
+				const flagsChanged = changedKeys(this.cache, flags);
+				this.cache = flags;
+				if (flagsChanged.length > 0) this.events.emit(ProviderEvents.ConfigurationChanged, { flagsChanged });
+			}
+			this.schedulePoll(context, epoch);
+		}, this.pollInterval);
 	}
 
 	/**
@@ -208,4 +228,10 @@ function resolveRelativeEndpoint(options: FlagshipClientProviderOptions): Flagsh
 	}
 
 	return { ...options, endpoint: `${window.location.origin}${endpoint}` };
+}
+
+function changedKeys(previous: Map<string, CachedFlag>, next: Map<string, CachedFlag>): string[] {
+	return [...new Set([...previous.keys(), ...next.keys()])].filter(
+		(key) => JSON.stringify(previous.get(key)) !== JSON.stringify(next.get(key)),
+	);
 }

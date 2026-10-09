@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Logger } from '@openfeature/web-sdk';
 import { ErrorCode, ProviderEvents, ProviderStatus } from '@openfeature/web-sdk';
 import { FlagshipClientProvider } from '../src/client-provider.js';
@@ -303,6 +303,76 @@ describe('FlagshipClientProvider', () => {
 			const provider = await initialized([]);
 			await provider.onClose();
 			await expect(provider.onClose()).resolves.toBeUndefined();
+		});
+	});
+
+	describe('polling', () => {
+		const pollInterval = 1000;
+		const flag = (variant: string): FlagshipBulkEvaluationResult => ({ key: 'f', value: variant === 'on', reason: 'DEFAULT', variant });
+
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+
+		it('does not poll unless pollInterval is set', async () => {
+			const evaluateAll = mockBulk([flag('on')]);
+			await new FlagshipClientProvider({ endpoint }).initialize({});
+
+			await vi.advanceTimersByTimeAsync(10 * pollInterval);
+
+			expect(evaluateAll).toHaveBeenCalledTimes(1);
+		});
+
+		it('emits CONFIGURATION_CHANGED with the changed keys only when results differ', async () => {
+			const evaluateAll = mockBulk([flag('on')], [flag('on')], [flag('off')]);
+			const provider = new FlagshipClientProvider({ endpoint, pollInterval });
+			const onChanged = vi.fn();
+			provider.events.addHandler(ProviderEvents.ConfigurationChanged, onChanged);
+			await provider.initialize({});
+
+			await vi.advanceTimersByTimeAsync(pollInterval);
+			expect(onChanged).not.toHaveBeenCalled();
+
+			await vi.advanceTimersByTimeAsync(pollInterval);
+			expect(onChanged).toHaveBeenCalledWith(expect.objectContaining({ flagsChanged: ['f'] }));
+			expect(provider.resolveBooleanEvaluation('f', true, {}, noopLogger).value).toBe(false);
+			expect(evaluateAll).toHaveBeenCalledTimes(3);
+		});
+
+		it('keeps serving the cache and keeps polling when a refresh fails', async () => {
+			const evaluateAll = mockBulk([flag('on')], new Error('network'), [flag('off')]);
+			const provider = new FlagshipClientProvider({ endpoint, pollInterval });
+			await provider.initialize({});
+
+			await vi.advanceTimersByTimeAsync(pollInterval);
+			expect(provider.status).toBe(ProviderStatus.READY);
+			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).value).toBe(true);
+
+			await vi.advanceTimersByTimeAsync(pollInterval);
+			expect(provider.resolveBooleanEvaluation('f', true, {}, noopLogger).value).toBe(false);
+			expect(evaluateAll).toHaveBeenCalledTimes(3);
+		});
+
+		it('stops polling on close', async () => {
+			const evaluateAll = mockBulk([flag('on')]);
+			const provider = new FlagshipClientProvider({ endpoint, pollInterval });
+			await provider.initialize({});
+
+			await provider.onClose();
+			await vi.advanceTimersByTimeAsync(10 * pollInterval);
+
+			expect(evaluateAll).toHaveBeenCalledTimes(1);
+		});
+
+		it('polls with the context of the latest load', async () => {
+			const evaluateAll = mockBulk([flag('on')], [flag('on')], [flag('on')]);
+			const provider = new FlagshipClientProvider({ endpoint, pollInterval });
+			await provider.initialize({ targetingKey: 'a' });
+			await provider.onContextChange({ targetingKey: 'a' }, { targetingKey: 'b' });
+
+			await vi.advanceTimersByTimeAsync(pollInterval);
+
+			expect(evaluateAll).toHaveBeenCalledTimes(3);
+			expect(evaluateAll).toHaveBeenLastCalledWith({ targetingKey: 'b' });
 		});
 	});
 });

@@ -152,6 +152,12 @@ export interface FlagshipClientProviderOptions extends FlagshipProviderOptions {
 	 * during `initialize()` and on every `onContextChange()`.
 	 */
 	prefetchFlags?: string[];
+	/**
+	 * Milliseconds between background re-evaluations of every flag for the
+	 * current context. Emits `PROVIDER_CONFIGURATION_CHANGED` when results
+	 * change. Disabled by default.
+	 */
+	pollInterval?: number;
 }
 
 /**

@@ -3,15 +3,18 @@ import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError,
 import { FlagshipClient, isAuthFailure } from './client.js';
 import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js';
 
+const ERROR_CODES = new Set<string>(Object.values(ErrorCode));
+
 /**
  * OpenFeature provider for Flagship (client-side / browser).
  *
- * Fetches all flags listed in `prefetchFlags` during initialization and on
- * every context change, storing results in an in-memory cache. All
- * `resolve*` methods are synchronous, as required by the OpenFeature web SDK.
+ * Evaluates every flag for the current context in a single OFREP bulk request
+ * during initialization and on every context change, storing results in an
+ * in-memory cache. All `resolve*` methods are synchronous, as required by the
+ * OpenFeature web SDK.
  *
- * A cache miss (flag key not in `prefetchFlags`, or fetch failed) returns
- * `ErrorCode.FLAG_NOT_FOUND` with the default value.
+ * A flag that is missing from the response returns `ErrorCode.FLAG_NOT_FOUND`
+ * with the default value.
  *
  * @example
  * ```typescript
@@ -23,7 +26,6 @@ import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js'
  *     appId: 'app-abc123',
  *     accountId: 'your-account-id',
  *     authToken: 'your-token',
- *     prefetchFlags: ['dark-mode', 'welcome-message'],
  *   })
  * );
  *
@@ -40,40 +42,37 @@ export class FlagshipClientProvider implements Provider {
 
 	private cache: Map<string, CachedFlag> = new Map();
 	private client: FlagshipClient;
-	private readonly prefetchFlags: string[];
 	private readonly logging: boolean;
+	private readonly pollInterval: number;
+	private timer?: ReturnType<typeof setTimeout>;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
 	private epoch = 0;
 
 	constructor(options: FlagshipClientProviderOptions) {
 		this.metadata = { name: 'Flagship Client Provider' };
 		this.client = new FlagshipClient(resolveRelativeEndpoint(options));
-		this.prefetchFlags = options.prefetchFlags || [];
 		this.logging = options.logging ?? false;
+		this.pollInterval = options.pollInterval ?? 0;
 	}
 
 	get status(): ProviderStatus {
 		return this.currentStatus;
 	}
 
-	/**
-	 * Fetches all `prefetchFlags` in parallel and populates the cache.
-	 * Individual flag fetch failures are logged when `logging` is enabled and
-	 * tolerated; initialization fails only when every fetch fails.
-	 */
 	async initialize(context: EvaluationContext = {}): Promise<void> {
 		if (await this.load(context, 'initialization')) this.events.emit(ProviderEvents.Ready);
 	}
 
 	async onClose(): Promise<void> {
 		this.epoch += 1;
+		clearTimeout(this.timer);
 		this.cache.clear();
 		this.currentStatus = ProviderStatus.NOT_READY;
 	}
 
 	/**
-	 * Invalidates the entire cache and re-fetches all `prefetchFlags` for the
-	 * new context. Returning a Promise causes the SDK to automatically emit
+	 * Invalidates the entire cache and re-evaluates every flag for the new
+	 * context. Returning a Promise causes the SDK to automatically emit
 	 * `ProviderEvents.Reconciling` while this method executes.
 	 */
 	async onContextChange(_oldContext: EvaluationContext, newContext: EvaluationContext = {}): Promise<void> {
@@ -110,11 +109,13 @@ export class FlagshipClientProvider implements Provider {
 	/** Resolves to false when `onClose()` or a newer load superseded this one. */
 	private async load(context: EvaluationContext, phase: string): Promise<boolean> {
 		const epoch = ++this.epoch;
+		clearTimeout(this.timer);
 		try {
 			const flags = await this.fetchAll(context, phase);
 			if (epoch !== this.epoch) return false;
 			this.cache = flags;
 			this.currentStatus = ProviderStatus.READY;
+			this.schedulePoll(context, epoch);
 			return true;
 		} catch (error) {
 			if (epoch === this.epoch) {
@@ -124,48 +125,50 @@ export class FlagshipClientProvider implements Provider {
 		}
 	}
 
+	private schedulePoll(context: EvaluationContext, epoch: number): void {
+		if (this.pollInterval <= 0) return;
+		this.timer = setTimeout(async () => {
+			try {
+				const flags = await this.fetchAll(context, 'refresh');
+				if (epoch !== this.epoch) return;
+				const flagsChanged = changedKeys(this.cache, flags);
+				this.cache = flags;
+				if (this.currentStatus === ProviderStatus.STALE) {
+					this.currentStatus = ProviderStatus.READY;
+					this.events.emit(ProviderEvents.Ready);
+				}
+				if (flagsChanged.length > 0) this.events.emit(ProviderEvents.ConfigurationChanged, { flagsChanged });
+			} catch (error) {
+				if (epoch !== this.epoch) return;
+				if (this.currentStatus === ProviderStatus.READY) {
+					this.currentStatus = ProviderStatus.STALE;
+					this.events.emit(ProviderEvents.Stale, { message: error instanceof Error ? error.message : String(error) });
+				}
+			}
+			this.schedulePoll(context, epoch);
+		}, this.pollInterval);
+	}
+
 	/**
-	 * Fetches all `prefetchFlags` in parallel using `Promise.allSettled`.
-	 * Failures are logged individually when `logging` is enabled. Throws when
-	 * every fetch fails, with `PROVIDER_FATAL` if any failure was a 401 or 403.
+	 * Evaluates every flag for `context`. Throws when the request fails, with
+	 * `PROVIDER_FATAL` on a 401 or 403.
 	 */
 	private async fetchAll(context: EvaluationContext, phase: string): Promise<Map<string, CachedFlag>> {
-		const flags = new Map<string, CachedFlag>();
-		if (this.prefetchFlags.length === 0) return flags;
-
-		const results = await Promise.allSettled(
-			this.prefetchFlags.map(async (flagKey) => {
-				const result = await this.client.evaluate(flagKey, context);
-				flags.set(flagKey, {
-					value: result.value,
-					reason: result.reason,
-					variant: result.variant,
-				});
-			}),
-		);
-
-		if (this.logging) {
-			results.forEach((result, i) => {
-				if (result.status === 'rejected') {
-					const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
-					console.warn(`[Flagship] Failed to fetch flag "${this.prefetchFlags[i]}" during ${phase}: ${reason}`);
-				}
-			});
+		try {
+			const flags = await this.client.evaluateAll(context);
+			return new Map(flags.map(({ key, ...flag }) => [key, flag]));
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (this.logging) console.warn(`[Flagship] Failed to evaluate flags during ${phase}: ${message}`);
+			throw isAuthFailure(error) ? new ProviderFatalError(message) : error;
 		}
-
-		const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-		if (failures.length < results.length) return flags;
-
-		const unauthorized = failures.find((failure) => isAuthFailure(failure.reason));
-		const cause = (unauthorized ?? failures[0]!).reason;
-		throw unauthorized ? new ProviderFatalError(cause instanceof Error ? cause.message : String(cause)) : cause;
 	}
 
 	private resolveFromCache<T>(flagKey: string, defaultValue: T, expectedType: string, logger: Logger): ResolutionDetails<T> {
 		const cached = this.cache.get(flagKey);
 
 		if (!cached) {
-			const msg = `Flag "${flagKey}" not found in cache. Add it to prefetchFlags to ensure it is fetched on initialization.`;
+			const msg = `Flag "${flagKey}" was not returned by the bulk evaluation`;
 			if (this.logging) {
 				logger.warn(`[Flagship] ${msg}`);
 			}
@@ -177,8 +180,23 @@ export class FlagshipClientProvider implements Provider {
 			};
 		}
 
+		const flagMetadata = cached.metadata ?? {};
+
+		if (cached.errorCode) {
+			const msg = cached.errorDetails ?? `Flag "${flagKey}" evaluation failed`;
+			if (this.logging) {
+				logger.warn(`[Flagship] ${msg}`);
+			}
+			return {
+				value: defaultValue,
+				reason: 'ERROR',
+				errorCode: ERROR_CODES.has(cached.errorCode) ? (cached.errorCode as ErrorCode) : ErrorCode.GENERAL,
+				errorMessage: msg,
+			};
+		}
+
 		if (cached.reason === 'DISABLED') {
-			return { value: defaultValue, reason: 'DISABLED', flagMetadata: {} };
+			return { value: defaultValue, reason: 'DISABLED', flagMetadata };
 		}
 
 		const actualType = this.getValueType(cached.value);
@@ -197,9 +215,9 @@ export class FlagshipClientProvider implements Provider {
 
 		return {
 			value: cached.value as T,
-			reason: 'CACHED',
+			reason: cached.reason,
 			variant: cached.variant,
-			flagMetadata: {},
+			flagMetadata,
 		};
 	}
 
@@ -220,4 +238,10 @@ function resolveRelativeEndpoint(options: FlagshipClientProviderOptions): Flagsh
 	}
 
 	return { ...options, endpoint: `${window.location.origin}${endpoint}` };
+}
+
+function changedKeys(previous: Map<string, CachedFlag>, next: Map<string, CachedFlag>): string[] {
+	return [...new Set([...previous.keys(), ...next.keys()])].filter(
+		(key) => JSON.stringify(previous.get(key)) !== JSON.stringify(next.get(key)),
+	);
 }

@@ -192,14 +192,7 @@ export class FlagshipClient {
 }
 
 async function parseEvaluationResponse(response: Response): Promise<FlagshipEvaluationResponse> {
-	if (!response.ok) {
-		throw new FlagshipError(
-			`HTTP ${response.status}: ${response.statusText}`,
-			FlagshipErrorCode.NETWORK_ERROR,
-			response,
-			isRetryableStatus(response.status),
-		);
-	}
+	if (!response.ok) throw await httpError(response);
 
 	const data = await response.json();
 
@@ -215,14 +208,7 @@ async function parseDefinitionsResponse(response: Response): Promise<{ etag: str
 		return 'not-modified';
 	}
 
-	if (!response.ok) {
-		throw new FlagshipError(
-			`HTTP ${response.status}: ${response.statusText}`,
-			FlagshipErrorCode.NETWORK_ERROR,
-			response,
-			isRetryableStatus(response.status),
-		);
-	}
+	if (!response.ok) throw await httpError(response);
 
 	const data: unknown = await response.json();
 	if (
@@ -238,6 +224,32 @@ async function parseDefinitionsResponse(response: Response): Promise<{ etag: str
 
 	const etag = response.headers.get('etag') ?? '';
 	return { etag, flags: (data as { flags: Record<string, unknown> }).flags };
+}
+
+async function httpError(response: Response): Promise<FlagshipError> {
+	const { message, errorCode } = await readErrorBody(response);
+	return new FlagshipError(
+		`HTTP ${response.status}: ${message ?? response.statusText}`,
+		FlagshipErrorCode.NETWORK_ERROR,
+		response,
+		isRetryableStatus(response.status),
+		errorCode,
+	);
+}
+
+async function readErrorBody(response: Response): Promise<{ message?: string; errorCode?: string }> {
+	try {
+		const body = (await response.json()) as Record<string, unknown> | null;
+		if (!body || typeof body !== 'object') return {};
+		const errors = Array.isArray(body.errors) ? (body.errors[0] as { message?: unknown } | undefined) : undefined;
+		const message = [body.errorMessage, body.errorDetails, body.error, errors?.message].find((value) => typeof value === 'string');
+		return {
+			message: message as string | undefined,
+			errorCode: typeof body.errorCode === 'string' ? body.errorCode : undefined,
+		};
+	} catch {
+		return {};
+	}
 }
 
 function buildPostRequest(

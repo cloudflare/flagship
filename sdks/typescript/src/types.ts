@@ -355,6 +355,7 @@ export class FlagshipError extends Error {
 		public code: FlagshipErrorCode,
 		public cause?: unknown,
 		public readonly retryable: boolean = false,
+		public readonly errorCode?: string,
 	) {
 		super(message);
 		this.name = 'FlagshipError';

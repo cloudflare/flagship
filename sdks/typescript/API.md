@@ -381,6 +381,7 @@ new FlagshipClientProvider({ ..., pollInterval: 30_000 });
 | `retries`      | `number`      | `1`                          | Retry attempts (max 10)                               |
 | `retryDelay`   | `number`      | `1000`                       | Delay between retries in ms (max 30 000)              |
 | `fetchOptions` | `RequestInit` | `{}`                         | Custom fetch options (headers, credentials, etc.)     |
+| `pollInterval` | `number`      | disabled                     | Background flag refresh interval in ms                |
 
 ## Evaluation context
 

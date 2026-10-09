@@ -1,6 +1,6 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/web-sdk';
-import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderStatus } from '@openfeature/web-sdk';
-import { FlagshipClient } from './client.js';
+import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError, ProviderStatus } from '@openfeature/web-sdk';
+import { FlagshipClient, isAuthFailure } from './client.js';
 import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js';
 
 /**
@@ -43,6 +43,7 @@ export class FlagshipClientProvider implements Provider {
 	private readonly prefetchFlags: string[];
 	private readonly logging: boolean;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
+	private epoch = 0;
 
 	constructor(options: FlagshipClientProviderOptions) {
 		this.metadata = { name: 'Flagship Client Provider' };
@@ -57,16 +58,15 @@ export class FlagshipClientProvider implements Provider {
 
 	/**
 	 * Fetches all `prefetchFlags` in parallel and populates the cache.
-	 * Individual flag fetch failures are logged when `logging` is enabled but
-	 * do not prevent the provider from reaching READY.
+	 * Individual flag fetch failures are logged when `logging` is enabled and
+	 * tolerated; initialization fails only when every fetch fails.
 	 */
 	async initialize(context: EvaluationContext = {}): Promise<void> {
-		await this.fetchAll(context, 'initialization');
-		this.currentStatus = ProviderStatus.READY;
-		this.events.emit(ProviderEvents.Ready);
+		if (await this.load(context, 'initialization')) this.events.emit(ProviderEvents.Ready);
 	}
 
 	async onClose(): Promise<void> {
+		this.epoch += 1;
 		this.cache.clear();
 		this.currentStatus = ProviderStatus.NOT_READY;
 	}
@@ -78,7 +78,7 @@ export class FlagshipClientProvider implements Provider {
 	 */
 	async onContextChange(_oldContext: EvaluationContext, newContext: EvaluationContext = {}): Promise<void> {
 		this.cache.clear();
-		await this.fetchAll(newContext, 'context change');
+		await this.load(newContext, 'context change');
 	}
 
 	resolveBooleanEvaluation(
@@ -107,17 +107,36 @@ export class FlagshipClientProvider implements Provider {
 		return this.resolveFromCache(flagKey, defaultValue, 'object', logger);
 	}
 
+	/** Resolves to false when `onClose()` or a newer load superseded this one. */
+	private async load(context: EvaluationContext, phase: string): Promise<boolean> {
+		const epoch = ++this.epoch;
+		try {
+			const flags = await this.fetchAll(context, phase);
+			if (epoch !== this.epoch) return false;
+			this.cache = flags;
+			this.currentStatus = ProviderStatus.READY;
+			return true;
+		} catch (error) {
+			if (epoch === this.epoch) {
+				this.currentStatus = error instanceof ProviderFatalError ? ProviderStatus.FATAL : ProviderStatus.ERROR;
+			}
+			throw error;
+		}
+	}
+
 	/**
 	 * Fetches all `prefetchFlags` in parallel using `Promise.allSettled`.
-	 * Failures are logged individually when `logging` is enabled.
+	 * Failures are logged individually when `logging` is enabled. Throws when
+	 * every fetch fails, with `PROVIDER_FATAL` if any failure was a 401 or 403.
 	 */
-	private async fetchAll(context: EvaluationContext, phase: string): Promise<void> {
-		if (this.prefetchFlags.length === 0) return;
+	private async fetchAll(context: EvaluationContext, phase: string): Promise<Map<string, CachedFlag>> {
+		const flags = new Map<string, CachedFlag>();
+		if (this.prefetchFlags.length === 0) return flags;
 
 		const results = await Promise.allSettled(
 			this.prefetchFlags.map(async (flagKey) => {
 				const result = await this.client.evaluate(flagKey, context);
-				this.cache.set(flagKey, {
+				flags.set(flagKey, {
 					value: result.value,
 					reason: result.reason,
 					variant: result.variant,
@@ -133,6 +152,13 @@ export class FlagshipClientProvider implements Provider {
 				}
 			});
 		}
+
+		const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+		if (failures.length < results.length) return flags;
+
+		const unauthorized = failures.find((failure) => isAuthFailure(failure.reason));
+		const cause = (unauthorized ?? failures[0]!).reason;
+		throw unauthorized ? new ProviderFatalError(cause instanceof Error ? cause.message : String(cause)) : cause;
 	}
 
 	private resolveFromCache<T>(flagKey: string, defaultValue: T, expectedType: string, logger: Logger): ResolutionDetails<T> {

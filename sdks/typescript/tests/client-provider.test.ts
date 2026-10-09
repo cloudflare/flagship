@@ -3,11 +3,13 @@ import type { Logger } from '@openfeature/web-sdk';
 import { ErrorCode } from '@openfeature/web-sdk';
 import { FlagshipClientProvider } from '../src/client-provider.js';
 import { FlagshipClient } from '../src/client.js';
+import { FlagshipError, FlagshipErrorCode } from '../src/types.js';
 
 const noopLogger: Logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 // Mock FlagshipClient
-vi.mock('../src/client.js', () => ({
+vi.mock('../src/client.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../src/client.js')>()),
 	FlagshipClient: vi.fn().mockImplementation(function () {
 		return { evaluate: vi.fn() };
 	}),
@@ -218,7 +220,10 @@ describe('FlagshipClientProvider', () => {
 
 			(FlagshipClient as any).mockImplementation(function () {
 				return {
-					evaluate: vi.fn().mockRejectedValue(new Error('network')),
+					evaluate: vi
+						.fn()
+						.mockResolvedValueOnce({ flagKey: 'flag1', value: true, reason: 'DEFAULT', variant: 'on' })
+						.mockRejectedValueOnce(new Error('network')),
 				};
 			});
 
@@ -229,6 +234,33 @@ describe('FlagshipClientProvider', () => {
 
 			await provider.initialize();
 			expect(provider.status).toBe(ProviderStatus.READY);
+		});
+
+		it('rejects initialization when every pre-fetch fails', async () => {
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: vi.fn().mockRejectedValue(new Error('network')) };
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['flag1', 'flag2'],
+			});
+
+			await expect(provider.initialize()).rejects.toThrow('network');
+		});
+
+		it('rejects initialization with PROVIDER_FATAL on 401 or 403', async () => {
+			const unauthorized = new FlagshipError('HTTP 401: Unauthorized', FlagshipErrorCode.NETWORK_ERROR, { status: 401 });
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: vi.fn().mockRejectedValue(unauthorized) };
+			});
+
+			const provider = new FlagshipClientProvider({
+				endpoint: 'https://api.example.com/evaluate',
+				prefetchFlags: ['flag1'],
+			});
+
+			await expect(provider.initialize()).rejects.toMatchObject({ code: ErrorCode.PROVIDER_FATAL });
 		});
 
 		it('emits ProviderEvents.Ready after initialize', async () => {
@@ -253,7 +285,7 @@ describe('FlagshipClientProvider', () => {
 				prefetchFlags: ['flag1'],
 			});
 
-			await provider.initialize();
+			await expect(provider.initialize()).rejects.toThrow();
 			expect(consoleSpy).not.toHaveBeenCalled();
 			consoleSpy.mockRestore();
 		});
@@ -271,7 +303,7 @@ describe('FlagshipClientProvider', () => {
 				logging: true,
 			});
 
-			await provider.initialize();
+			await expect(provider.initialize()).rejects.toThrow('network failure');
 
 			expect(consoleSpy).toHaveBeenCalledTimes(2);
 			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('flag1'));
@@ -326,7 +358,7 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).value).toBe(true);
 
 			// Second context change: fetch fails — stale value must NOT be served
-			await provider.onContextChange({ targetingKey: 'user-1' }, { targetingKey: 'user-2' });
+			await expect(provider.onContextChange({ targetingKey: 'user-1' }, { targetingKey: 'user-2' })).rejects.toThrow('network');
 			const result = provider.resolveBooleanEvaluation('f', false, {}, noopLogger);
 			expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
 		});
@@ -361,7 +393,7 @@ describe('FlagshipClientProvider', () => {
 				logging: true,
 			});
 
-			await provider.onContextChange({}, { targetingKey: 'user-1' });
+			await expect(provider.onContextChange({}, { targetingKey: 'user-1' })).rejects.toThrow('timeout');
 
 			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('flag1'));
 			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('timeout'));
@@ -563,6 +595,42 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.status).toBe(ProviderStatus.READY);
 		});
 
+		it('status is ERROR after a failed initialize, and FATAL on 401 or 403', async () => {
+			const { ProviderStatus } = require('@openfeature/web-sdk');
+			const failWith = (error: Error) =>
+				(FlagshipClient as any).mockImplementation(function () {
+					return { evaluate: vi.fn().mockRejectedValue(error) };
+				});
+
+			failWith(new Error('network'));
+			const failed = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate', prefetchFlags: ['f'] });
+			await expect(failed.initialize()).rejects.toThrow();
+			expect(failed.status).toBe(ProviderStatus.ERROR);
+
+			failWith(new FlagshipError('HTTP 403: Forbidden', FlagshipErrorCode.NETWORK_ERROR, { status: 403 }));
+			const fatal = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate', prefetchFlags: ['f'] });
+			await expect(fatal.initialize()).rejects.toThrow();
+			expect(fatal.status).toBe(ProviderStatus.FATAL);
+		});
+
+		it('status follows context changes: ERROR on failure, READY once it succeeds again', async () => {
+			const { ProviderStatus } = require('@openfeature/web-sdk');
+			const result = { flagKey: 'f', value: true, reason: 'DEFAULT', variant: 'on' };
+			(FlagshipClient as any).mockImplementation(function () {
+				return {
+					evaluate: vi.fn().mockResolvedValueOnce(result).mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(result),
+				};
+			});
+
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate', prefetchFlags: ['f'] });
+			await provider.initialize();
+			await expect(provider.onContextChange({}, { targetingKey: 'user-1' })).rejects.toThrow('network');
+			expect(provider.status).toBe(ProviderStatus.ERROR);
+
+			await provider.onContextChange({ targetingKey: 'user-1' }, { targetingKey: 'user-2' });
+			expect(provider.status).toBe(ProviderStatus.READY);
+		});
+
 		it('status resets to NOT_READY after onClose', async () => {
 			const { ProviderStatus } = require('@openfeature/web-sdk');
 			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
@@ -588,6 +656,34 @@ describe('FlagshipClientProvider', () => {
 
 			await provider.onClose();
 			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
+		});
+
+		it('onClose during an in-flight initialize discards the result and does not emit READY', async () => {
+			const { ProviderStatus, ProviderEvents } = require('@openfeature/web-sdk');
+			let resolveEvaluate!: (value: unknown) => void;
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: vi.fn().mockReturnValue(new Promise((resolve) => (resolveEvaluate = resolve))) };
+			});
+
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate', prefetchFlags: ['f'] });
+			const onReady = vi.fn();
+			provider.events.addHandler(ProviderEvents.Ready, onReady);
+
+			const initializing = provider.initialize();
+			await provider.onClose();
+			resolveEvaluate({ flagKey: 'f', value: true, reason: 'DEFAULT', variant: 'on' });
+			await initializing;
+
+			expect(onReady).not.toHaveBeenCalled();
+			expect(provider.status).toBe(ProviderStatus.NOT_READY);
+			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
+		});
+
+		it('onClose is idempotent', async () => {
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
+			await provider.initialize();
+			await provider.onClose();
+			await expect(provider.onClose()).resolves.toBeUndefined();
 		});
 
 		it('re-fetches flags on each context change', async () => {

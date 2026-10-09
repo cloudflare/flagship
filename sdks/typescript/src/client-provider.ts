@@ -43,6 +43,7 @@ export class FlagshipClientProvider implements Provider {
 	private readonly prefetchFlags: string[];
 	private readonly logging: boolean;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
+	private epoch = 0;
 
 	constructor(options: FlagshipClientProviderOptions) {
 		this.metadata = { name: 'Flagship Client Provider' };
@@ -61,11 +62,11 @@ export class FlagshipClientProvider implements Provider {
 	 * tolerated; initialization fails only when every fetch fails.
 	 */
 	async initialize(context: EvaluationContext = {}): Promise<void> {
-		await this.load(context, 'initialization');
-		this.events.emit(ProviderEvents.Ready);
+		if (await this.load(context, 'initialization')) this.events.emit(ProviderEvents.Ready);
 	}
 
 	async onClose(): Promise<void> {
+		this.epoch += 1;
 		this.cache.clear();
 		this.currentStatus = ProviderStatus.NOT_READY;
 	}
@@ -106,12 +107,19 @@ export class FlagshipClientProvider implements Provider {
 		return this.resolveFromCache(flagKey, defaultValue, 'object', logger);
 	}
 
-	private async load(context: EvaluationContext, phase: string): Promise<void> {
+	/** Resolves to false when `onClose()` or a newer load superseded this one. */
+	private async load(context: EvaluationContext, phase: string): Promise<boolean> {
+		const epoch = ++this.epoch;
 		try {
-			await this.fetchAll(context, phase);
+			const flags = await this.fetchAll(context, phase);
+			if (epoch !== this.epoch) return false;
+			this.cache = flags;
 			this.currentStatus = ProviderStatus.READY;
+			return true;
 		} catch (error) {
-			this.currentStatus = error instanceof ProviderFatalError ? ProviderStatus.FATAL : ProviderStatus.ERROR;
+			if (epoch === this.epoch) {
+				this.currentStatus = error instanceof ProviderFatalError ? ProviderStatus.FATAL : ProviderStatus.ERROR;
+			}
 			throw error;
 		}
 	}
@@ -121,13 +129,14 @@ export class FlagshipClientProvider implements Provider {
 	 * Failures are logged individually when `logging` is enabled. Throws when
 	 * every fetch fails, with `PROVIDER_FATAL` if any failure was a 401 or 403.
 	 */
-	private async fetchAll(context: EvaluationContext, phase: string): Promise<void> {
-		if (this.prefetchFlags.length === 0) return;
+	private async fetchAll(context: EvaluationContext, phase: string): Promise<Map<string, CachedFlag>> {
+		const flags = new Map<string, CachedFlag>();
+		if (this.prefetchFlags.length === 0) return flags;
 
 		const results = await Promise.allSettled(
 			this.prefetchFlags.map(async (flagKey) => {
 				const result = await this.client.evaluate(flagKey, context);
-				this.cache.set(flagKey, {
+				flags.set(flagKey, {
 					value: result.value,
 					reason: result.reason,
 					variant: result.variant,
@@ -145,7 +154,7 @@ export class FlagshipClientProvider implements Provider {
 		}
 
 		const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-		if (failures.length < results.length) return;
+		if (failures.length < results.length) return flags;
 
 		const unauthorized = failures.find((failure) => isAuthFailure(failure.reason));
 		const cause = (unauthorized ?? failures[0]!).reason;

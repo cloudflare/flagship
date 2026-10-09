@@ -658,6 +658,34 @@ describe('FlagshipClientProvider', () => {
 			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
 		});
 
+		it('onClose during an in-flight initialize discards the result and does not emit READY', async () => {
+			const { ProviderStatus, ProviderEvents } = require('@openfeature/web-sdk');
+			let resolveEvaluate!: (value: unknown) => void;
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluate: vi.fn().mockReturnValue(new Promise((resolve) => (resolveEvaluate = resolve))) };
+			});
+
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate', prefetchFlags: ['f'] });
+			const onReady = vi.fn();
+			provider.events.addHandler(ProviderEvents.Ready, onReady);
+
+			const initializing = provider.initialize();
+			await provider.onClose();
+			resolveEvaluate({ flagKey: 'f', value: true, reason: 'DEFAULT', variant: 'on' });
+			await initializing;
+
+			expect(onReady).not.toHaveBeenCalled();
+			expect(provider.status).toBe(ProviderStatus.NOT_READY);
+			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
+		});
+
+		it('onClose is idempotent', async () => {
+			const provider = new FlagshipClientProvider({ endpoint: 'https://api.example.com/evaluate' });
+			await provider.initialize();
+			await provider.onClose();
+			await expect(provider.onClose()).resolves.toBeUndefined();
+		});
+
 		it('re-fetches flags on each context change', async () => {
 			const mockEvaluate = vi
 				.fn()

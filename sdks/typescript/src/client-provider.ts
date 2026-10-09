@@ -128,12 +128,22 @@ export class FlagshipClientProvider implements Provider {
 	private schedulePoll(context: EvaluationContext, epoch: number): void {
 		if (this.pollInterval <= 0) return;
 		this.timer = setTimeout(async () => {
-			const flags = await this.fetchAll(context, 'refresh').catch(() => undefined);
-			if (epoch !== this.epoch) return;
-			if (flags) {
+			try {
+				const flags = await this.fetchAll(context, 'refresh');
+				if (epoch !== this.epoch) return;
 				const flagsChanged = changedKeys(this.cache, flags);
 				this.cache = flags;
+				if (this.currentStatus === ProviderStatus.STALE) {
+					this.currentStatus = ProviderStatus.READY;
+					this.events.emit(ProviderEvents.Ready);
+				}
 				if (flagsChanged.length > 0) this.events.emit(ProviderEvents.ConfigurationChanged, { flagsChanged });
+			} catch (error) {
+				if (epoch !== this.epoch) return;
+				if (this.currentStatus === ProviderStatus.READY) {
+					this.currentStatus = ProviderStatus.STALE;
+					this.events.emit(ProviderEvents.Stale, { message: error instanceof Error ? error.message : String(error) });
+				}
 			}
 			this.schedulePoll(context, epoch);
 		}, this.pollInterval);

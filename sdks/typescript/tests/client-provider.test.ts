@@ -338,18 +338,26 @@ describe('FlagshipClientProvider', () => {
 			expect(evaluateAll).toHaveBeenCalledTimes(3);
 		});
 
-		it('keeps serving the cache and keeps polling when a refresh fails', async () => {
-			const evaluateAll = mockBulk([flag('on')], new Error('network'), [flag('off')]);
+		it('goes STALE once when refreshes fail, keeps serving the cache, and recovers to READY', async () => {
+			const evaluateAll = mockBulk([flag('on')], new Error('network'), new Error('network'), [flag('off')]);
 			const provider = new FlagshipClientProvider({ endpoint, pollInterval });
+			const onStale = vi.fn();
+			const onReady = vi.fn();
+			provider.events.addHandler(ProviderEvents.Stale, onStale);
 			await provider.initialize({});
+			provider.events.addHandler(ProviderEvents.Ready, onReady);
 
-			await vi.advanceTimersByTimeAsync(pollInterval);
-			expect(provider.status).toBe(ProviderStatus.READY);
+			await vi.advanceTimersByTimeAsync(2 * pollInterval);
+			expect(provider.status).toBe(ProviderStatus.STALE);
+			expect(onStale).toHaveBeenCalledTimes(1);
+			expect(onStale).toHaveBeenCalledWith(expect.objectContaining({ message: 'network' }));
 			expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).value).toBe(true);
 
 			await vi.advanceTimersByTimeAsync(pollInterval);
+			expect(provider.status).toBe(ProviderStatus.READY);
+			expect(onReady).toHaveBeenCalledTimes(1);
 			expect(provider.resolveBooleanEvaluation('f', true, {}, noopLogger).value).toBe(false);
-			expect(evaluateAll).toHaveBeenCalledTimes(3);
+			expect(evaluateAll).toHaveBeenCalledTimes(4);
 		});
 
 		it('stops polling on close', async () => {

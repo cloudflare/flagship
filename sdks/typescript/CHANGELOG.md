@@ -1,5 +1,17 @@
 # @cloudflare/flagship
 
+## 0.7.0
+
+### Minor Changes
+
+- [#50](https://github.com/cloudflare/flagship/pull/50) [`f4ef40e`](https://github.com/cloudflare/flagship/commit/f4ef40e52d52ad1739f8ad6070bb2bbcc6081a9e) Thanks [@akshitsinha](https://github.com/akshitsinha)! - `FlagshipClientProvider` now evaluates every flag in a single OFREP bulk request on `initialize()` and on every context change, so `prefetchFlags` is no longer needed and is ignored. Cached results keep their evaluation reason instead of `CACHED`, and per-flag failures surface their OpenFeature error code. The new `pollInterval` option re-evaluates flags in the background and emits `PROVIDER_CONFIGURATION_CHANGED` when results change.
+
+- [#49](https://github.com/cloudflare/flagship/pull/49) [`0d46808`](https://github.com/cloudflare/flagship/commit/0d46808667b5977135875e8e0113d48654319a46) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Report provider state accurately. Local-evaluation server providers emit `PROVIDER_STALE` when a definitions refresh fails and `PROVIDER_READY` when it recovers, and fail initialization with `PROVIDER_FATAL` on a 401 or 403. The client provider now rejects `initialize()` and `onContextChange()` when every flag fetch fails, instead of reporting `READY`, and `onClose()` now discards a load that is still in flight.
+
+### Patch Changes
+
+- [#48](https://github.com/cloudflare/flagship/pull/48) [`c6c6864`](https://github.com/cloudflare/flagship/commit/c6c6864979962f3977cf18f9716aef4036f8d49a) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Map the OpenFeature `errorCode` from Flagship HTTP error responses, so `INVALID_CONTEXT`, `PARSE_ERROR` and `TYPE_MISMATCH` are no longer reported as `GENERAL`.
+
 ## 0.6.0
 
 ### Minor Changes

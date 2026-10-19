@@ -9,10 +9,29 @@ const noopLogger: Logger = { debug: () => {}, info: () => {}, warn: () => {}, er
 const spyLogger = (): Logger => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });
 const endpoint = 'https://api.example.com/evaluate';
 
+class FakeEventSource {
+	static instances: FakeEventSource[] = [];
+	private readonly listeners = new Map<string, Array<(event: Event | MessageEvent) => void>>();
+	constructor(readonly url: string | URL) {
+		FakeEventSource.instances.push(this);
+	}
+	addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+		const callback = typeof listener === 'function' ? listener : (event: Event) => listener.handleEvent(event);
+		const listeners = this.listeners.get(type) ?? [];
+		listeners.push(callback);
+		this.listeners.set(type, listeners);
+	}
+	close(): void {}
+	emit(type: string, data?: string): void {
+		const event = type === 'message' ? new MessageEvent(type, { data }) : new Event(type);
+		for (const listener of this.listeners.get(type) ?? []) listener(event);
+	}
+}
+
 vi.mock('../src/client.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../src/client.js')>()),
 	FlagshipClient: vi.fn().mockImplementation(function () {
-		return { evaluateAll: vi.fn().mockResolvedValue([]) };
+		return { evaluateAllResponse: vi.fn().mockResolvedValue({ flags: [] }) };
 	}),
 }));
 
@@ -20,10 +39,10 @@ function mockBulk(...responses: Array<FlagshipBulkEvaluationResult[] | Error>) {
 	const evaluateAll = vi.fn();
 	for (const response of responses) {
 		if (response instanceof Error) evaluateAll.mockRejectedValueOnce(response);
-		else evaluateAll.mockResolvedValueOnce(response);
+		else evaluateAll.mockResolvedValueOnce({ flags: response });
 	}
 	(FlagshipClient as any).mockImplementation(function () {
-		return { evaluateAll };
+		return { evaluateAllResponse: evaluateAll };
 	});
 	return evaluateAll;
 }
@@ -38,6 +57,7 @@ async function initialized(flags: FlagshipBulkEvaluationResult[], options: { log
 describe('FlagshipClientProvider', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		FakeEventSource.instances = [];
 	});
 
 	describe('constructor', () => {
@@ -282,7 +302,7 @@ describe('FlagshipClientProvider', () => {
 		});
 
 		it('discards an in-flight initialize on close without emitting READY', async () => {
-			let resolveEvaluate!: (flags: FlagshipBulkEvaluationResult[]) => void;
+			let resolveEvaluate!: (response: { flags: FlagshipBulkEvaluationResult[] }) => void;
 			const evaluateAll = mockBulk();
 			evaluateAll.mockReturnValueOnce(new Promise((resolve) => (resolveEvaluate = resolve)));
 			const provider = new FlagshipClientProvider({ endpoint });
@@ -291,7 +311,7 @@ describe('FlagshipClientProvider', () => {
 
 			const initializing = provider.initialize({});
 			await provider.onClose();
-			resolveEvaluate([{ key: 'f', value: true, reason: 'DEFAULT', variant: 'on' }]);
+			resolveEvaluate({ flags: [{ key: 'f', value: true, reason: 'DEFAULT', variant: 'on' }] });
 			await initializing;
 
 			expect(onReady).not.toHaveBeenCalled();
@@ -303,6 +323,53 @@ describe('FlagshipClientProvider', () => {
 			const provider = await initialized([]);
 			await provider.onClose();
 			await expect(provider.onClose()).resolves.toBeUndefined();
+		});
+	});
+
+	describe('SSE change detection', () => {
+		it('refreshes the notified version before emitting configuration changed', async () => {
+			const evaluateAllResponse = vi
+				.fn()
+				.mockResolvedValueOnce({
+					flags: [{ key: 'f', value: true, reason: 'DEFAULT', variant: 'on' }],
+					metadata: { version: 'v1' },
+					eventStreams: [{ type: 'sse', url: 'https://events.example.com/ticket' }],
+				})
+				.mockResolvedValueOnce({
+					flags: [{ key: 'f', value: true, reason: 'DEFAULT', variant: 'on' }],
+					metadata: { version: 'v2' },
+					eventStreams: [{ type: 'sse', url: 'https://events.example.com/ticket-2' }],
+				});
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluateAllResponse };
+			});
+			const provider = new FlagshipClientProvider({ endpoint, eventSource: FakeEventSource as unknown as typeof EventSource });
+			const onChanged = vi.fn();
+			provider.events.addHandler(ProviderEvents.ConfigurationChanged, onChanged);
+			await provider.initialize({ targetingKey: 'user' });
+
+			FakeEventSource.instances[0]!.emit('message', JSON.stringify({ type: 'refetchEvaluation', etag: 'v2' }));
+			await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+
+			expect(evaluateAllResponse).toHaveBeenLastCalledWith({ targetingKey: 'user' }, 'v2');
+			await provider.onClose();
+		});
+
+		it('can disable background change detection', async () => {
+			const evaluateAllResponse = vi.fn().mockResolvedValue({
+				flags: [],
+				metadata: { version: 'v1' },
+				eventStreams: [{ type: 'sse', url: 'https://events.example.com/ticket' }],
+			});
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluateAllResponse };
+			});
+			await new FlagshipClientProvider({
+				endpoint,
+				changeDetection: 'none',
+				eventSource: FakeEventSource as unknown as typeof EventSource,
+			}).initialize({});
+			expect(FakeEventSource.instances).toHaveLength(0);
 		});
 	});
 

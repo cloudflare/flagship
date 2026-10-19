@@ -1,7 +1,8 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/web-sdk';
 import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError, ProviderStatus } from '@openfeature/web-sdk';
 import { FlagshipClient, isAuthFailure } from './client.js';
-import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js';
+import { SseManager } from './sse-manager.js';
+import { type FlagshipBulkEvaluationResponse, type FlagshipClientProviderOptions, type CachedFlag } from './types.js';
 
 const ERROR_CODES = new Set<string>(Object.values(ErrorCode));
 
@@ -44,8 +45,13 @@ export class FlagshipClientProvider implements Provider {
 	private client: FlagshipClient;
 	private readonly logging: boolean;
 	private readonly pollInterval: number;
+	private readonly changeDetection: 'sse' | 'polling' | 'none';
+	private readonly EventSourceImpl?: typeof EventSource;
+	private readonly inactivityDelaySec?: number;
 	private timer?: ReturnType<typeof setTimeout>;
+	private sse?: SseManager;
 	private currentStatus: ProviderStatus = ProviderStatus.NOT_READY;
+	private currentVersion?: string;
 	private epoch = 0;
 
 	constructor(options: FlagshipClientProviderOptions) {
@@ -53,6 +59,9 @@ export class FlagshipClientProvider implements Provider {
 		this.client = new FlagshipClient(resolveRelativeEndpoint(options));
 		this.logging = options.logging ?? false;
 		this.pollInterval = options.pollInterval ?? 0;
+		this.changeDetection = options.changeDetection ?? 'sse';
+		this.EventSourceImpl = options.eventSource ?? globalThis.EventSource;
+		this.inactivityDelaySec = options.inactivityDelaySec;
 	}
 
 	get status(): ProviderStatus {
@@ -66,7 +75,10 @@ export class FlagshipClientProvider implements Provider {
 	async onClose(): Promise<void> {
 		this.epoch += 1;
 		clearTimeout(this.timer);
+		this.sse?.disconnect();
+		this.sse = undefined;
 		this.cache.clear();
+		this.currentVersion = undefined;
 		this.currentStatus = ProviderStatus.NOT_READY;
 	}
 
@@ -110,53 +122,91 @@ export class FlagshipClientProvider implements Provider {
 	private async load(context: EvaluationContext, phase: string): Promise<boolean> {
 		const epoch = ++this.epoch;
 		clearTimeout(this.timer);
+		this.sse?.disconnect();
 		try {
-			const flags = await this.fetchAll(context, phase);
+			const response = await this.fetchAll(context, phase);
 			if (epoch !== this.epoch) return false;
-			this.cache = flags;
+			this.cache = toCache(response);
+			this.currentVersion = response.metadata?.version;
 			this.currentStatus = ProviderStatus.READY;
+			this.connectSse(response, context, epoch);
 			this.schedulePoll(context, epoch);
 			return true;
 		} catch (error) {
-			if (epoch === this.epoch) {
-				this.currentStatus = error instanceof ProviderFatalError ? ProviderStatus.FATAL : ProviderStatus.ERROR;
-			}
+			if (epoch === this.epoch) this.currentStatus = error instanceof ProviderFatalError ? ProviderStatus.FATAL : ProviderStatus.ERROR;
 			throw error;
 		}
 	}
 
+	private connectSse(response: FlagshipBulkEvaluationResponse, context: EvaluationContext, epoch: number): void {
+		if (this.changeDetection !== 'sse' || !this.EventSourceImpl || !response.eventStreams?.length) return;
+		this.sse ??= new SseManager(
+			{
+				onRefetch: (metadata) => void this.refresh(context, epoch, metadata?.etag, true),
+				onStale: (message) => {
+					this.markStale(message);
+					void this.refresh(context, epoch, undefined, false);
+				},
+				onReady: () => this.recover(),
+			},
+			this.EventSourceImpl,
+			this.inactivityDelaySec,
+		);
+		this.sse.connect(response.eventStreams);
+	}
+
 	private schedulePoll(context: EvaluationContext, epoch: number): void {
-		if (this.pollInterval <= 0) return;
+		if (this.changeDetection === 'none' || this.pollInterval <= 0) return;
 		this.timer = setTimeout(async () => {
-			try {
-				const flags = await this.fetchAll(context, 'refresh');
-				if (epoch !== this.epoch) return;
-				const flagsChanged = changedKeys(this.cache, flags);
-				this.cache = flags;
-				if (this.currentStatus === ProviderStatus.STALE) {
-					this.currentStatus = ProviderStatus.READY;
-					this.events.emit(ProviderEvents.Ready);
-				}
-				if (flagsChanged.length > 0) this.events.emit(ProviderEvents.ConfigurationChanged, { flagsChanged });
-			} catch (error) {
-				if (epoch !== this.epoch) return;
-				if (this.currentStatus === ProviderStatus.READY) {
-					this.currentStatus = ProviderStatus.STALE;
-					this.events.emit(ProviderEvents.Stale, { message: error instanceof Error ? error.message : String(error) });
-				}
-			}
+			await this.refresh(context, epoch, undefined, false);
 			this.schedulePoll(context, epoch);
 		}, this.pollInterval);
+	}
+
+	private async refresh(
+		context: EvaluationContext,
+		epoch: number,
+		expectedVersion: string | undefined,
+		configurationEvent: boolean,
+	): Promise<void> {
+		try {
+			const response = await this.fetchAll(context, 'refresh', expectedVersion);
+			if (epoch !== this.epoch) return;
+			const next = toCache(response);
+			const flagsChanged = changedKeys(this.cache, next);
+			const versionChanged = Boolean(response.metadata?.version && response.metadata.version !== this.currentVersion);
+			this.cache = next;
+			this.currentVersion = response.metadata?.version ?? this.currentVersion;
+			this.recover();
+			this.connectSse(response, context, epoch);
+			if (configurationEvent || versionChanged || flagsChanged.length > 0) {
+				this.events.emit(ProviderEvents.ConfigurationChanged, flagsChanged.length > 0 ? { flagsChanged } : undefined);
+			}
+		} catch (error) {
+			if (epoch !== this.epoch) return;
+			this.markStale(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private markStale(message: string): void {
+		if (this.currentStatus !== ProviderStatus.READY) return;
+		this.currentStatus = ProviderStatus.STALE;
+		this.events.emit(ProviderEvents.Stale, { message });
+	}
+
+	private recover(): void {
+		if (this.currentStatus !== ProviderStatus.STALE) return;
+		this.currentStatus = ProviderStatus.READY;
+		this.events.emit(ProviderEvents.Ready);
 	}
 
 	/**
 	 * Evaluates every flag for `context`. Throws when the request fails, with
 	 * `PROVIDER_FATAL` on a 401 or 403.
 	 */
-	private async fetchAll(context: EvaluationContext, phase: string): Promise<Map<string, CachedFlag>> {
+	private async fetchAll(context: EvaluationContext, phase: string, expectedVersion?: string): Promise<FlagshipBulkEvaluationResponse> {
 		try {
-			const flags = await this.client.evaluateAll(context);
-			return new Map(flags.map(({ key, ...flag }) => [key, flag]));
+			return await (expectedVersion ? this.client.evaluateAllResponse(context, expectedVersion) : this.client.evaluateAllResponse(context));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			if (this.logging) console.warn(`[Flagship] Failed to evaluate flags during ${phase}: ${message}`);
@@ -238,6 +288,10 @@ function resolveRelativeEndpoint(options: FlagshipClientProviderOptions): Flagsh
 	}
 
 	return { ...options, endpoint: `${window.location.origin}${endpoint}` };
+}
+
+function toCache(response: FlagshipBulkEvaluationResponse): Map<string, CachedFlag> {
+	return new Map(response.flags.map(({ key, ...flag }) => [key, flag]));
 }
 
 function changedKeys(previous: Map<string, CachedFlag>, next: Map<string, CachedFlag>): string[] {

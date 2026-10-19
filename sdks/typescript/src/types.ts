@@ -158,6 +158,30 @@ export interface FlagshipClientProviderOptions extends FlagshipProviderOptions {
 	 * change. Disabled by default.
 	 */
 	pollInterval?: number;
+	changeDetection?: 'sse' | 'polling' | 'none';
+	eventSource?: typeof EventSource;
+	inactivityDelaySec?: number;
+}
+
+export interface FlagshipEventStream {
+	type: string;
+	url?: string;
+	endpoint?: { origin?: string; requestUri: string };
+	inactivityDelaySec?: number;
+}
+
+export interface FlagshipBulkEvaluationResponse {
+	flags: FlagshipBulkEvaluationResult[];
+	eventStreams?: FlagshipEventStream[];
+	metadata?: { version?: string };
+	etag?: string;
+}
+
+export interface FlagshipDefinitionsResponse {
+	flags: Record<string, unknown>;
+	etag: string;
+	eventStreams?: FlagshipEventStream[];
+	metadata?: { version?: string };
 }
 
 /**
@@ -222,7 +246,9 @@ export interface FlagshipEvaluationResponse {
  * }
  * ```
  */
-export type FlagshipBinding = Flagship;
+export type FlagshipBinding = Flagship & {
+	getConfigurationVersion?(): Promise<string | null>;
+};
 
 /**
  * Evaluation details returned by the Flagship binding's `*Details` methods.
@@ -255,6 +281,8 @@ export interface FlagshipBindingProviderOptions {
 	 * @default false
 	 */
 	logging?: boolean;
+
+	configurationVersionCheckInterval?: number;
 }
 
 /**
@@ -304,6 +332,9 @@ export interface FlagshipLocalEvaluationOptions {
 	 * @default 30_000
 	 */
 	refreshInterval?: number;
+	configurationEvents?: boolean;
+	eventSource?: typeof EventSource;
+	inactivityDelaySec?: number;
 }
 
 /**

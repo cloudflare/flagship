@@ -2,6 +2,7 @@ import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, Provide
 import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError } from '@openfeature/server-sdk';
 import { LRUCache } from 'lru-cache';
 import { FlagshipClient, isAuthFailure, resolveDefinitionsEndpoint } from './client.js';
+import { SseManager } from './sse-manager.js';
 import { normalizeEvaluationContext, type NormalizedContextValue } from './context.js';
 import { evaluateFlag, FlagConfigError, type EvalFlag } from './local/evaluate.js';
 import {
@@ -10,11 +11,13 @@ import {
 	isBindingOptions,
 	type FlagshipBinding,
 	type FlagshipBindingEvaluationDetails,
+	type FlagshipEventStream,
 	type FlagshipServerProviderOptions,
 } from './types.js';
 
 const DEFAULT_CACHE_MAX_SIZE = 1000;
 const DEFAULT_REFRESH_INTERVAL_MS = 30_000;
+const DEFAULT_BINDING_VERSION_CHECK_INTERVAL_MS = 30_000;
 type ExpectedType = 'boolean' | 'string' | 'number' | 'object';
 
 // Shared no-op used to build a silent logger when logging is false.
@@ -34,6 +37,9 @@ const HTTP_ONLY_FIELDS = [
 	'retryDelay',
 	'localEvaluation',
 	'refreshInterval',
+	'configurationEvents',
+	'eventSource',
+	'inactivityDelaySec',
 ] as const;
 
 /**
@@ -108,6 +114,14 @@ export class FlagshipServerProvider implements Provider {
 	private readonly localEvaluation: boolean;
 	private readonly refreshInterval: number;
 	private readonly accountId: string | undefined;
+	private readonly configurationEvents: boolean;
+	private readonly EventSourceImpl?: typeof EventSource;
+	private readonly inactivityDelaySec?: number;
+	private eventSse?: SseManager;
+	private readonly bindingVersionCheckInterval: number;
+	private bindingVersion?: string;
+	private bindingVersionCheckedAt = 0;
+	private bindingVersionInFlight?: Promise<void>;
 
 	/** TTL + LRU response cache; `undefined` when caching is disabled. */
 	private readonly cache: LRUCache<string, ResolutionDetails<unknown>> | undefined;
@@ -142,9 +156,18 @@ export class FlagshipServerProvider implements Provider {
 		this.logging = options.logging ?? false;
 		this.localEvaluation = options.localEvaluation === true;
 		this.refreshInterval = options.refreshInterval ?? DEFAULT_REFRESH_INTERVAL_MS;
+		this.configurationEvents = options.configurationEvents === true;
+		this.EventSourceImpl = options.eventSource ?? globalThis.EventSource;
+		this.inactivityDelaySec = options.inactivityDelaySec;
+		this.bindingVersionCheckInterval = isBindingOptions(options)
+			? (options.configurationVersionCheckInterval ?? DEFAULT_BINDING_VERSION_CHECK_INTERVAL_MS)
+			: 0;
 
 		if (this.localEvaluation && (!Number.isFinite(this.refreshInterval) || this.refreshInterval <= 0)) {
 			throw new Error('Flagship: "refreshInterval" must be a finite number of milliseconds greater than 0');
+		}
+		if (this.configurationEvents && !this.EventSourceImpl) {
+			throw new Error('Flagship: configurationEvents requires an EventSource implementation');
 		}
 
 		if (options.cacheTtl !== undefined && options.cacheTtl > 0) {
@@ -200,7 +223,11 @@ export class FlagshipServerProvider implements Provider {
 	 * Failure puts the OpenFeature provider in ERROR.
 	 */
 	async initialize(): Promise<void> {
-		if (!this.localEvaluation || !this.client) return;
+		if (!this.client) return;
+		if (!this.localEvaluation) {
+			if (this.configurationEvents) await this.initializeRemoteEvents();
+			return;
+		}
 		// Bump the epoch so any refresh still in flight from a prior session is
 		// ignored when it resolves. Drop residual state before the blocking fetch.
 		this.epoch += 1;
@@ -216,6 +243,41 @@ export class FlagshipServerProvider implements Provider {
 		if (epoch === this.epoch) this.localReady = true;
 	}
 
+	private async initializeRemoteEvents(): Promise<void> {
+		const epoch = ++this.epoch;
+		const response = await this.client!.evaluateAllResponse({});
+		if (epoch !== this.epoch) return;
+		this.connectRemoteSse(response.eventStreams, epoch);
+	}
+
+	private connectRemoteSse(streams: FlagshipEventStream[] | undefined, epoch: number): void {
+		if (!this.EventSourceImpl || !streams?.length) return;
+		this.eventSse ??= new SseManager(
+			{
+				onRefetch: (metadata) => void this.refreshRemoteEvents(epoch, metadata?.etag),
+				onStale: (message) => this.markStale(message),
+				onReady: () => this.recover(),
+			},
+			this.EventSourceImpl,
+			this.inactivityDelaySec,
+		);
+		this.eventSse.connect(streams);
+	}
+
+	private async refreshRemoteEvents(epoch: number, expectedVersion?: string): Promise<void> {
+		try {
+			const response = await this.client!.evaluateAllResponse({}, expectedVersion);
+			if (epoch !== this.epoch) return;
+			this.cache?.clear();
+			this.recover();
+			this.connectRemoteSse(response.eventStreams, epoch);
+			this.events.emit(ProviderEvents.ConfigurationChanged);
+		} catch (error) {
+			if (epoch !== this.epoch) return;
+			this.markStale(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	async onClose(): Promise<void> {
 		// Bump the epoch so in-flight fetches observe a stale generation and
 		// refuse to write. Clearing refreshInFlight is safe: the old promise
@@ -227,6 +289,11 @@ export class FlagshipServerProvider implements Provider {
 		this.etag = undefined;
 		this.lastFetch = 0;
 		this.refreshInFlight = undefined;
+		this.bindingVersion = undefined;
+		this.bindingVersionCheckedAt = 0;
+		this.bindingVersionInFlight = undefined;
+		this.eventSse?.disconnect();
+		this.eventSse = undefined;
 		this.cache?.clear();
 	}
 
@@ -277,6 +344,7 @@ export class FlagshipServerProvider implements Provider {
 		expectedType: ExpectedType,
 		logger: Logger,
 	): Promise<ResolutionDetails<T>> {
+		await this.maybeRefreshBindingVersion();
 		if (!this.cache) {
 			return this.resolve(flagKey, defaultValue, context, expectedType, logger);
 		}
@@ -297,6 +365,28 @@ export class FlagshipServerProvider implements Provider {
 			this.cache.set(key, result as ResolutionDetails<unknown>);
 		}
 		return result;
+	}
+
+	private async maybeRefreshBindingVersion(): Promise<void> {
+		const getVersion = this.binding?.getConfigurationVersion;
+		if (!getVersion || this.bindingVersionCheckInterval <= 0) return;
+		if (Date.now() - this.bindingVersionCheckedAt < this.bindingVersionCheckInterval) return;
+		if (this.bindingVersionInFlight) return this.bindingVersionInFlight;
+		this.bindingVersionCheckedAt = Date.now();
+		const pending = (async () => {
+			const version = await getVersion.call(this.binding);
+			if (version && this.bindingVersion && version !== this.bindingVersion) {
+				this.cache?.clear();
+				this.events.emit(ProviderEvents.ConfigurationChanged);
+			}
+			this.bindingVersion = version ?? undefined;
+		})();
+		this.bindingVersionInFlight = pending;
+		try {
+			await pending;
+		} finally {
+			if (this.bindingVersionInFlight === pending) this.bindingVersionInFlight = undefined;
+		}
 	}
 
 	// ---------------------------------------------------------------------------
@@ -426,9 +516,17 @@ export class FlagshipServerProvider implements Provider {
 		});
 	}
 
-	private async fetchAndApplySnapshot(initial: boolean, log: Logger | undefined, epoch: number): Promise<void> {
+	private async fetchAndApplySnapshot(
+		initial: boolean,
+		log: Logger | undefined,
+		epoch: number,
+		expectedVersion?: string,
+		configurationEvent = false,
+	): Promise<void> {
 		try {
-			const result = await this.client!.fetchDefinitions(this.etag);
+			const previous = this.snapshot;
+			const previousEtag = this.etag;
+			const result = await this.client!.fetchDefinitionsResponse(this.etag, expectedVersion);
 			// Stale session (closed or superseded by a newer initialize).
 			if (epoch !== this.epoch) return;
 
@@ -449,6 +547,11 @@ export class FlagshipServerProvider implements Provider {
 			this.lastFetch = Date.now();
 			this.recover();
 			log?.debug(`[Flagship] Definitions snapshot updated (${Object.keys(this.snapshot).length} flags)`);
+			this.connectLocalSse(result.eventStreams, epoch);
+			if (!initial && (configurationEvent || this.etag !== previousEtag)) {
+				const flagsChanged = changedDefinitionKeys(previous, this.snapshot);
+				this.events.emit(ProviderEvents.ConfigurationChanged, flagsChanged.length > 0 ? { flagsChanged } : undefined);
+			}
 		} catch (error) {
 			if (epoch !== this.epoch) return;
 			this.lastFetch = Date.now();
@@ -457,6 +560,20 @@ export class FlagshipServerProvider implements Provider {
 			this.markStale(message);
 			log?.warn(`[Flagship] Definitions refresh failed; keeping last good snapshot: ${message}`);
 		}
+	}
+
+	private connectLocalSse(streams: FlagshipEventStream[] | undefined, epoch: number): void {
+		if (!this.configurationEvents || !this.EventSourceImpl || !streams?.length) return;
+		this.eventSse ??= new SseManager(
+			{
+				onRefetch: (metadata) => void this.fetchAndApplySnapshot(false, undefined, epoch, metadata?.etag, true),
+				onStale: (message) => this.markStale(message),
+				onReady: () => this.recover(),
+			},
+			this.EventSourceImpl,
+			this.inactivityDelaySec,
+		);
+		this.eventSse.connect(streams);
 	}
 
 	private markStale(message: string): void {
@@ -582,6 +699,13 @@ function finalizeEvaluation<T>(
  * `null` maps to `'object'` (typeof null === 'object'), treating it as a
  * JSON null which belongs to the object/structure category.
  */
+function changedDefinitionKeys(previous: Record<string, EvalFlag> | undefined, next: Record<string, EvalFlag>): string[] {
+	if (!previous) return [];
+	return [...new Set([...Object.keys(previous), ...Object.keys(next)])].filter(
+		(key) => JSON.stringify(previous[key]) !== JSON.stringify(next[key]),
+	);
+}
+
 function getValueType(value: unknown): ExpectedType {
 	if (typeof value === 'boolean') return 'boolean';
 	if (typeof value === 'string') return 'string';

@@ -8,6 +8,7 @@ from typing import Any
 
 from cachetools import TTLCache
 from openfeature.evaluation_context import EvaluationContext
+from openfeature.event import ProviderEventDetails
 from openfeature.exception import (
     FlagNotFoundError,
     GeneralError,
@@ -137,6 +138,7 @@ class FlagshipServerProvider(AbstractProvider):
         # after close or re-init. A boolean "closed" flag is not enough.
         self._epoch = 0
         self._lifecycle_lock = threading.Lock()
+        self._stale = False
 
     def get_metadata(self) -> Metadata:
         return Metadata(name="Flagship Server Provider")
@@ -160,6 +162,7 @@ class FlagshipServerProvider(AbstractProvider):
             self._epoch += 1
             epoch = self._epoch
             self._snapshot = None
+            self._stale = False
             self._stop_event.set()
             old_thread = self._refresh_thread
             self._refresh_thread = None
@@ -201,6 +204,7 @@ class FlagshipServerProvider(AbstractProvider):
             # refuse to write.
             self._epoch += 1
             self._snapshot = None
+            self._stale = False
             self._stop_event.set()
             thread = self._refresh_thread
             self._refresh_thread = None
@@ -420,19 +424,33 @@ class FlagshipServerProvider(AbstractProvider):
 
             if result is None:
                 self._log_debug("[Flagship] Definitions not modified (304)")
+                if self._stale:
+                    self._stale = False
+                    self.emit_provider_ready(ProviderEventDetails())
                 return
 
             flags, new_etag = result
-            # Assignment of the tuple is atomic under the GIL.
+            previous_flags = self._snapshot[1] if self._snapshot is not None else {}
             self._snapshot = (new_etag, flags)
             if not new_etag:
                 self._log_debug("[Flagship] Definitions response had no ETag; conditional refresh (304) is unavailable")
             self._log_debug("[Flagship] Definitions snapshot updated (%d flags)", len(flags))
+            if self._stale:
+                self._stale = False
+                self.emit_provider_ready(ProviderEventDetails())
+            if not initial and new_etag != current_etag:
+                changed = sorted(
+                    key for key in set(previous_flags) | set(flags) if previous_flags.get(key) != flags.get(key)
+                )
+                self.emit_provider_configuration_changed(ProviderEventDetails(flags_changed=changed or None))
         except Exception as error:
             if epoch != self._epoch:
                 return
             if initial:
                 raise
+            if not self._stale:
+                self._stale = True
+                self.emit_provider_stale(ProviderEventDetails(message=str(error)))
             self._log_error(
                 "[Flagship] Definitions refresh failed; keeping last good snapshot: %s",
                 error,

@@ -206,6 +206,9 @@ export class FlagshipClientProvider implements Provider {
 	 */
 	private async fetchAll(context: EvaluationContext, phase: string, expectedVersion?: string): Promise<FlagshipBulkEvaluationResponse> {
 		try {
+			if (this.changeDetection === 'sse' && this.EventSourceImpl !== undefined) {
+				return await this.client.evaluateAllResponse(context, expectedVersion, undefined, true);
+			}
 			return await (expectedVersion ? this.client.evaluateAllResponse(context, expectedVersion) : this.client.evaluateAllResponse(context));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

@@ -153,6 +153,23 @@ describe('FlagshipClient.fetchDefinitions', () => {
 		expect(new Headers(init.headers).get('If-None-Match')).toBe('"abc"');
 	});
 
+	it('requests event stream advertisement when enabled', async () => {
+		const fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: new Headers({ etag: '"abc"' }),
+			json: async () => ({ flags: {} }),
+		});
+		const client = new FlagshipClient({ appId: 'app-1', accountId: 'acct-1', fetch });
+
+		await client.fetchDefinitionsResponse(undefined, undefined, undefined, true);
+
+		const call = fetch.mock.calls[0];
+		if (!call) throw new Error('expected a definitions request');
+		const init = call[1] as RequestInit;
+		expect(new Headers(init.headers).get('Flagship-Event-Stream')).toBe('sse');
+	});
+
 	it('rejects malformed definitions payload', async () => {
 		const fetch = vi.fn().mockResolvedValue({
 			ok: true,

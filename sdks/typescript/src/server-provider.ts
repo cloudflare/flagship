@@ -245,7 +245,7 @@ export class FlagshipServerProvider implements Provider {
 
 	private async initializeRemoteEvents(): Promise<void> {
 		const epoch = ++this.epoch;
-		const response = await this.client!.evaluateAllResponse({});
+		const response = await this.client!.evaluateAllResponse({}, undefined, undefined, true);
 		if (epoch !== this.epoch) return;
 		this.connectRemoteSse(response.eventStreams, epoch);
 	}
@@ -255,7 +255,10 @@ export class FlagshipServerProvider implements Provider {
 		this.eventSse ??= new SseManager(
 			{
 				onRefetch: (metadata) => void this.refreshRemoteEvents(epoch, metadata?.etag),
-				onStale: (message) => this.markStale(message),
+				onStale: (message) => {
+					this.markStale(message);
+					void this.refreshRemoteEvents(epoch, undefined, false);
+				},
 				onReady: () => this.recover(),
 			},
 			this.EventSourceImpl,
@@ -264,14 +267,14 @@ export class FlagshipServerProvider implements Provider {
 		this.eventSse.connect(streams);
 	}
 
-	private async refreshRemoteEvents(epoch: number, expectedVersion?: string): Promise<void> {
+	private async refreshRemoteEvents(epoch: number, expectedVersion?: string, configurationEvent = true): Promise<void> {
 		try {
-			const response = await this.client!.evaluateAllResponse({}, expectedVersion);
+			const response = await this.client!.evaluateAllResponse({}, expectedVersion, undefined, true);
 			if (epoch !== this.epoch) return;
 			this.cache?.clear();
 			this.recover();
 			this.connectRemoteSse(response.eventStreams, epoch);
-			this.events.emit(ProviderEvents.ConfigurationChanged);
+			if (configurationEvent) this.events.emit(ProviderEvents.ConfigurationChanged);
 		} catch (error) {
 			if (epoch !== this.epoch) return;
 			this.markStale(error instanceof Error ? error.message : String(error));
@@ -526,7 +529,7 @@ export class FlagshipServerProvider implements Provider {
 		try {
 			const previous = this.snapshot;
 			const previousEtag = this.etag;
-			const result = await this.client!.fetchDefinitionsResponse(this.etag, expectedVersion);
+			const result = await this.client!.fetchDefinitionsResponse(this.etag, expectedVersion, undefined, this.configurationEvents);
 			// Stale session (closed or superseded by a newer initialize).
 			if (epoch !== this.epoch) return;
 
@@ -567,7 +570,10 @@ export class FlagshipServerProvider implements Provider {
 		this.eventSse ??= new SseManager(
 			{
 				onRefetch: (metadata) => void this.fetchAndApplySnapshot(false, undefined, epoch, metadata?.etag, true),
-				onStale: (message) => this.markStale(message),
+				onStale: (message) => {
+					this.markStale(message);
+					void this.fetchAndApplySnapshot(false, undefined, epoch);
+				},
 				onReady: () => this.recover(),
 			},
 			this.EventSourceImpl,

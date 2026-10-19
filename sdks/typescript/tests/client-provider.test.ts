@@ -351,7 +351,7 @@ describe('FlagshipClientProvider', () => {
 			FakeEventSource.instances[0]!.emit('message', JSON.stringify({ type: 'refetchEvaluation', etag: 'v2' }));
 			await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
 
-			expect(evaluateAllResponse).toHaveBeenLastCalledWith({ targetingKey: 'user' }, 'v2');
+			expect(evaluateAllResponse).toHaveBeenLastCalledWith({ targetingKey: 'user' }, 'v2', undefined, true);
 			await provider.onClose();
 		});
 

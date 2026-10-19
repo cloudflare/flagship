@@ -623,6 +623,17 @@ describe('FlagshipClient', () => {
 			expect(JSON.parse(init.body)).toEqual({ context: { targetingKey: 'user-1', nested: { plan: 'pro' } } });
 		});
 
+		it('requests event stream advertisement only when enabled', async () => {
+			(global.fetch as any).mockImplementation(() => Promise.resolve(Response.json({ flags: [] })));
+			const instance = client();
+
+			await instance.evaluateAllResponse({}, undefined, undefined, true);
+			expect((global.fetch as any).mock.calls[0][1].headers.get('Flagship-Event-Stream')).toBe('sse');
+
+			await instance.evaluateAllResponse({});
+			expect((global.fetch as any).mock.calls[1][1].headers.get('Flagship-Event-Stream')).toBeNull();
+		});
+
 		it('derives the bulk endpoint from appId and accountId', async () => {
 			(global.fetch as any).mockResolvedValueOnce(Response.json({ flags: [] }));
 

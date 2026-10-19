@@ -96,6 +96,7 @@ export class FlagshipClient {
 		context: EvaluationContext,
 		flagConfigEtag?: string,
 		options?: FlagshipRequestOptions,
+		requestEventStream = false,
 	): Promise<FlagshipBulkEvaluationResponse> {
 		const endpoint = this.options.bulkEndpoint;
 		if (!endpoint) {
@@ -103,7 +104,11 @@ export class FlagshipClient {
 		}
 		const url = new URL(endpoint);
 		if (flagConfigEtag) url.searchParams.set('flagConfigEtag', flagConfigEtag);
-		const request = buildPostRequest(url.toString(), { context: normalizeEvaluationContext(context).context }, this.options.fetchOptions);
+		const request = buildPostRequest(
+			url.toString(),
+			{ context: normalizeEvaluationContext(context).context },
+			withEventStreamCapability(this.options.fetchOptions, requestEventStream),
+		);
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
 		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseBulkResponse);
@@ -129,6 +134,7 @@ export class FlagshipClient {
 		etag?: string,
 		flagConfigEtag?: string,
 		options?: FlagshipRequestOptions,
+		requestEventStream = false,
 	): Promise<FlagshipDefinitionsResponse | 'not-modified'> {
 		const endpoint = this.options.definitionsEndpoint;
 		if (!endpoint) {
@@ -137,11 +143,12 @@ export class FlagshipClient {
 		}
 		const url = new URL(endpoint);
 		if (flagConfigEtag) url.searchParams.set('flagConfigEtag', flagConfigEtag);
-		const headers = new Headers(this.options.fetchOptions.headers);
+		const requestOptions = withEventStreamCapability(this.options.fetchOptions, requestEventStream);
+		const headers = new Headers(requestOptions.headers);
 		if (etag) headers.set('If-None-Match', etag);
 		const request: EvaluationRequest = {
 			url: url.toString(),
-			init: { ...this.options.fetchOptions, method: 'GET', headers },
+			init: { ...requestOptions, method: 'GET', headers },
 		};
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -228,6 +235,13 @@ export class FlagshipClient {
 			merged.dispose();
 		}
 	}
+}
+
+function withEventStreamCapability(options: RequestInit, enabled: boolean): RequestInit {
+	if (!enabled) return options;
+	const headers = new Headers(options.headers);
+	headers.set('Flagship-Event-Stream', 'sse');
+	return { ...options, headers };
 }
 
 async function parseEvaluationResponse(response: Response): Promise<FlagshipEvaluationResponse> {

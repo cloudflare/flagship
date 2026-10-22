@@ -129,6 +129,8 @@ export class FlagshipServerProvider implements Provider {
 	/** Immutable definitions snapshot swapped atomically on refresh. */
 	private snapshot: Record<string, EvalFlag> | undefined;
 	private etag: string | undefined;
+	/** Configuration version of the current snapshot, compared against event versions. */
+	private version: string | undefined;
 	private lastFetch = 0;
 	private refreshInFlight: Promise<void> | undefined;
 	/**
@@ -235,6 +237,7 @@ export class FlagshipServerProvider implements Provider {
 		this.stale = false;
 		this.snapshot = undefined;
 		this.etag = undefined;
+		this.version = undefined;
 		this.lastFetch = 0;
 		this.refreshInFlight = undefined;
 		const epoch = this.epoch;
@@ -251,10 +254,10 @@ export class FlagshipServerProvider implements Provider {
 	}
 
 	private connectRemoteSse(streams: FlagshipEventStream[] | undefined, epoch: number): void {
-		if (!this.EventSourceImpl || !streams?.length) return;
+		if (!this.EventSourceImpl || !streams?.length || this.eventSse?.active) return;
 		this.eventSse ??= new SseManager(
 			{
-				onRefetch: (metadata) => void this.refreshRemoteEvents(epoch, metadata?.etag),
+				onRefetch: (metadata, attempt) => this.refreshRemoteEvents(epoch, metadata?.etag, attempt === 0),
 				onStale: (message) => {
 					this.markStale(message);
 					void this.refreshRemoteEvents(epoch, undefined, false);
@@ -267,17 +270,19 @@ export class FlagshipServerProvider implements Provider {
 		this.eventSse.connect(streams);
 	}
 
-	private async refreshRemoteEvents(epoch: number, expectedVersion?: string, configurationEvent = true): Promise<void> {
+	private async refreshRemoteEvents(epoch: number, expectedVersion?: string, configurationEvent = true): Promise<string | undefined> {
 		try {
-			const response = await this.client!.evaluateAllResponse({}, expectedVersion, undefined, true);
-			if (epoch !== this.epoch) return;
+			const response = await this.client!.evaluateAllResponse({}, expectedVersion, undefined, !this.eventSse?.active);
+			if (epoch !== this.epoch) return undefined;
 			this.cache?.clear();
 			this.recover();
 			this.connectRemoteSse(response.eventStreams, epoch);
 			if (configurationEvent) this.events.emit(ProviderEvents.ConfigurationChanged);
+			return response.metadata?.version;
 		} catch (error) {
-			if (epoch !== this.epoch) return;
+			if (epoch !== this.epoch) return undefined;
 			this.markStale(error instanceof Error ? error.message : String(error));
+			return undefined;
 		}
 	}
 
@@ -290,6 +295,7 @@ export class FlagshipServerProvider implements Provider {
 		this.stale = false;
 		this.snapshot = undefined;
 		this.etag = undefined;
+		this.version = undefined;
 		this.lastFetch = 0;
 		this.refreshInFlight = undefined;
 		this.bindingVersion = undefined;
@@ -510,7 +516,7 @@ export class FlagshipServerProvider implements Provider {
 		if (Date.now() - this.lastFetch < this.refreshInterval) return;
 
 		const epoch = this.epoch;
-		const pending = this.fetchAndApplySnapshot(false, log, epoch);
+		const pending = this.fetchAndApplySnapshot(false, log, epoch).then(() => undefined);
 		this.refreshInFlight = pending;
 		void pending.finally(() => {
 			// Only clear the slot if we still own it — a later initialize/onClose
@@ -525,20 +531,29 @@ export class FlagshipServerProvider implements Provider {
 		epoch: number,
 		expectedVersion?: string,
 		configurationEvent = false,
-	): Promise<void> {
+	): Promise<string | undefined> {
 		try {
 			const previous = this.snapshot;
 			const previousEtag = this.etag;
-			const result = await this.client!.fetchDefinitionsResponse(this.etag, expectedVersion, undefined, this.configurationEvents);
+			// A 304 carries no stream descriptor, so skip the conditional request
+			// whenever a replacement stream is needed.
+			const requestStream = this.configurationEvents && !this.eventSse?.active;
+			const result = await this.client!.fetchDefinitionsResponse(
+				requestStream ? undefined : this.etag,
+				expectedVersion,
+				undefined,
+				requestStream,
+			);
 			// Stale session (closed or superseded by a newer initialize).
-			if (epoch !== this.epoch) return;
+			if (epoch !== this.epoch) return undefined;
 
 			if (result === 'not-modified') {
 				this.lastFetch = Date.now();
 				this.recover();
 				log?.debug('[Flagship] Definitions not modified (304)');
-				return;
+				return this.version;
 			}
+			this.version = result.metadata?.version;
 
 			// Only validate the top-level shape; individual malformed flags are
 			// left in the snapshot and surface PARSE_ERROR at evaluation time.
@@ -555,21 +570,23 @@ export class FlagshipServerProvider implements Provider {
 				const flagsChanged = changedDefinitionKeys(previous, this.snapshot);
 				this.events.emit(ProviderEvents.ConfigurationChanged, flagsChanged.length > 0 ? { flagsChanged } : undefined);
 			}
+			return this.version;
 		} catch (error) {
-			if (epoch !== this.epoch) return;
+			if (epoch !== this.epoch) return undefined;
 			this.lastFetch = Date.now();
 			const message = error instanceof Error ? error.message : String(error);
 			if (initial) throw isAuthFailure(error) ? new ProviderFatalError(message) : error;
 			this.markStale(message);
 			log?.warn(`[Flagship] Definitions refresh failed; keeping last good snapshot: ${message}`);
+			return undefined;
 		}
 	}
 
 	private connectLocalSse(streams: FlagshipEventStream[] | undefined, epoch: number): void {
-		if (!this.configurationEvents || !this.EventSourceImpl || !streams?.length) return;
+		if (!this.configurationEvents || !this.EventSourceImpl || !streams?.length || this.eventSse?.active) return;
 		this.eventSse ??= new SseManager(
 			{
-				onRefetch: (metadata) => void this.fetchAndApplySnapshot(false, undefined, epoch, metadata?.etag, true),
+				onRefetch: (metadata, attempt) => this.fetchAndApplySnapshot(false, undefined, epoch, metadata?.etag, attempt === 0),
 				onStale: (message) => {
 					this.markStale(message);
 					void this.fetchAndApplySnapshot(false, undefined, epoch);

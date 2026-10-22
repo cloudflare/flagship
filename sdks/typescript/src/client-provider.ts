@@ -139,10 +139,10 @@ export class FlagshipClientProvider implements Provider {
 	}
 
 	private connectSse(response: FlagshipBulkEvaluationResponse, context: EvaluationContext, epoch: number): void {
-		if (this.changeDetection !== 'sse' || !this.EventSourceImpl || !response.eventStreams?.length) return;
+		if (this.changeDetection !== 'sse' || !this.EventSourceImpl || !response.eventStreams?.length || this.sse?.active) return;
 		this.sse ??= new SseManager(
 			{
-				onRefetch: (metadata) => void this.refresh(context, epoch, metadata?.etag, true),
+				onRefetch: (metadata, attempt) => this.refresh(context, epoch, metadata?.etag, attempt === 0),
 				onStale: (message) => {
 					this.markStale(message);
 					void this.refresh(context, epoch, undefined, false);
@@ -168,10 +168,10 @@ export class FlagshipClientProvider implements Provider {
 		epoch: number,
 		expectedVersion: string | undefined,
 		configurationEvent: boolean,
-	): Promise<void> {
+	): Promise<string | undefined> {
 		try {
 			const response = await this.fetchAll(context, 'refresh', expectedVersion);
-			if (epoch !== this.epoch) return;
+			if (epoch !== this.epoch) return undefined;
 			const next = toCache(response);
 			const flagsChanged = changedKeys(this.cache, next);
 			const versionChanged = Boolean(response.metadata?.version && response.metadata.version !== this.currentVersion);
@@ -182,9 +182,11 @@ export class FlagshipClientProvider implements Provider {
 			if (configurationEvent || versionChanged || flagsChanged.length > 0) {
 				this.events.emit(ProviderEvents.ConfigurationChanged, flagsChanged.length > 0 ? { flagsChanged } : undefined);
 			}
+			return this.currentVersion;
 		} catch (error) {
-			if (epoch !== this.epoch) return;
+			if (epoch !== this.epoch) return undefined;
 			this.markStale(error instanceof Error ? error.message : String(error));
+			return undefined;
 		}
 	}
 
@@ -206,7 +208,8 @@ export class FlagshipClientProvider implements Provider {
 	 */
 	private async fetchAll(context: EvaluationContext, phase: string, expectedVersion?: string): Promise<FlagshipBulkEvaluationResponse> {
 		try {
-			if (this.changeDetection === 'sse' && this.EventSourceImpl !== undefined) {
+			// Only ask for a stream ticket when there is no healthy stream to keep.
+			if (this.changeDetection === 'sse' && this.EventSourceImpl !== undefined && !this.sse?.active) {
 				return await this.client.evaluateAllResponse(context, expectedVersion, undefined, true);
 			}
 			return await (expectedVersion ? this.client.evaluateAllResponse(context, expectedVersion) : this.client.evaluateAllResponse(context));

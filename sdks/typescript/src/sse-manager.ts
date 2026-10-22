@@ -4,19 +4,29 @@ type EventSourceConstructor = new (url: string | URL, eventSourceInitDict?: Even
 type RefetchMetadata = { etag?: string; lastModified?: number };
 
 type Callbacks = {
-	onRefetch: (metadata?: RefetchMetadata) => void;
+	/**
+	 * Refetches after a change. `attempt` is 0 for the event itself and increases for
+	 * retries. Resolves to the configuration version that was actually observed.
+	 */
+	onRefetch: (metadata: RefetchMetadata | undefined, attempt: number) => Promise<string | undefined> | void;
 	onStale: (message: string) => void;
 	onReady: () => void;
 };
 
 const DEFAULT_INACTIVITY_SECONDS = 120;
 const DEBOUNCE_MS = 50;
+/**
+ * Retry delays when a refetch still observes an older version, e.g. while an edge
+ * cache catches up. Bounded so a missed or superseded version cannot loop forever.
+ */
+const STALE_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
 
 export class SseManager {
 	private sources: EventSource[] = [];
 	private streams: FlagshipEventStream[] = [];
 	private debounce?: ReturnType<typeof setTimeout>;
 	private inactivity?: ReturnType<typeof setTimeout>;
+	private retry?: ReturnType<typeof setTimeout>;
 	private pending?: RefetchMetadata;
 	private visibility?: () => void;
 	private stale = false;
@@ -26,6 +36,14 @@ export class SseManager {
 		private readonly EventSourceImpl: EventSourceConstructor,
 		private readonly inactivityOverride?: number,
 	) {}
+
+	/**
+	 * True while a stream is open and healthy. Streams persist across configuration
+	 * versions, so providers neither request a new ticket nor reconnect while active.
+	 */
+	get active(): boolean {
+		return this.sources.length > 0 && !this.stale;
+	}
 
 	connect(streams: FlagshipEventStream[]): boolean {
 		this.disconnect();
@@ -56,8 +74,10 @@ export class SseManager {
 	disconnect(): void {
 		if (this.debounce) clearTimeout(this.debounce);
 		if (this.inactivity) clearTimeout(this.inactivity);
+		if (this.retry) clearTimeout(this.retry);
 		this.debounce = undefined;
 		this.inactivity = undefined;
+		this.retry = undefined;
 		this.pending = undefined;
 		for (const source of this.sources) source.close();
 		this.sources = [];
@@ -74,12 +94,22 @@ export class SseManager {
 				...(typeof data.lastModified === 'number' ? { lastModified: data.lastModified } : {}),
 			};
 			if (this.debounce) clearTimeout(this.debounce);
+			if (this.retry) clearTimeout(this.retry);
+			this.retry = undefined;
 			this.debounce = setTimeout(() => {
 				const metadata = this.pending;
 				this.pending = undefined;
-				this.callbacks.onRefetch(metadata);
+				this.refetch(metadata, 0);
 			}, DEBOUNCE_MS);
 		} catch {}
+	}
+
+	private refetch(metadata: RefetchMetadata | undefined, attempt: number): void {
+		void Promise.resolve(this.callbacks.onRefetch(metadata, attempt)).then((observed) => {
+			const delay = STALE_RETRY_DELAYS_MS[attempt];
+			if (!metadata?.etag || observed === undefined || observed === metadata.etag || delay === undefined) return;
+			this.retry = setTimeout(() => this.refetch(metadata, attempt + 1), delay);
+		});
 	}
 
 	private installVisibility(): void {
@@ -96,10 +126,9 @@ export class SseManager {
 			}
 			if (this.inactivity) clearTimeout(this.inactivity);
 			this.inactivity = undefined;
-			if (this.sources.length === 0) {
-				this.connect(this.streams);
-				this.callbacks.onRefetch();
-			}
+			// Tickets are single-use, so never reopen the old URL: refetching while
+			// inactive requests a fresh descriptor and the provider reconnects with it.
+			if (this.sources.length === 0) this.refetch(undefined, 0);
 		};
 		document.addEventListener('visibilitychange', this.visibility);
 	}

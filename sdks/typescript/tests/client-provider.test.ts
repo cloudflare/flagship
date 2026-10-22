@@ -351,8 +351,58 @@ describe('FlagshipClientProvider', () => {
 			FakeEventSource.instances[0]!.emit('message', JSON.stringify({ type: 'refetchEvaluation', etag: 'v2' }));
 			await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
 
-			expect(evaluateAllResponse).toHaveBeenLastCalledWith({ targetingKey: 'user' }, 'v2', undefined, true);
+			// The healthy stream is kept: no new ticket is requested and no reconnect happens.
+			expect(evaluateAllResponse).toHaveBeenLastCalledWith({ targetingKey: 'user' }, 'v2');
+			expect(FakeEventSource.instances).toHaveLength(1);
 			await provider.onClose();
+		});
+
+		it('requests a fresh single-use ticket and reconnects after the stream drops', async () => {
+			const stream = (ticket: string) => [{ type: 'sse', url: `https://events.example.com/${ticket}` }];
+			const evaluateAllResponse = vi
+				.fn()
+				.mockResolvedValueOnce({ flags: [], metadata: { version: 'v1' }, eventStreams: stream('ticket-1') })
+				.mockResolvedValueOnce({ flags: [], metadata: { version: 'v1' }, eventStreams: stream('ticket-2') });
+			(FlagshipClient as any).mockImplementation(function () {
+				return { evaluateAllResponse };
+			});
+			const provider = new FlagshipClientProvider({ endpoint, eventSource: FakeEventSource as unknown as typeof EventSource });
+			await provider.initialize({});
+
+			FakeEventSource.instances[0]!.emit('error');
+			await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+
+			expect(evaluateAllResponse).toHaveBeenLastCalledWith({}, undefined, undefined, true);
+			expect(String(FakeEventSource.instances[1]!.url)).toBe('https://events.example.com/ticket-2');
+			await provider.onClose();
+		});
+
+		it('retries with backoff while the refetch still observes an older version', async () => {
+			vi.useFakeTimers();
+			try {
+				const evaluateAllResponse = vi
+					.fn()
+					.mockResolvedValueOnce({ flags: [], metadata: { version: 'v1' }, eventStreams: [{ type: 'sse', url: 'https://e.example/t' }] })
+					.mockResolvedValueOnce({ flags: [], metadata: { version: 'v1' } })
+					.mockResolvedValueOnce({ flags: [{ key: 'f', value: true, reason: 'DEFAULT', variant: 'on' }], metadata: { version: 'v2' } });
+				(FlagshipClient as any).mockImplementation(function () {
+					return { evaluateAllResponse };
+				});
+				const provider = new FlagshipClientProvider({ endpoint, eventSource: FakeEventSource as unknown as typeof EventSource });
+				await provider.initialize({});
+
+				FakeEventSource.instances[0]!.emit('message', JSON.stringify({ type: 'refetchEvaluation', etag: 'v2' }));
+				await vi.advanceTimersByTimeAsync(100);
+				expect(evaluateAllResponse).toHaveBeenCalledTimes(2);
+				await vi.advanceTimersByTimeAsync(1_000);
+				expect(evaluateAllResponse).toHaveBeenCalledTimes(3);
+				await vi.advanceTimersByTimeAsync(60_000);
+				expect(evaluateAllResponse).toHaveBeenCalledTimes(3);
+				expect(provider.resolveBooleanEvaluation('f', false, {}, noopLogger).value).toBe(true);
+				await provider.onClose();
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it('can disable background change detection', async () => {

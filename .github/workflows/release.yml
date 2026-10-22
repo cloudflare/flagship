@@ -38,6 +38,7 @@ jobs:
       has_changesets: ${{ steps.changesets.outputs.has-changesets }}
       python_changed: ${{ steps.sdk-changes.outputs.python }}
       go_changed: ${{ steps.sdk-changes.outputs.go }}
+      rust_changed: ${{ steps.sdk-changes.outputs.rust }}
     permissions:
       id-token: write
       contents: write
@@ -55,6 +56,8 @@ jobs:
         with:
           node-version: 24.18.0
           registry-url: https://registry.npmjs.org
+
+      - uses: dtolnay/rust-toolchain@stable
 
       # `uv` is needed by `.github/changeset-version.ts` to refresh `uv.lock`
       # when the Python SDK version is bumped.
@@ -89,11 +92,12 @@ jobs:
           TYPESCRIPT_SDK_CHANGED: ${{ steps.sdk-changes.outputs.typescript }}
           PYTHON_SDK_CHANGED: ${{ steps.sdk-changes.outputs.python }}
           GO_SDK_CHANGED: ${{ steps.sdk-changes.outputs.go }}
+          RUST_SDK_CHANGED: ${{ steps.sdk-changes.outputs.rust }}
 
       # changesets/action v2 only warns when a tag push fails. Release detection
       # needs this tag as its baseline, so fail the job if it was not pushed.
       - name: Verify canonical release tag
-        if: ${{ steps.changesets.outputs.has-changesets == 'false' && (steps.sdk-changes.outputs.typescript == 'true' || steps.sdk-changes.outputs.python == 'true' || steps.sdk-changes.outputs.go == 'true') }}
+        if: ${{ steps.changesets.outputs.has-changesets == 'false' && (steps.sdk-changes.outputs.typescript == 'true' || steps.sdk-changes.outputs.python == 'true' || steps.sdk-changes.outputs.go == 'true' || steps.sdk-changes.outputs.rust == 'true') }}
         run: |
           VERSION=$(node -p "require('./sdks/typescript/package.json').version")
           TAG="@cloudflare/flagship@${VERSION}"
@@ -138,3 +142,52 @@ jobs:
     permissions:
       contents: write
       id-token: write
+
+  publish-rust:
+    name: Publish Rust SDK
+    needs: release
+    if: ${{ needs.release.outputs.has_changesets == 'false' && needs.release.outputs.rust_changed == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.18.0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish crate if needed
+        working-directory: sdks/rust
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          STATUS=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://crates.io/api/v1/crates/cloudflare-flagship/${VERSION}")
+          case "${STATUS}" in
+            200)
+              echo "cloudflare-flagship@${VERSION} already exists on crates.io; skipping publish."
+              ;;
+            404)
+              cargo publish --locked
+              ;;
+            *)
+              echo "Unexpected crates.io response while checking cloudflare-flagship@${VERSION}: ${STATUS}" >&2
+              exit 1
+              ;;
+          esac
+      - name: Tag Rust SDK
+        run: |
+          VERSION=$(node -p "require('./sdks/rust/package.json').version")
+          TAG="sdks/rust/v${VERSION}"
+          if git rev-parse --verify --quiet "refs/tags/${TAG}"; then
+            test "$(git rev-list -n 1 "${TAG}")" = "${GITHUB_SHA}" || {
+              echo "${TAG} exists on a different commit." >&2
+              exit 1
+            }
+            echo "${TAG} already exists on this release; skipping."
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          fi

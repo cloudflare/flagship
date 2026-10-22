@@ -235,6 +235,71 @@ jobs:
       - working-directory: sdks/go
         run: go test ./...
 
+  # ── Rust SDK ──────────────────────────────────────────────────────────────
+
+  rust-stable:
+    name: Rust / Stable
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sdks/rust/target
+          key: rust-stable-${{ runner.os }}-${{ hashFiles('sdks/rust/Cargo.lock') }}
+          restore-keys: rust-stable-${{ runner.os }}-
+      - working-directory: sdks/rust
+        run: cmp --silent ../../spec/local-evaluation/cases.json src/local/cases.json
+      - working-directory: sdks/rust
+        run: cargo fmt --check
+      - working-directory: sdks/rust
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Check TLS feature combinations
+        working-directory: sdks/rust
+        run: |
+          cargo test --locked --no-default-features --features rustls
+          cargo test --locked --no-default-features --features native-tls
+          cargo test --locked --no-default-features --features rustls-no-provider
+      - working-directory: sdks/rust
+        run: cargo check --locked --examples --all-features
+      - working-directory: sdks/rust
+        run: cargo test --locked --all-features
+      - working-directory: sdks/rust
+        run: cargo test --locked --release --all-features
+      - name: Check doctests and documentation
+        working-directory: sdks/rust
+        run: |
+          RUSTDOCFLAGS='-D warnings' cargo test --locked --doc --all-features
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
+      - working-directory: sdks/rust
+        run: cargo package --locked
+      - working-directory: sdks/rust
+        run: cargo publish --dry-run --locked
+
+  rust-msrv:
+    name: Rust / MSRV 1.88
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sdks/rust/target
+          key: rust-msrv-${{ runner.os }}-${{ hashFiles('sdks/rust/Cargo.lock') }}
+          restore-keys: rust-msrv-${{ runner.os }}-
+      - working-directory: sdks/rust
+        run: cargo check --locked --all-features
+      - working-directory: sdks/rust
+        run: cargo test --locked --all-features
+
   # ── Aggregator (required status check for branch protection) ──────────────
 
   ci-success:
@@ -257,6 +322,8 @@ jobs:
       - go-format
       - go-vet
       - go-test
+      - rust-stable
+      - rust-msrv
     steps:
       - name: Check job results
         run: |

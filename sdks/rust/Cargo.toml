@@ -1,0 +1,45 @@
+[package]
+name = "cloudflare-flagship"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.88"
+description = "OpenFeature provider for Cloudflare Flagship feature flags"
+license = "Apache-2.0"
+repository = "https://github.com/cloudflare/flagship"
+homepage = "https://developers.cloudflare.com/flagship/"
+readme = "README.md"
+keywords = ["cloudflare", "feature-flags", "flagship", "openfeature"]
+categories = ["api-bindings", "web-programming::http-client"]
+include = ["/src/**", "/examples/**", "/Cargo.toml", "/README.md", "/LICENSE"]
+
+[features]
+default = ["rustls"]
+native-tls = ["reqwest/native-tls"]
+rustls = ["reqwest/rustls"]
+rustls-no-provider = ["reqwest/rustls-no-provider"]
+
+[dependencies]
+# open-feature 0.3 compiles its LoggingHook unconditionally while gating `log`
+# behind its default features. Disabling defaults therefore fails to compile and
+# the default `test-util`/mockall feature remains enabled until upstream fixes it.
+open-feature = "0.3.0"
+rand = "0.10.3"
+reqwest = { version = "0.13.5", default-features = false, features = ["http2", "json"] }
+ryu-js = "1.0.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "raw_value"] }
+tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "test-util"] }
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -1,6 +1,7 @@
 import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, ProviderMetadata, Logger } from '@openfeature/web-sdk';
 import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError, ProviderStatus } from '@openfeature/web-sdk';
 import { FlagshipClient, isAuthFailure } from './client.js';
+import { toFlagMetadata } from './metadata.js';
 import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js';
 
 const ERROR_CODES = new Set<string>(Object.values(ErrorCode));
@@ -180,7 +181,7 @@ export class FlagshipClientProvider implements Provider {
 			};
 		}
 
-		const flagMetadata = cached.metadata ?? {};
+		const flagMetadata = toFlagMetadata(cached.metadata);
 
 		if (cached.errorCode) {
 			const msg = cached.errorDetails ?? `Flag "${flagKey}" evaluation failed`;

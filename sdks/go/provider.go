@@ -321,7 +321,7 @@ func resolveTyped[T any](
 					return value, openfeature.ProviderResolutionDetail{
 						Reason:       openfeature.CachedReason,
 						Variant:      cached.Variant,
-						FlagMetadata: openfeature.FlagMetadata{},
+						FlagMetadata: toFlagMetadata(cached.Metadata),
 					}
 				}
 			}
@@ -350,7 +350,7 @@ func resolveTyped[T any](
 	if result.Reason == ReasonDisabled {
 		return defaultValue, openfeature.ProviderResolutionDetail{
 			Reason:       openfeature.DisabledReason,
-			FlagMetadata: openfeature.FlagMetadata{},
+			FlagMetadata: toFlagMetadata(result.Metadata),
 		}
 	}
 
@@ -376,7 +376,7 @@ func resolveTyped[T any](
 	return value, openfeature.ProviderResolutionDetail{
 		Reason:       mapReason(result.Reason),
 		Variant:      result.Variant,
-		FlagMetadata: openfeature.FlagMetadata{},
+		FlagMetadata: toFlagMetadata(result.Metadata),
 	}
 }
 
@@ -429,10 +429,11 @@ func (p *ServerProvider) evaluateLocal(ctx context.Context, flagKey string, flat
 
 	_ = ctx // local evaluation is pure; ctx is reserved for future cancellation hooks
 	return EvaluationResponse{
-		FlagKey: flagKey,
-		Value:   result.Value,
-		Variant: result.Variant,
-		Reason:  result.Reason,
+		FlagKey:  flagKey,
+		Value:    result.Value,
+		Variant:  result.Variant,
+		Reason:   result.Reason,
+		Metadata: result.Metadata,
 	}, nil
 }
 

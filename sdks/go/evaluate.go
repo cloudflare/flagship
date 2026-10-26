@@ -28,9 +28,10 @@ var (
 )
 
 type evaluationResult struct {
-	Value   any
-	Variant string
-	Reason  EvaluationReason
+	Value    any
+	Variant  string
+	Reason   EvaluationReason
+	Metadata map[string]any
 }
 
 type evalFlag struct {
@@ -39,6 +40,7 @@ type evalFlag struct {
 	DefaultVariation string
 	Variations       map[string]any
 	Rules            []evalRule
+	Metadata         map[string]any
 }
 
 type evalRule struct {
@@ -545,9 +547,10 @@ func evaluateFlag(flagDef evalFlag, context map[string]any, accountID string) (e
 			}
 		}
 		return evaluationResult{
-			Value:   flagDef.Variations[variant],
-			Variant: variant,
-			Reason:  reason,
+			Value:    flagDef.Variations[variant],
+			Variant:  variant,
+			Reason:   reason,
+			Metadata: flagDef.Metadata,
 		}, nil
 	}
 
@@ -631,6 +634,8 @@ func decodeEvalFlag(raw json.RawMessage) (evalFlag, error) {
 		variations = rawVariations
 	}
 
+	metadata, _ := payload["metadata"].(map[string]any)
+
 	var rules []evalRule
 	if rawRules, ok := payload["rules"].([]any); ok {
 		rules = make([]evalRule, 0, len(rawRules))
@@ -670,5 +675,6 @@ func decodeEvalFlag(raw json.RawMessage) (evalFlag, error) {
 		DefaultVariation: defaultVariation,
 		Variations:       variations,
 		Rules:            rules,
+		Metadata:         metadata,
 	}, nil
 }

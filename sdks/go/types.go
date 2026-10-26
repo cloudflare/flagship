@@ -88,6 +88,8 @@ type EvaluationResponse struct {
 	Value   any
 	Variant string
 	Reason  EvaluationReason
+	// Metadata is the flag metadata configured in Flagship. It is nil when the flag has none.
+	Metadata map[string]any
 }
 
 // ErrorCode identifies an error produced by the Flagship HTTP client.

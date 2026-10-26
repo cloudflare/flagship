@@ -182,7 +182,7 @@ export type CachedFlag = Omit<FlagshipBulkEvaluationResult, 'key'>;
 /**
  * Shape of a successful response from the Flagship evaluation API.
  * Mirrors the data-plane's `EvaluateResult` contract exactly — every field
- * is always present on a 200 response.
+ * except `metadata` is always present on a 200 response.
  */
 export interface FlagshipEvaluationResponse {
 	flagKey: string;
@@ -198,6 +198,8 @@ export interface FlagshipEvaluationResponse {
 	 * - `DISABLED`        — the flag is disabled
 	 */
 	reason: 'STATIC' | 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT';
+	/** Flag metadata configured in Flagship. Omitted when the flag has none. */
+	metadata?: Record<string, string | number | boolean>;
 }
 
 // ---------------------------------------------------------------------------

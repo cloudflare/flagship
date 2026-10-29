@@ -231,6 +231,7 @@ def _parse_evaluation_response(response: httpx.Response) -> FlagshipEvaluationRe
         value=data["value"],
         variant=data.get("variant", ""),
         reason=data.get("reason", "DEFAULT"),
+        metadata=data["metadata"] if isinstance(data.get("metadata"), dict) else {},
     )
 
 

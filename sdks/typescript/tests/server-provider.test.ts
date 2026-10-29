@@ -146,7 +146,7 @@ describe('FlagshipServerProvider', () => {
 			expect(result.errorCode).toBeUndefined();
 		});
 
-		it('flagMetadata is always empty (API does not return metadata)', async () => {
+		it('flagMetadata is empty when the API response has no metadata', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({

@@ -20,10 +20,14 @@ __all__ = ["FlagConfigError", "EvaluationResult", "evaluate_flag", "js_number", 
 EvaluationReason = Literal["STATIC", "TARGETING_MATCH", "DEFAULT", "DISABLED", "SPLIT"]
 
 
-class EvaluationResult(TypedDict):
+class _EvaluationResultRequired(TypedDict):
     value: Any
     variant: str
     reason: EvaluationReason
+
+
+class EvaluationResult(_EvaluationResultRequired, total=False):
+    metadata: dict[str, Any]
 
 
 _ISO_8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
@@ -365,7 +369,11 @@ def evaluate_flag(
     def serve(variant: str, reason: EvaluationReason) -> EvaluationResult:
         if variant not in variations:
             raise FlagConfigError(str(key), f"variation '{variant}' is not defined")
-        return {"value": variations[variant], "variant": variant, "reason": reason}
+        result: EvaluationResult = {"value": variations[variant], "variant": variant, "reason": reason}
+        metadata = flag_def.get("metadata")
+        if isinstance(metadata, dict):
+            result["metadata"] = metadata
+        return result
 
     if not flag_def.get("enabled", False):
         return serve(str(flag_def.get("default_variation", "")), "DISABLED")

@@ -4,6 +4,7 @@ import { LRUCache } from 'lru-cache';
 import { FlagshipClient, isAuthFailure, resolveDefinitionsEndpoint } from './client.js';
 import { normalizeEvaluationContext, type NormalizedContextValue } from './context.js';
 import { evaluateFlag, FlagConfigError, type EvalFlag } from './local/evaluate.js';
+import { toFlagMetadata } from './metadata.js';
 import {
 	FlagshipError,
 	FlagshipErrorCode,
@@ -497,6 +498,7 @@ export class FlagshipServerProvider implements Provider {
 				return { value: defaultValue, errorCode, errorMessage, reason: details.reason ?? 'ERROR' };
 			}
 
+			// The binding returns `metadata` at runtime even though the published workers-types omit it.
 			return finalizeEvaluation(flagKey, defaultValue, expectedType, details, log);
 		} catch (error) {
 			if (error instanceof FlagshipError) return this.handleHttpError(flagKey, defaultValue, error, log);
@@ -553,11 +555,11 @@ function finalizeEvaluation<T>(
 	flagKey: string,
 	defaultValue: T,
 	expectedType: ExpectedType,
-	result: { value: unknown; variant?: string; reason?: string },
+	result: { value: unknown; variant?: string; reason?: string; metadata?: unknown },
 	log: Logger,
 ): ResolutionDetails<T> {
 	if (result.reason === 'DISABLED') {
-		return { value: defaultValue, reason: 'DISABLED', flagMetadata: {} };
+		return { value: defaultValue, reason: 'DISABLED', flagMetadata: toFlagMetadata(result.metadata) };
 	}
 
 	const actualType = getValueType(result.value);
@@ -573,7 +575,7 @@ function finalizeEvaluation<T>(
 		value: result.value as T,
 		variant: result.variant,
 		reason: result.reason,
-		flagMetadata: {},
+		flagMetadata: toFlagMetadata(result.metadata),
 	};
 }
 

@@ -176,7 +176,7 @@ describe('Flagship Integration Tests', () => {
 			expect(value).toBe(false); // Default value
 		});
 
-		it('flagMetadata is always empty (API does not return metadata)', async () => {
+		it('flagMetadata is empty when the API response has no metadata', async () => {
 			(global.fetch as any).mockResolvedValue({
 				ok: true,
 				json: async () => ({

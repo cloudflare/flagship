@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 __all__ = ["FlagshipEvaluationResponse"]
@@ -12,3 +12,4 @@ class FlagshipEvaluationResponse:
     value: Any
     variant: str
     reason: EvaluationReason
+    metadata: dict[str, Any] = field(default_factory=dict)

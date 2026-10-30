@@ -26,6 +26,7 @@ from openfeature.hook import Hook
 from openfeature.provider import AbstractProvider, Metadata
 
 from ._evaluate import FlagConfigError, evaluate_flag
+from ._metadata import to_flag_metadata
 from ._types import FlagshipEvaluationResponse
 from .client import FLAGSHIP_DEFAULT_BASE_URL, FlagshipClient, resolve_definitions_endpoint
 from .context import normalize_context
@@ -381,6 +382,7 @@ class FlagshipServerProvider(AbstractProvider):
                 value=result["value"],
                 variant=result["variant"],
                 reason=result["reason"],
+                metadata=result.get("metadata", {}),
             )
             details = _build_details(flag_type, default_value, response)
             self._log_debug(
@@ -505,6 +507,7 @@ def _build_details(
             value=default_value,
             reason=Reason.DISABLED,
             variant=result.variant or None,
+            flag_metadata=to_flag_metadata(result.metadata),
         )
 
     value = _typecheck_flag_value(result.value, flag_type)
@@ -513,6 +516,7 @@ def _build_details(
         value=value,
         variant=result.variant or None,
         reason=_map_reason(result.reason),
+        flag_metadata=to_flag_metadata(result.metadata),
     )
 
 

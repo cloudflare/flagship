@@ -241,11 +241,22 @@ func parseResponse(resp *http.Response) (EvaluationResponse, error) {
 		reason = EvaluationReason(reasonString)
 	}
 
+	var metadata map[string]any
+	if metadataRaw, ok := raw["metadata"]; ok {
+		metadataDecoder := json.NewDecoder(bytes.NewReader(metadataRaw))
+		metadataDecoder.UseNumber()
+		// Malformed metadata is dropped rather than failing the evaluation.
+		if err := metadataDecoder.Decode(&metadata); err != nil {
+			metadata = nil
+		}
+	}
+
 	return EvaluationResponse{
-		FlagKey: flagKey,
-		Value:   value,
-		Variant: variant,
-		Reason:  reason,
+		FlagKey:  flagKey,
+		Value:    value,
+		Variant:  variant,
+		Reason:   reason,
+		Metadata: metadata,
 	}, nil
 }
 

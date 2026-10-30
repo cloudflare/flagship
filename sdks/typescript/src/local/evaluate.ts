@@ -38,6 +38,8 @@ export interface EvalFlag {
 	variations: Record<string, unknown>;
 	/** Rules pre-sorted by priority at write time. Priority field stripped — iteration order is evaluation order. */
 	rules: EvalRule[];
+	/** Flat flag metadata; omitted by the backend when empty. */
+	metadata?: Record<string, string | number | boolean>;
 }
 
 export type Definitions = {
@@ -290,12 +292,12 @@ export function evaluateFlag(
 	flagDef: EvalFlag,
 	context: EvaluationContext,
 	accountId: string,
-): { value: FlagValue; variant: string; reason: EvaluationReason } {
+): { value: FlagValue; variant: string; reason: EvaluationReason; metadata?: EvalFlag['metadata'] } {
 	const serve = (variant: string, reason: EvaluationReason) => {
 		if (!hasOwn(flagDef.variations, variant)) {
 			throw new FlagConfigError(flagDef.key, `variation '${variant}' is not defined`);
 		}
-		return { value: flagDef.variations[variant] as FlagValue, variant, reason };
+		return { value: flagDef.variations[variant] as FlagValue, variant, reason, metadata: flagDef.metadata };
 	};
 
 	if (!flagDef.enabled) return serve(flagDef.default_variation, 'DISABLED');

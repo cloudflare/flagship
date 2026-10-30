@@ -366,18 +366,18 @@ fn evaluate_condition_with_cache(
 fn evaluate_condition_at_depth(
     condition: &Value,
     context: &BTreeMap<String, Value>,
-    depth: usize,
+    group_depth: usize,
     coercions: &mut CoercionCache,
 ) -> bool {
-    if depth > MAX_CONDITION_DEPTH {
-        return false;
-    }
-
     let Some(condition) = condition.as_object() else {
         return false;
     };
 
     if let Some(logical_operator) = condition.get("logical_operator") {
+        if group_depth >= MAX_CONDITION_DEPTH {
+            return false;
+        }
+
         let clauses = condition
             .get("clauses")
             .and_then(Value::as_array)
@@ -385,12 +385,12 @@ fn evaluate_condition_at_depth(
             .unwrap_or_default();
 
         return match logical_operator.as_str() {
-            Some("AND") => clauses
-                .iter()
-                .all(|clause| evaluate_condition_at_depth(clause, context, depth + 1, coercions)),
-            Some("OR") => clauses
-                .iter()
-                .any(|clause| evaluate_condition_at_depth(clause, context, depth + 1, coercions)),
+            Some("AND") => clauses.iter().all(|clause| {
+                evaluate_condition_at_depth(clause, context, group_depth + 1, coercions)
+            }),
+            Some("OR") => clauses.iter().any(|clause| {
+                evaluate_condition_at_depth(clause, context, group_depth + 1, coercions)
+            }),
             _ => false,
         };
     }
@@ -751,9 +751,15 @@ mod tests {
         }
 
         let beyond_limit = json!({"logical_operator": "AND", "clauses": [at_limit.clone()]});
+        let mut empty_group_beyond_limit = json!({"logical_operator": "AND", "clauses": []});
+        for _ in 0..MAX_CONDITION_DEPTH {
+            empty_group_beyond_limit =
+                json!({"logical_operator": "AND", "clauses": [empty_group_beyond_limit]});
+        }
 
         assert!(evaluate_condition(&at_limit, &context));
         assert!(!evaluate_condition(&beyond_limit, &context));
+        assert!(!evaluate_condition(&empty_group_beyond_limit, &context));
     }
 
     #[test]

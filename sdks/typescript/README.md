@@ -169,6 +169,10 @@ const client = OpenFeature.getClient();
 const darkMode = client.getBooleanValue('dark-mode', false);
 ```
 
+When Flagship advertises an OFREP event stream, the browser provider connects with SSE by default, refreshes its bulk cache to the notified configuration version, and then emits `PROVIDER_CONFIGURATION_CHANGED`. Set `changeDetection: 'polling'` with `pollInterval`, or `changeDetection: 'none'`, to override this behavior.
+
+Local-evaluation server providers emit `PROVIDER_CONFIGURATION_CHANGED` after a changed definitions snapshot has been applied. Binding providers can lazily invalidate cached evaluations when the platform binding exposes `getConfigurationVersion()`.
+
 ## Features
 
 | Feature               | Description                                                                    |

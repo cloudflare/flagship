@@ -4,7 +4,9 @@ import {
 	FlagshipError,
 	FlagshipErrorCode,
 	FLAGSHIP_DEFAULT_BASE_URL,
+	type FlagshipBulkEvaluationResponse,
 	type FlagshipBulkEvaluationResult,
+	type FlagshipDefinitionsResponse,
 	type FlagshipEvaluationResponse,
 	type FlagshipProviderOptions,
 	type FlagshipRequestOptions,
@@ -87,15 +89,28 @@ export class FlagshipClient {
 	 * @internal
 	 */
 	async evaluateAll(context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipBulkEvaluationResult[]> {
+		return (await this.evaluateAllResponse(context, undefined, options)).flags;
+	}
+
+	async evaluateAllResponse(
+		context: EvaluationContext,
+		flagConfigEtag?: string,
+		options?: FlagshipRequestOptions,
+		requestEventStream = false,
+	): Promise<FlagshipBulkEvaluationResponse> {
 		const endpoint = this.options.bulkEndpoint;
 		if (!endpoint) {
 			throw new Error('Flagship: bulk evaluation requires an endpoint ending in /evaluate, or appId and accountId.');
 		}
-
-		const request = buildPostRequest(endpoint, { context: normalizeEvaluationContext(context).context }, this.options.fetchOptions);
+		const url = new URL(endpoint);
+		if (flagConfigEtag) url.searchParams.set('flagConfigEtag', flagConfigEtag);
+		const request = buildPostRequest(
+			url.toString(),
+			{ context: normalizeEvaluationContext(context).context },
+			withEventStreamCapability(this.options.fetchOptions, requestEventStream),
+		);
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
-
 		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseBulkResponse);
 	}
 
@@ -111,26 +126,32 @@ export class FlagshipClient {
 		etag?: string,
 		options?: FlagshipRequestOptions,
 	): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
+		const response = await this.fetchDefinitionsResponse(etag, undefined, options);
+		return response === 'not-modified' ? response : { etag: response.etag, flags: response.flags };
+	}
+
+	async fetchDefinitionsResponse(
+		etag?: string,
+		flagConfigEtag?: string,
+		options?: FlagshipRequestOptions,
+		requestEventStream = false,
+	): Promise<FlagshipDefinitionsResponse | 'not-modified'> {
 		const endpoint = this.options.definitionsEndpoint;
 		if (!endpoint) {
 			// Configuration problem, not an evaluation failure — mirror the constructor's plain Errors.
 			throw new Error('Flagship: definitions endpoint is not configured. Provide appId+accountId, or an endpoint ending in /evaluate.');
 		}
-
-		const headers = new Headers(this.options.fetchOptions.headers);
+		const url = new URL(endpoint);
+		if (flagConfigEtag) url.searchParams.set('flagConfigEtag', flagConfigEtag);
+		const requestOptions = withEventStreamCapability(this.options.fetchOptions, requestEventStream);
+		const headers = new Headers(requestOptions.headers);
 		if (etag) headers.set('If-None-Match', etag);
-
 		const request: EvaluationRequest = {
-			url: endpoint,
-			init: {
-				...this.options.fetchOptions,
-				method: 'GET',
-				headers,
-			},
+			url: url.toString(),
+			init: { ...requestOptions, method: 'GET', headers },
 		};
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
-
 		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseDefinitionsResponse);
 	}
 
@@ -216,6 +237,13 @@ export class FlagshipClient {
 	}
 }
 
+function withEventStreamCapability(options: RequestInit, enabled: boolean): RequestInit {
+	if (!enabled) return options;
+	const headers = new Headers(options.headers);
+	headers.set('Flagship-Event-Stream', 'sse');
+	return { ...options, headers };
+}
+
 async function parseEvaluationResponse(response: Response): Promise<FlagshipEvaluationResponse> {
 	if (!response.ok) throw await httpError(response);
 
@@ -228,18 +256,16 @@ async function parseEvaluationResponse(response: Response): Promise<FlagshipEval
 	return data as FlagshipEvaluationResponse;
 }
 
-async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResult[]> {
+async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResponse> {
 	if (!response.ok) throw await httpError(response);
-
-	const data = (await response.json()) as { flags?: unknown } | null;
+	const data = (await response.json()) as Omit<FlagshipBulkEvaluationResponse, 'etag'> | null;
 	if (!data || !Array.isArray(data.flags)) {
 		throw new FlagshipError('Invalid bulk evaluation response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
-
-	return data.flags as FlagshipBulkEvaluationResult[];
+	return { ...data, etag: response.headers.get('etag') ?? undefined };
 }
 
-async function parseDefinitionsResponse(response: Response): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
+async function parseDefinitionsResponse(response: Response): Promise<FlagshipDefinitionsResponse | 'not-modified'> {
 	if (response.status === 304) {
 		return 'not-modified';
 	}
@@ -258,8 +284,8 @@ async function parseDefinitionsResponse(response: Response): Promise<{ etag: str
 		throw new FlagshipError('Invalid definitions response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
 
-	const etag = response.headers.get('etag') ?? '';
-	return { etag, flags: (data as { flags: Record<string, unknown> }).flags };
+	const envelope = data as Omit<FlagshipDefinitionsResponse, 'etag'>;
+	return { ...envelope, etag: response.headers.get('etag') ?? '' };
 }
 
 export function isAuthFailure(error: unknown): boolean {

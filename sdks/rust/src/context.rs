@@ -13,8 +13,11 @@ use serde_json::{Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 
 use crate::error::{ErrorCode, FlagshipError};
 
-const MAX_CONTEXT_DEPTH: usize = 100;
-const MAX_CONTEXT_JSON_BYTES: usize = 1024 * 1024;
+const MAX_CONTEXT_ATTRIBUTES: usize = 100;
+const MAX_CONTEXT_KEY_CHARS: usize = 256;
+const MAX_CONTEXT_DEPTH: usize = 9;
+const MAX_CONTEXT_JSON_BYTES: usize = 32 * 1024;
+const MAX_CONTEXT_VISITED_VALUES: usize = 10_000;
 const TARGETING_KEY: &str = "targetingKey";
 const FLAG_KEY: &str = "flagKey";
 const MAX_ESCAPED_PATH_LENGTH: usize = 160;
@@ -58,7 +61,7 @@ impl ExpectedFlagType {
 /// but [`Self::query_pairs`] omits it so the separately requested flag always wins on
 /// GET. `f32` context values have already been widened to `f64` by `open-feature`, so
 /// their query text can expose the exact widened value rather than Go's original
-/// 32-bit formatting. The serialized context is limited to 1 MiB.
+/// 32-bit formatting. Platform context limits are validated before transport.
 #[derive(Clone, PartialEq)]
 pub(crate) struct NormalizedContext {
     values: BTreeMap<String, JsonValue>,
@@ -136,8 +139,8 @@ impl NormalizedContext {
 /// A nonempty dedicated targeting key is authoritative. In that case a custom
 /// `targetingKey` field is skipped before validation, so even an invalid or
 /// structured colliding value cannot change the request method or fail conversion.
-/// Nesting depth starts at zero for each context attribute: values at depth 100
-/// are accepted and values at depth 101 are rejected.
+/// Nesting depth starts at zero for each context attribute: values at depth 9
+/// are accepted and values at depth 10 are rejected, for ten total levels.
 ///
 /// Datetimes use RFC 3339 with Go-compatible nanosecond trimming. Years must be
 /// in `0000..=9999`, offsets must be minute-aligned and less than 24 hours, and
@@ -146,12 +149,15 @@ pub(crate) fn normalize_context(
     context: &EvaluationContext,
 ) -> Result<NormalizedContext, FlagshipError> {
     let mut values = BTreeMap::new();
+    let mut traversal = ContextTraversal::default();
     let targeting_key = context
         .targeting_key
         .as_deref()
         .filter(|key| !key.is_empty());
 
     if let Some(targeting_key) = targeting_key {
+        let path = ContextPath::Root(TARGETING_KEY);
+        traversal.visit(&path)?;
         values.insert(
             TARGETING_KEY.to_owned(),
             JsonValue::String(targeting_key.to_owned()),
@@ -167,8 +173,16 @@ pub(crate) fn normalize_context(
         }
 
         let path = ContextPath::Root(key);
-        let normalized = normalize_field_value(value, &path, 0)?;
+        validate_context_key(key, &path)?;
+        let normalized = normalize_field_value(value, &path, 0, &mut traversal)?;
         values.insert(key.clone(), normalized);
+    }
+
+    if values.len() > MAX_CONTEXT_ATTRIBUTES {
+        return Err(invalid_context(
+            None,
+            "exceeds the maximum of 100 top-level attributes",
+        ));
     }
 
     validate_context_size(&values)?;
@@ -180,19 +194,34 @@ fn normalize_field_value(
     value: &EvaluationContextFieldValue,
     path: &ContextPath<'_>,
     depth: usize,
+    traversal: &mut ContextTraversal,
 ) -> Result<JsonValue, FlagshipError> {
     check_depth(path, depth)?;
 
     match value {
-        EvaluationContextFieldValue::Bool(value) => Ok(JsonValue::Bool(*value)),
-        EvaluationContextFieldValue::Int(value) => Ok(JsonValue::Number(JsonNumber::from(*value))),
+        EvaluationContextFieldValue::Bool(value) => {
+            traversal.visit(path)?;
+
+            Ok(JsonValue::Bool(*value))
+        }
+        EvaluationContextFieldValue::Int(value) => {
+            traversal.visit(path)?;
+
+            Ok(JsonValue::Number(JsonNumber::from(*value)))
+        }
         EvaluationContextFieldValue::Float(value) => {
+            traversal.visit(path)?;
             let number = finite_json_number(*value, path)?;
 
             Ok(JsonValue::Number(number))
         }
-        EvaluationContextFieldValue::String(value) => Ok(JsonValue::String(value.clone())),
+        EvaluationContextFieldValue::String(value) => {
+            traversal.visit(path)?;
+
+            Ok(JsonValue::String(value.clone()))
+        }
         EvaluationContextFieldValue::DateTime(value) => {
+            traversal.visit(path)?;
             let formatted = format_datetime(
                 value.year(),
                 u8::from(value.month()),
@@ -207,7 +236,9 @@ fn normalize_field_value(
 
             Ok(JsonValue::String(formatted))
         }
-        EvaluationContextFieldValue::Struct(value) => normalize_opaque_struct(value, path, depth),
+        EvaluationContextFieldValue::Struct(value) => {
+            normalize_opaque_struct(value, path, depth, traversal)
+        }
     }
 }
 
@@ -270,21 +301,23 @@ fn normalize_opaque_struct(
     value: &Arc<dyn std::any::Any + Send + Sync>,
     path: &ContextPath<'_>,
     depth: usize,
+    traversal: &mut ContextTraversal,
 ) -> Result<JsonValue, FlagshipError> {
     if let Some(value) = value.downcast_ref::<StructValue>() {
-        let normalized = normalize_struct_value(value, path, depth)?;
+        traversal.visit(path)?;
+        let normalized = normalize_struct_value(value, path, depth, traversal)?;
 
         return Ok(normalized);
     }
 
     if let Some(value) = value.downcast_ref::<OpenFeatureValue>() {
-        let normalized = normalize_open_feature_value(value, path, depth)?;
+        let normalized = normalize_open_feature_value(value, path, depth, traversal)?;
 
         return Ok(normalized);
     }
 
     if let Some(value) = value.downcast_ref::<JsonValue>() {
-        let normalized = normalize_json_value(value, path, depth)?;
+        let normalized = normalize_json_value(value, path, depth, traversal)?;
 
         return Ok(normalized);
     }
@@ -299,6 +332,7 @@ fn normalize_struct_value(
     value: &StructValue,
     path: &ContextPath<'_>,
     depth: usize,
+    traversal: &mut ContextTraversal,
 ) -> Result<JsonValue, FlagshipError> {
     let mut fields: Vec<_> = value.fields.iter().collect();
     fields.sort_by(|left, right| left.0.cmp(right.0));
@@ -307,7 +341,7 @@ fn normalize_struct_value(
 
     for (key, value) in fields {
         let child_path = ContextPath::Field { parent: path, key };
-        let normalized = normalize_open_feature_value(value, &child_path, depth + 1)?;
+        let normalized = normalize_open_feature_value(value, &child_path, depth + 1, traversal)?;
         object.insert(key.clone(), normalized);
     }
 
@@ -318,8 +352,10 @@ fn normalize_open_feature_value(
     value: &OpenFeatureValue,
     path: &ContextPath<'_>,
     depth: usize,
+    traversal: &mut ContextTraversal,
 ) -> Result<JsonValue, FlagshipError> {
     check_depth(path, depth)?;
+    traversal.visit(path)?;
 
     match value {
         OpenFeatureValue::Bool(value) => Ok(JsonValue::Bool(*value)),
@@ -330,8 +366,10 @@ fn normalize_open_feature_value(
             Ok(JsonValue::Number(number))
         }
         OpenFeatureValue::String(value) => Ok(JsonValue::String(value.clone())),
-        OpenFeatureValue::Array(values) => normalize_open_feature_array(values, path, depth),
-        OpenFeatureValue::Struct(value) => normalize_struct_value(value, path, depth),
+        OpenFeatureValue::Array(values) => {
+            normalize_open_feature_array(values, path, depth, traversal)
+        }
+        OpenFeatureValue::Struct(value) => normalize_struct_value(value, path, depth, traversal),
     }
 }
 
@@ -339,6 +377,7 @@ fn normalize_open_feature_array(
     values: &[OpenFeatureValue],
     path: &ContextPath<'_>,
     depth: usize,
+    traversal: &mut ContextTraversal,
 ) -> Result<JsonValue, FlagshipError> {
     let mut array = Vec::with_capacity(values.len());
 
@@ -347,7 +386,12 @@ fn normalize_open_feature_array(
             parent: path,
             index,
         };
-        array.push(normalize_open_feature_value(value, &child_path, depth + 1)?);
+        array.push(normalize_open_feature_value(
+            value,
+            &child_path,
+            depth + 1,
+            traversal,
+        )?);
     }
 
     Ok(JsonValue::Array(array))
@@ -357,16 +401,18 @@ fn normalize_json_value(
     value: &JsonValue,
     path: &ContextPath<'_>,
     depth: usize,
+    traversal: &mut ContextTraversal,
 ) -> Result<JsonValue, FlagshipError> {
     check_depth(path, depth)?;
+    traversal.visit(path)?;
 
     match value {
         JsonValue::Null => Ok(JsonValue::Null),
         JsonValue::Bool(value) => Ok(JsonValue::Bool(*value)),
         JsonValue::Number(value) => normalize_json_number(value, path),
         JsonValue::String(value) => Ok(JsonValue::String(value.clone())),
-        JsonValue::Array(values) => normalize_json_array(values, path, depth),
-        JsonValue::Object(values) => normalize_json_object(values, path, depth),
+        JsonValue::Array(values) => normalize_json_array(values, path, depth, traversal),
+        JsonValue::Object(values) => normalize_json_object(values, path, depth, traversal),
     }
 }
 
@@ -400,6 +446,7 @@ fn normalize_json_array(
     values: &[JsonValue],
     path: &ContextPath<'_>,
     depth: usize,
+    traversal: &mut ContextTraversal,
 ) -> Result<JsonValue, FlagshipError> {
     let mut array = Vec::with_capacity(values.len());
 
@@ -408,7 +455,12 @@ fn normalize_json_array(
             parent: path,
             index,
         };
-        array.push(normalize_json_value(value, &child_path, depth + 1)?);
+        array.push(normalize_json_value(
+            value,
+            &child_path,
+            depth + 1,
+            traversal,
+        )?);
     }
 
     Ok(JsonValue::Array(array))
@@ -418,6 +470,7 @@ fn normalize_json_object(
     values: &JsonMap<String, JsonValue>,
     path: &ContextPath<'_>,
     depth: usize,
+    traversal: &mut ContextTraversal,
 ) -> Result<JsonValue, FlagshipError> {
     let mut fields: Vec<_> = values.iter().collect();
     fields.sort_by(|left, right| left.0.cmp(right.0));
@@ -428,7 +481,7 @@ fn normalize_json_object(
         let child_path = ContextPath::Field { parent: path, key };
         object.insert(
             key.clone(),
-            normalize_json_value(value, &child_path, depth + 1)?,
+            normalize_json_value(value, &child_path, depth + 1, traversal)?,
         );
     }
 
@@ -494,7 +547,7 @@ fn validate_context_size(values: &BTreeMap<String, JsonValue>) -> Result<(), Fla
         Ok(()) => Ok(()),
         Err(_) if writer.exceeded => Err(invalid_context(
             None,
-            "exceeds the maximum serialized size of 1 MiB",
+            "exceeds the maximum serialized size of 32 KiB",
         )),
         Err(source) => Err(FlagshipError::new(
             ErrorCode::InvalidContext,
@@ -538,6 +591,37 @@ fn check_depth(path: &ContextPath<'_>, depth: usize) -> Result<(), FlagshipError
     }
 
     Ok(())
+}
+
+fn validate_context_key(key: &str, path: &ContextPath<'_>) -> Result<(), FlagshipError> {
+    let length = key.chars().count();
+    if length == 0 || length > MAX_CONTEXT_KEY_CHARS {
+        return Err(invalid_context(
+            Some(path),
+            "must contain between 1 and 256 characters",
+        ));
+    }
+
+    Ok(())
+}
+
+#[derive(Default)]
+struct ContextTraversal {
+    visited: usize,
+}
+
+impl ContextTraversal {
+    fn visit(&mut self, path: &ContextPath<'_>) -> Result<(), FlagshipError> {
+        self.visited = self.visited.saturating_add(1);
+        if self.visited > MAX_CONTEXT_VISITED_VALUES {
+            return Err(invalid_context(
+                Some(path),
+                "exceeds the maximum of 10,000 visited values",
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 fn invalid_context(path: Option<&ContextPath<'_>>, problem: &str) -> FlagshipError {
@@ -1008,16 +1092,15 @@ mod tests {
     }
 
     #[test]
-    fn accepts_depth_100_and_rejects_depth_101_with_bounded_path() {
-        let at_limit = nested_json_array(100);
+    fn accepts_ten_value_levels_and_rejects_eleven_with_bounded_path() {
+        let at_limit = nested_json_array(9);
         let context = EvaluationContext::default().with_custom_field("deep", Arc::new(at_limit));
         assert!(normalize_context(&context).is_ok());
 
-        let too_deep = nested_json_array(101);
+        let too_deep = nested_json_array(10);
         let context = EvaluationContext::default().with_custom_field("deep", Arc::new(too_deep));
         let error = normalize_context(&context).unwrap_err();
         assert!(error.message().contains("exceeds maximum nesting depth"));
-        assert!(error.message().contains('…'));
         assert!(error.message().len() < 240);
     }
 
@@ -1049,9 +1132,58 @@ mod tests {
 
         assert_eq!(
             error.message(),
-            "exceeds the maximum serialized size of 1 MiB"
+            "exceeds the maximum serialized size of 32 KiB"
         );
         assert!(!error.message().contains(secret));
+    }
+
+    #[test]
+    fn enforces_top_level_attribute_and_key_limits() {
+        let mut at_limit = EvaluationContext::default();
+        for index in 0..MAX_CONTEXT_ATTRIBUTES {
+            at_limit.add_custom_field(format!("key-{index}"), true);
+        }
+        assert!(normalize_context(&at_limit).is_ok());
+
+        at_limit.add_custom_field("one-too-many", true);
+        let error = normalize_context(&at_limit).unwrap_err();
+        assert_eq!(
+            error.message(),
+            "exceeds the maximum of 100 top-level attributes"
+        );
+
+        let empty = EvaluationContext::default().with_custom_field("", true);
+        assert!(
+            normalize_context(&empty)
+                .unwrap_err()
+                .message()
+                .contains("between 1 and 256 characters")
+        );
+
+        let unicode_key = "é".repeat(MAX_CONTEXT_KEY_CHARS);
+        let unicode = EvaluationContext::default().with_custom_field(unicode_key, true);
+        assert!(normalize_context(&unicode).is_ok());
+
+        let long_key = "x".repeat(MAX_CONTEXT_KEY_CHARS + 1);
+        let too_long = EvaluationContext::default().with_custom_field(long_key, true);
+        assert!(
+            normalize_context(&too_long)
+                .unwrap_err()
+                .message()
+                .contains("between 1 and 256 characters")
+        );
+    }
+
+    #[test]
+    fn enforces_visited_value_limit() {
+        let at_limit = json!(vec![0; MAX_CONTEXT_VISITED_VALUES - 1]);
+        let context = EvaluationContext::default().with_custom_field("values", Arc::new(at_limit));
+        assert!(normalize_context(&context).is_ok());
+
+        let too_many = json!(vec![0; MAX_CONTEXT_VISITED_VALUES]);
+        let context = EvaluationContext::default().with_custom_field("values", Arc::new(too_many));
+        let error = normalize_context(&context).unwrap_err();
+        assert!(error.message().contains("10,000 visited values"));
     }
 
     #[test]

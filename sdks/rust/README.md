@@ -173,6 +173,8 @@ The default is one retry with a one-second fixed delay and a five-second timeout
 
 Contexts containing only primitive values are sent as GET query parameters. Those values, along with the flag key, can therefore appear in request URLs and proxy or server logs; use the structured POST path where appropriate and treat context data as sensitive regardless.
 
+The SDK enforces Flagship's context limits before transport: 100 top-level attributes, 1–256 characters per top-level key, 10 value-nesting levels, 32 KiB of serialized JSON, and 10,000 visited values.
+
 Do not embed tokens in endpoint URLs or evaluation context. URLs with credentials, query strings, or fragments are rejected. SDK-generated debug output redacts configured URLs and credentials, and request headers are marked sensitive. Telemetry callbacks are an explicit sensitive-data boundary and must avoid blocking or panicking.
 
 ## Development

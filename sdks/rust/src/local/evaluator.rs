@@ -40,7 +40,7 @@ use crate::types::EvaluationReason;
 
 const DEFAULT_ROLLOUT_ATTRIBUTE: &str = "targetingKey";
 const MAX_PATH_SEGMENTS: usize = 5;
-const MAX_CONDITION_DEPTH: usize = 100;
+const MAX_CONDITION_DEPTH: usize = 5;
 const MAX_ERROR_FIELD_LENGTH: usize = 128;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -741,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn logical_condition_depth_is_capped_at_one_hundred() {
+    fn logical_condition_depth_is_capped_at_five() {
         let context = context(json!({"x": "yes"}));
         let leaf = json!({"attribute": "x", "operator": "equals", "value": "yes"});
 

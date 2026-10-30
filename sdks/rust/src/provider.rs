@@ -933,8 +933,7 @@ fn map_reason(reason: &EvaluationReason) -> OpenFeatureReason {
     reason = "owned signature composes directly with Result::map_err"
 )]
 fn map_flagship_error(error: FlagshipError) -> EvaluationError {
-    // `server_code` is deliberately ignored for Go/Python parity: an unknown
-    // backend code must not replace the SDK's established error category.
+    let backend_invalid_context = error.server_code() == Some("INVALID_CONTEXT");
     let (code, category, summary) = match error.code() {
         ErrorCode::ProviderNotReady => (
             EvaluationErrorCode::ProviderNotReady,
@@ -952,6 +951,11 @@ fn map_flagship_error(error: FlagshipError) -> EvaluationError {
             "Flagship data could not be parsed",
         ),
         ErrorCode::InvalidContext => (
+            EvaluationErrorCode::InvalidContext,
+            "INVALID_CONTEXT",
+            "evaluation context is invalid",
+        ),
+        ErrorCode::BadRequest if backend_invalid_context => (
             EvaluationErrorCode::InvalidContext,
             "INVALID_CONTEXT",
             "evaluation context is invalid",
@@ -1898,6 +1902,17 @@ mod lifecycle_tests {
         assert_eq!(
             mapped.message.as_deref(),
             Some("BAD_REQUEST (HTTP 400): Flagship evaluation failed")
+        );
+
+        let invalid_context = map_flagship_error(
+            FlagshipError::new(ErrorCode::BadRequest, "secret body")
+                .with_status(400)
+                .with_server_code("INVALID_CONTEXT"),
+        );
+        assert_eq!(invalid_context.code, EvaluationErrorCode::InvalidContext);
+        assert_eq!(
+            invalid_context.message.as_deref(),
+            Some("INVALID_CONTEXT (HTTP 400): evaluation context is invalid")
         );
     }
 

@@ -8,8 +8,8 @@ const RELEASE_COMMIT_PATTERN = `^${RELEASE_COMMIT_SUBJECT}`;
 // Python 0.4.0 was published to PyPI from this canonical release. Until the
 // first Python SDK tag is pushed, keep this baseline even across failed releases.
 const PYTHON_INITIAL_BASELINE = '@cloudflare/flagship@0.4.0';
-// The Rust SDK is first published from the 0.6.0 canonical release. Until the
-// first Rust SDK tag is pushed, keep this baseline even across failed releases.
+// The last canonical release before the Rust SDK existed. Until the first Rust
+// SDK tag is pushed, keep this baseline even across failed releases.
 const RUST_INITIAL_BASELINE = '@cloudflare/flagship@0.6.0';
 type Sdk = (typeof SDKS)[number];
 export type SdkChanges = Record<Sdk, boolean>;

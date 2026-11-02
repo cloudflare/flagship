@@ -2,8 +2,9 @@
 //!
 //! `open-feature` 0.3 does not pass a default value to provider resolution
 //! methods and returns provider errors directly. A disabled Flagship flag is a
-//! successful resolution and returns its served value after exact type checking;
-//! this deliberately differs from the Go provider's default-value fallback. The
+//! successful resolution and returns its served value after exact type checking.
+//! This differs from the TypeScript, Python, and Go providers, which return the
+//! caller's default for a disabled flag; this provider never receives it. The
 //! same `open-feature` version has no null value and only exposes structured
 //! objects at the resolution root. JSON nulls (including nested nulls),
 //! unsupported numbers, and array roots consequently produce a type mismatch.
@@ -31,7 +32,9 @@ use tokio::time::{Interval, MissedTickBehavior};
 use crate::cache::{CacheToken, ResponseCache};
 use crate::client::FlagshipClient;
 use crate::config::FlagshipClientOptions;
-use crate::context::{ExpectedFlagType, NormalizedContext, normalize_context};
+use crate::context::{
+    ExpectedFlagType, NormalizedContext, normalize_context, normalize_local_context,
+};
 use crate::definitions::{DefinitionsFetchResult, DefinitionsFetcher, DefinitionsSnapshot};
 use crate::endpoint::resolve_definitions_endpoint;
 use crate::error::{ConfigError, ErrorCode, FlagshipError};
@@ -305,10 +308,6 @@ impl FlagshipServerProvider {
             refresh_interval,
         } = &self.inner.mode
         else {
-            if self.status() != ProviderStatus::Ready {
-                self.inner.transition_remote(STATUS_READY);
-            }
-
             return Ok(());
         };
 
@@ -345,11 +344,14 @@ impl FlagshipServerProvider {
         Err(superseded_error())
     }
 
-    /// Stops refresh work, clears snapshots and cache state, and leaves the
+    /// Stops refresh work, clears snapshots and cache state, and leaves a local
     /// provider not-ready.
+    ///
+    /// A remote provider has no session state, so shutdown only clears its cache
+    /// and the provider keeps evaluating, matching the TypeScript and Go providers.
     pub async fn shutdown_provider(&self) {
         if matches!(&self.inner.mode, ProviderMode::Remote { .. }) {
-            self.inner.transition_remote(STATUS_NOT_READY);
+            self.inner.reset_remote_cache();
 
             return;
         }
@@ -395,7 +397,7 @@ impl FlagshipServerProvider {
                 if !definition.is_object() {
                     return Err(parse_evaluation_error());
                 }
-                let normalized = normalize_context(context).map_err(map_flagship_error)?;
+                let normalized = normalize_local_context(context).map_err(map_flagship_error)?;
                 let result = evaluate_flag(definition, normalized.values(), account_id)
                     .map_err(|_| parse_evaluation_error())?;
                 let response = FlagshipEvaluationResponse::new(flag_key, result.value)
@@ -601,11 +603,10 @@ impl ProviderInner {
         (generation, task)
     }
 
-    fn transition_remote(&self, status: u8) {
-        self.set_status(STATUS_NOT_READY);
+    /// Invalidates in-flight cache insertions, then clears the remote cache.
+    fn reset_remote_cache(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
         self.clear_remote_cache();
-        self.set_status(status);
     }
 
     fn is_current(&self, generation: u64) -> bool {
@@ -2258,7 +2259,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_lifecycle_is_ready_noop_and_shutdown_is_not_ready() {
+    async fn remote_lifecycle_is_ready_and_shutdown_keeps_evaluating() {
         let provider = FlagshipServerProvider::new(options(false)).expect("remote provider");
         assert_eq!(provider.status(), ProviderStatus::Ready);
 
@@ -2269,12 +2270,12 @@ mod tests {
         assert_eq!(provider.status(), ProviderStatus::Ready);
 
         provider.shutdown_provider().await;
-        assert_eq!(provider.status(), ProviderStatus::NotReady);
+        assert_eq!(provider.status(), ProviderStatus::Ready);
         let error = provider
             .resolve_bool_value("flag", &EvaluationContext::default())
             .await
-            .expect_err("shutdown provider rejects evaluations");
-        assert_eq!(error.code, EvaluationErrorCode::ProviderNotReady);
+            .expect_err("unreachable test endpoint");
+        assert_ne!(error.code, EvaluationErrorCode::ProviderNotReady);
 
         provider
             .initialize_provider()

@@ -799,6 +799,10 @@ mod tests {
         assert!(request.contains("targetingKey=user+one"));
         assert!(!request.contains("context-flag"));
         assert!(!request.to_ascii_lowercase().contains("content-type:"));
+        assert!(request.to_ascii_lowercase().contains(&format!(
+            "user-agent: cloudflare-flagship-rust/{}\r\n",
+            env!("CARGO_PKG_VERSION")
+        )));
         assert_eq!(result.variant, "");
         assert_eq!(result.reason, crate::types::EvaluationReason::DEFAULT);
     }

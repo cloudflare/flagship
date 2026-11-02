@@ -188,18 +188,30 @@ test('retains Python changes after an unsuccessful first publish without a Pytho
 
 test('retains Rust changes after an unsuccessful first publish without a Rust tag', () => {
 	const repo = createRepository();
-	git(repo, 'tag', '@cloudflare/flagship@0.6.0');
 	git(repo, 'tag', '-d', 'sdks/rust/v0.1.0');
-	git(repo, 'tag', '@cloudflare/flagship@0.4.0');
-	write(repo, 'sdks/rust/src/client.rs', 'changed\n');
-	commit(repo, 'change rust');
-	releaseCommit(repo, '0.5.0');
-	git(repo, 'tag', '@cloudflare/flagship@0.5.0');
-	write(repo, 'README.md', 'next release\n');
-	commit(repo, 'prepare next release');
 	releaseCommit(repo, '0.6.0');
+	git(repo, 'tag', '@cloudflare/flagship@0.6.0');
+	write(repo, 'sdks/rust/src/client.rs', 'changed\n');
+	commit(repo, 'add rust sdk');
+	releaseCommit(repo, '0.7.0');
 
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: true });
+
+	// The 0.7.0 crates.io publish failed, so no Rust tag exists; a docs-only release still publishes Rust.
+	git(repo, 'tag', '@cloudflare/flagship@0.7.0');
+	write(repo, 'README.md', 'next release\n');
+	commit(repo, 'prepare next release');
+	releaseCommit(repo, '0.8.0');
+
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: true });
+
+	git(repo, 'tag', '@cloudflare/flagship@0.8.0');
+	git(repo, 'tag', 'sdks/rust/v0.8.0');
+	write(repo, 'README.md', 'after rust publish\n');
+	commit(repo, 'prepare release after rust publish');
+	releaseCommit(repo, '0.9.0');
+
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false });
 });
 
 test('ignores release commits inside a stale SDK baseline window', () => {

@@ -68,8 +68,6 @@ pub use types::{EvaluationReason, FlagshipEvaluationResponse};
 pub use open_feature;
 /// The compatible Reqwest version used by this crate.
 pub use reqwest;
-/// The compatible Reqwest client type used by this crate.
-pub use reqwest::Client;
 /// The compatible `serde_json` version used by this crate.
 pub use serde_json;
 

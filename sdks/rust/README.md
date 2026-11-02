@@ -4,9 +4,8 @@ Native asynchronous feature evaluation for [Cloudflare Flagship](https://develop
 
 ## Install
 
-```toml
-[dependencies]
-cloudflare-flagship = "0.6.0"
+```console
+cargo add cloudflare-flagship
 ```
 
 The default TLS backend is Rustls. See [TLS features](#tls-features) before changing defaults.
@@ -101,7 +100,7 @@ provider.shutdown_provider().await;
 # }
 ```
 
-Dropping an evaluation future cancels its in-progress SDK work. Dropping the final local-provider clone aborts its refresh task.
+Dropping an evaluation future cancels its in-progress SDK work. Dropping the final local-provider clone aborts its refresh task. In remote mode, `shutdown_provider` only clears the response cache and the provider keeps evaluating, as in the TypeScript and Go SDKs.
 
 If a background refresh fails after initialization, the provider becomes `STALE` but retains the last good definitions snapshot, so local evaluations continue. A later successful refresh replaces the snapshot and returns the provider to `READY`.
 
@@ -150,10 +149,10 @@ Exactly one TLS strategy is recommended:
 | `native-tls`         | Platform-native TLS; requires `default-features = false`                                                                                     |
 | `rustls-no-provider` | Rustls without selecting a crypto provider; requires `default-features = false`; the application must install one before client construction |
 
-For example: `cloudflare-flagship = { version = "0.6.0", default-features = false, features = ["native-tls"] }`. The `rustls-no-provider` configuration likewise requires `default-features = false`:
+For example: `cargo add cloudflare-flagship --no-default-features --features native-tls`. The `rustls-no-provider` configuration likewise requires `default-features = false`:
 
-```toml
-cloudflare-flagship = { version = "0.6.0", default-features = false, features = ["rustls-no-provider"] }
+```console
+cargo add cloudflare-flagship --no-default-features --features rustls-no-provider
 ```
 
 Cargo features are additive and unified across the dependency graph, so another dependency can enable additional Reqwest TLS features. This crate rejects a build with no TLS transport feature, but does not reject valid feature-unified combinations or providerless Rustls. With `rustls-no-provider`, the application is responsible for installing a Rustls crypto provider before constructing a default client.
@@ -165,16 +164,19 @@ Cargo features are additive and unified across the dependency graph, so another 
 - WebAssembly and Cloudflare Workers bindings are out of scope. Use the TypeScript SDK's native Workers binding.
 - OpenFeature 0.3 cannot represent null or an array at the root of `StructValue`; nested nulls also fail conversion. Use the direct client when arbitrary JSON is required.
 - OpenFeature 0.3's `EvaluationError` does not implement `std::error::Error`; adapt it at application error boundaries when using `?`.
-- A disabled flag resolves successfully to the value served by Flagship rather than an OpenFeature caller default.
+- A disabled flag resolves successfully to the value served by Flagship. The TypeScript, Python, and Go SDKs return the caller's default instead, but OpenFeature 0.3 never passes the default to a provider. Check for the `Disabled` reason if your code must fall back.
+- Provider errors carry a fixed message such as `FLAG_NOT_FOUND (HTTP 404): requested flag was not found`, not the server's error details, so backend text never reaches logs through OpenFeature. Use the direct client's `FlagshipError` when you need the server message or code.
+- A 400 response whose body reports `INVALID_CONTEXT` resolves with the OpenFeature `InvalidContext` code. The Python and Go SDKs report it as `GENERAL`.
+- The public API exposes Reqwest 0.13 and `open-feature` 0.3 types, such as `FlagshipClientOptionsBuilder::http_client` and the re-exported `open_feature` crate. Upgrading either dependency is a breaking release of this crate.
 - Flag metadata configured in Flagship is returned as OpenFeature `flag_metadata` in remote and local modes, including for disabled flags and cache hits. Only string, boolean and numeric entries are kept; missing or malformed metadata resolves to an empty map.
 
 ## Requests, retries, and security
 
-The default is one retry with a one-second fixed delay and a five-second timeout **per attempt**, including dynamic-header generation and HTTP I/O. Network, timeout, provider-not-ready, general, and unknown errors are retryable; bad request, missing flag, parse, and invalid-context errors are terminal. Dynamic headers are produced once per attempt. Header precedence is dynamic headers, static headers, bearer token, then injected Reqwest defaults.
+The default is one retry with a one-second fixed delay and a five-second timeout **per attempt**, including dynamic-header generation and HTTP I/O. Network, timeout, provider-not-ready, general, and unknown errors are retryable; bad request, missing flag, parse, and invalid-context errors are terminal. Dynamic headers are produced once per attempt. Header precedence is dynamic headers, static headers, bearer token, then injected Reqwest defaults. The default Reqwest client sends `User-Agent: cloudflare-flagship-rust/<version>`; an injected client keeps its own.
 
 Contexts containing only primitive values are sent as GET query parameters. Those values, along with the flag key, can therefore appear in request URLs and proxy or server logs; use the structured POST path where appropriate and treat context data as sensitive regardless.
 
-The SDK enforces Flagship's context limits before transport: 100 top-level attributes, 1–256 characters per top-level key, 10 value-nesting levels, 32 KiB of serialized JSON, and 10,000 visited values.
+The SDK enforces [Flagship's evaluation context limits](https://developers.cloudflare.com/flagship/reference/limits/) before evaluating: 100 top-level attributes, 1–256 characters per top-level key, 10 value-nesting levels, and 32 KiB of serialized JSON. Remote evaluation also enforces the 10,000 visited-values limit, which Flagship applies only to data-plane HTTP and Workers binding evaluation.
 
 Do not embed tokens in endpoint URLs or evaluation context. URLs with credentials, query strings, or fragments are rejected. SDK-generated debug output redacts configured URLs and credentials, and request headers are marked sensitive. Telemetry callbacks are an explicit sensitive-data boundary and must avoid blocking or panicking.
 

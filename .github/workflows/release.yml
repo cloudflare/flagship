@@ -57,7 +57,9 @@ jobs:
           node-version: 24.18.0
           registry-url: https://registry.npmjs.org
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
 
       # `uv` is needed by `.github/changeset-version.ts` to refresh `uv.lock`
       # when the Python SDK version is bumped.
@@ -148,9 +150,13 @@ jobs:
     needs: release
     if: ${{ needs.release.outputs.has_changesets == 'false' && needs.release.outputs.rust_changed == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: crates-io
       url: https://crates.io/crates/cloudflare-flagship
+    # `id-token: write` lets crates-io-auth-action mint a short-lived crates.io token (trusted
+    # publishing). No step in this job compiles code, so dependency build scripts never run
+    # while that permission or the token is available.
     permissions:
       contents: write
       id-token: write
@@ -158,40 +164,67 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          node-version: 24.18.0
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Package crate
-        working-directory: sdks/rust
-        # Build and verify the package before the registry token exists, so build scripts never run with it.
-        run: cargo package --locked
-      # Exchanges the GitHub OIDC token for a short-lived crates.io token (trusted publishing).
-      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
-        id: auth
-      - name: Publish crate if needed
-        working-directory: sdks/rust
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          toolchain: stable
+
+      - name: Check crates.io
+        id: crates-io
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          STATUS=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://crates.io/api/v1/crates/cloudflare-flagship/${VERSION}")
-          case "${STATUS}" in
+          VERSION=$(node -p "require('./sdks/rust/package.json').version")
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          # crates.io rejects requests without a descriptive User-Agent.
+          crates_io_status() {
+            curl --silent --show-error --retry 3 --retry-all-errors \
+              --user-agent "cloudflare/flagship release (https://github.com/cloudflare/flagship)" \
+              --output /dev/null --write-out '%{http_code}' "$1"
+          }
+
+          CRATE_STATUS=$(crates_io_status "https://crates.io/api/v1/crates/cloudflare-flagship")
+          if [ "${CRATE_STATUS}" = "404" ]; then
+            echo "cloudflare-flagship does not exist on crates.io yet, so trusted publishing cannot be configured for it." >&2
+            echo "Publish ${VERSION} manually from this commit, add the trusted publisher, then re-run this job (see AGENTS.md)." >&2
+            exit 1
+          elif [ "${CRATE_STATUS}" != "200" ]; then
+            echo "Unexpected crates.io response while checking cloudflare-flagship: ${CRATE_STATUS}" >&2
+            exit 1
+          fi
+
+          VERSION_STATUS=$(crates_io_status "https://crates.io/api/v1/crates/cloudflare-flagship/${VERSION}")
+          case "${VERSION_STATUS}" in
             200)
               echo "cloudflare-flagship@${VERSION} already exists on crates.io; skipping publish."
+              echo "published=true" >> "${GITHUB_OUTPUT}"
               ;;
             404)
-              cargo publish --locked --no-verify
+              echo "published=false" >> "${GITHUB_OUTPUT}"
               ;;
             *)
-              echo "Unexpected crates.io response while checking cloudflare-flagship@${VERSION}: ${STATUS}" >&2
+              echo "Unexpected crates.io response while checking cloudflare-flagship@${VERSION}: ${VERSION_STATUS}" >&2
               exit 1
               ;;
           esac
+
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+        if: ${{ steps.crates-io.outputs.published == 'false' }}
+        id: auth
+
+      # PR CI runs `cargo publish --dry-run`, and the release commit only bumps versions, so
+      # skipping verification here avoids compiling dependencies while the token exists.
+      - name: Publish crate
+        if: ${{ steps.crates-io.outputs.published == 'false' }}
+        working-directory: sdks/rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked --no-verify
+
       - name: Tag Rust SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: sdks/rust/v${{ steps.crates-io.outputs.version }}
         run: |
-          VERSION=$(node -p "require('./sdks/rust/package.json').version")
-          TAG="sdks/rust/v${VERSION}"
           if git rev-parse --verify --quiet "refs/tags/${TAG}"; then
             test "$(git rev-list -n 1 "${TAG}")" = "${GITHUB_SHA}" || {
               echo "${TAG} exists on a different commit." >&2
@@ -199,6 +232,6 @@ jobs:
             }
             echo "${TAG} already exists on this release; skipping."
           else
-            git tag "${TAG}"
-            git push origin "${TAG}"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${TAG}" -f "sha=${GITHUB_SHA}" > /dev/null
           fi

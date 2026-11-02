@@ -13,6 +13,8 @@ pub use reqwest::{Client, Url};
 
 use crate::error::ConfigError;
 
+const USER_AGENT: &str = concat!("cloudflare-flagship-rust/", env!("CARGO_PKG_VERSION"));
+
 /// Default base URL for the Flagship API.
 pub const FLAGSHIP_DEFAULT_BASE_URL: &str = "https://api.cloudflare.com";
 
@@ -514,10 +516,13 @@ impl FlagshipClientOptionsBuilder {
 
         let http_client = match self.http_client {
             Some(client) => client,
-            None => Client::builder().build().map_err(|error| {
-                ConfigError::new("default HTTP client could not be constructed")
-                    .with_source(error.without_url())
-            })?,
+            None => Client::builder()
+                .user_agent(USER_AGENT)
+                .build()
+                .map_err(|error| {
+                    ConfigError::new("default HTTP client could not be constructed")
+                        .with_source(error.without_url())
+                })?,
         };
 
         Ok(FlagshipClientOptions {

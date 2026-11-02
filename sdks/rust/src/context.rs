@@ -148,8 +148,24 @@ impl NormalizedContext {
 pub(crate) fn normalize_context(
     context: &EvaluationContext,
 ) -> Result<NormalizedContext, FlagshipError> {
+    normalize_context_with(context, ContextTraversal::remote())
+}
+
+/// Like [`normalize_context`] for in-process evaluation.
+///
+/// Flagship applies its visited-value limit only to data-plane HTTP and Workers
+/// binding evaluation, so it is not enforced here. All other context limits apply.
+pub(crate) fn normalize_local_context(
+    context: &EvaluationContext,
+) -> Result<NormalizedContext, FlagshipError> {
+    normalize_context_with(context, ContextTraversal::local())
+}
+
+fn normalize_context_with(
+    context: &EvaluationContext,
+    mut traversal: ContextTraversal,
+) -> Result<NormalizedContext, FlagshipError> {
     let mut values = BTreeMap::new();
-    let mut traversal = ContextTraversal::default();
     let targeting_key = context
         .targeting_key
         .as_deref()
@@ -605,15 +621,29 @@ fn validate_context_key(key: &str, path: &ContextPath<'_>) -> Result<(), Flagshi
     Ok(())
 }
 
-#[derive(Default)]
 struct ContextTraversal {
     visited: usize,
+    max_visited: Option<usize>,
 }
 
 impl ContextTraversal {
+    const fn remote() -> Self {
+        Self {
+            visited: 0,
+            max_visited: Some(MAX_CONTEXT_VISITED_VALUES),
+        }
+    }
+
+    const fn local() -> Self {
+        Self {
+            visited: 0,
+            max_visited: None,
+        }
+    }
+
     fn visit(&mut self, path: &ContextPath<'_>) -> Result<(), FlagshipError> {
         self.visited = self.visited.saturating_add(1);
-        if self.visited > MAX_CONTEXT_VISITED_VALUES {
+        if self.max_visited.is_some_and(|max| self.visited > max) {
             return Err(invalid_context(
                 Some(path),
                 "exceeds the maximum of 10,000 visited values",
@@ -1184,6 +1214,7 @@ mod tests {
         let context = EvaluationContext::default().with_custom_field("values", Arc::new(too_many));
         let error = normalize_context(&context).unwrap_err();
         assert!(error.message().contains("10,000 visited values"));
+        assert!(normalize_local_context(&context).is_ok());
     }
 
     #[test]

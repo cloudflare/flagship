@@ -107,7 +107,7 @@ If a background refresh fails after initialization, the provider becomes `STALE`
 
 ## Cache and hooks
 
-The optional remote cache has fixed TTL, bounded LRU capacity, and no singleflight behavior. It cannot be combined with local evaluation. Disabled responses, type mismatches, and errors are never cached. A cache hit retains the response value and variant and reports the `CACHED` evaluation reason.
+The optional remote cache has fixed TTL, bounded LRU capacity, and no singleflight behavior. It cannot be combined with local evaluation. Disabled responses, type mismatches, and errors are never cached. A cache hit retains the response value, variant and flag metadata and reports the `CACHED` evaluation reason.
 
 ```rust,no_run
 use std::time::Duration;
@@ -166,6 +166,7 @@ Cargo features are additive and unified across the dependency graph, so another 
 - OpenFeature 0.3 cannot represent null or an array at the root of `StructValue`; nested nulls also fail conversion. Use the direct client when arbitrary JSON is required.
 - OpenFeature 0.3's `EvaluationError` does not implement `std::error::Error`; adapt it at application error boundaries when using `?`.
 - A disabled flag resolves successfully to the value served by Flagship rather than an OpenFeature caller default.
+- Flag metadata configured in Flagship is returned as OpenFeature `flag_metadata` in remote and local modes, including for disabled flags and cache hits. Only string, boolean and numeric entries are kept; missing or malformed metadata resolves to an empty map.
 
 ## Requests, retries, and security
 

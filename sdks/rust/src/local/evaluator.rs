@@ -48,6 +48,7 @@ pub(crate) struct EvaluationResult {
     pub(crate) value: Value,
     pub(crate) variant: String,
     pub(crate) reason: EvaluationReason,
+    pub(crate) metadata: Map<String, Value>,
 }
 
 /// An internally inconsistent flag definition.
@@ -182,6 +183,7 @@ pub(crate) fn evaluate_flag_with_random<R: BucketRandom + ?Sized>(
     let flag_key = string_field(flag, "key");
     let default_variation = string_field(flag, "default_variation");
     let variations = flag.get("variations").and_then(Value::as_object);
+    let metadata = flag.get("metadata").and_then(Value::as_object);
     let enabled = flag
         .get("enabled")
         .and_then(Value::as_bool)
@@ -192,6 +194,7 @@ pub(crate) fn evaluate_flag_with_random<R: BucketRandom + ?Sized>(
             flag_key,
             default_variation,
             EvaluationReason::DISABLED,
+            metadata,
         );
     }
     let rules = flag.get("rules").and_then(Value::as_array);
@@ -201,6 +204,7 @@ pub(crate) fn evaluate_flag_with_random<R: BucketRandom + ?Sized>(
             flag_key,
             default_variation,
             EvaluationReason::STATIC,
+            metadata,
         );
     }
 
@@ -230,7 +234,7 @@ pub(crate) fn evaluate_flag_with_random<R: BucketRandom + ?Sized>(
                 EvaluationReason::TARGETING_MATCH
             };
 
-            return serve_variation(variations, flag_key, variant.as_ref(), reason);
+            return serve_variation(variations, flag_key, variant.as_ref(), reason, metadata);
         }
     }
 
@@ -239,6 +243,7 @@ pub(crate) fn evaluate_flag_with_random<R: BucketRandom + ?Sized>(
         flag_key,
         default_variation,
         EvaluationReason::DEFAULT,
+        metadata,
     )
 }
 
@@ -264,6 +269,7 @@ fn serve_variation(
     flag_key: &str,
     variant: &str,
     reason: EvaluationReason,
+    metadata: Option<&Map<String, Value>>,
 ) -> Result<EvaluationResult, FlagConfigError> {
     let Some(value) = variations.and_then(|variations| variations.get(variant)) else {
         return Err(FlagConfigError::undefined_variation(flag_key, variant));
@@ -273,6 +279,7 @@ fn serve_variation(
         value: value.clone(),
         variant: variant.to_owned(),
         reason,
+        metadata: metadata.cloned().unwrap_or_default(),
     })
 }
 

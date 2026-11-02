@@ -8,7 +8,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// The native Flagship reason for selecting an evaluation value.
 ///
@@ -177,6 +177,16 @@ where
     Ok(value.unwrap_or_default())
 }
 
+fn object_or_default<'de, D>(deserializer: D) -> Result<Map<String, Value>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match Value::deserialize(deserializer)? {
+        Value::Object(object) => object,
+        _ => Map::new(),
+    })
+}
+
 /// A successful response from the native Flagship evaluation API.
 ///
 /// `value` retains any JSON value, including `null`. A missing or `null`
@@ -208,6 +218,17 @@ pub struct FlagshipEvaluationResponse {
     /// [`EvaluationReason::DEFAULT`] when missing or `null`.
     #[serde(default, deserialize_with = "null_as_default")]
     pub reason: EvaluationReason,
+
+    /// The flag metadata configured in Flagship.
+    ///
+    /// Empty when the response has no metadata or it is not a JSON object.
+    /// The `OpenFeature` provider exposes only string, boolean and numeric entries.
+    #[serde(
+        default,
+        deserialize_with = "object_or_default",
+        skip_serializing_if = "Map::is_empty"
+    )]
+    pub metadata: Map<String, Value>,
 }
 
 impl FlagshipEvaluationResponse {
@@ -219,6 +240,7 @@ impl FlagshipEvaluationResponse {
             value,
             variant: String::new(),
             reason: EvaluationReason::DEFAULT,
+            metadata: Map::new(),
         }
     }
 
@@ -234,6 +256,14 @@ impl FlagshipEvaluationResponse {
     #[must_use]
     pub fn with_reason(mut self, reason: impl Into<EvaluationReason>) -> Self {
         self.reason = reason.into();
+
+        self
+    }
+
+    /// Sets the flag metadata.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: Map<String, Value>) -> Self {
+        self.metadata = metadata;
 
         self
     }

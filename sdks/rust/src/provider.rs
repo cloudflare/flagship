@@ -19,7 +19,8 @@ use open_feature::provider::{
 };
 use open_feature::{
     EvaluationContext, EvaluationError, EvaluationErrorCode, EvaluationReason as OpenFeatureReason,
-    EvaluationResult, Hook, HookWrapper, StructValue, Value as OpenFeatureValue, async_trait,
+    EvaluationResult, FlagMetadata, Hook, HookWrapper, StructValue, Value as OpenFeatureValue,
+    async_trait,
 };
 use reqwest::header::HeaderValue;
 use serde_json::Value as JsonValue;
@@ -399,7 +400,8 @@ impl FlagshipServerProvider {
                     .map_err(|_| parse_evaluation_error())?;
                 let response = FlagshipEvaluationResponse::new(flag_key, result.value)
                     .with_variant(result.variant)
-                    .with_reason(result.reason);
+                    .with_reason(result.reason)
+                    .with_metadata(result.metadata);
 
                 (response, None, generation)
             }
@@ -411,7 +413,7 @@ impl FlagshipServerProvider {
             value,
             variant: (!response.variant.is_empty()).then(|| response.variant.clone()),
             reason: Some(map_reason(&response.reason)),
-            flag_metadata: None,
+            flag_metadata: Some(to_flag_metadata(&response.metadata)),
         };
 
         if response.reason != EvaluationReason::DISABLED
@@ -912,6 +914,29 @@ async fn evaluate_remote(
         .map_err(map_flagship_error)?;
 
     Ok((response, token))
+}
+
+/// Converts flag metadata into `OpenFeature` metadata, keeping only string,
+/// boolean and finite numeric entries. Integers that fit in `i64` stay integers.
+fn to_flag_metadata(metadata: &serde_json::Map<String, JsonValue>) -> FlagMetadata {
+    let mut out = FlagMetadata::default();
+
+    for (key, value) in metadata {
+        match value {
+            JsonValue::String(value) => out.add_value(key.as_str(), value.as_str()),
+            JsonValue::Bool(value) => out.add_value(key.as_str(), *value),
+            JsonValue::Number(number) => {
+                if let Some(value) = number.as_i64() {
+                    out.add_value(key.as_str(), value);
+                } else if let Some(value) = number.as_f64().filter(|value| value.is_finite()) {
+                    out.add_value(key.as_str(), value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    out
 }
 
 fn map_reason(reason: &EvaluationReason) -> OpenFeatureReason {
@@ -1963,6 +1988,8 @@ mod tests {
     use serde_json::json;
     use tokio::sync::oneshot;
 
+    use open_feature::FlagMetadataValue;
+
     use super::*;
 
     fn options(account_id: bool) -> FlagshipClientOptions {
@@ -2756,6 +2783,141 @@ mod tests {
         assert!(!disabled.value);
         assert_eq!(boolean.reason, Some(OpenFeatureReason::Static));
         assert_eq!(boolean.variant.as_deref(), Some("value"));
+    }
+
+    fn metadata_values(
+        details: &FlagMetadata,
+    ) -> std::collections::BTreeMap<&str, &FlagMetadataValue> {
+        details
+            .values
+            .iter()
+            .map(|(key, value)| (key.as_str(), value))
+            .collect()
+    }
+
+    #[test]
+    fn metadata_conversion_keeps_primitives_and_drops_everything_else() {
+        let metadata = json!({
+            "owner": "growth",
+            "beta": true,
+            "version": 3,
+            "ratio": 0.5,
+            "huge": u64::MAX,
+            "nothing": null,
+            "list": [1],
+            "nested": {"a": 1}
+        });
+        let converted = to_flag_metadata(metadata.as_object().unwrap());
+        let values = metadata_values(&converted);
+
+        assert_eq!(values.len(), 5);
+        assert_eq!(values["owner"], &FlagMetadataValue::String("growth".into()));
+        assert_eq!(values["beta"], &FlagMetadataValue::Bool(true));
+        assert_eq!(values["version"], &FlagMetadataValue::Int(3));
+        assert_eq!(values["ratio"], &FlagMetadataValue::Float(0.5));
+        assert_eq!(
+            values["huge"],
+            &FlagMetadataValue::Float(1.844_674_407_370_955_2e19)
+        );
+        assert!(to_flag_metadata(&serde_json::Map::new()).values.is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_provider_returns_metadata_for_enabled_and_disabled_flags() {
+        let provider = local_provider();
+        let mut enabled = flag(json!(true), true);
+        enabled["metadata"] = json!({"owner": "growth", "tier": 2, "nested": {"x": 1}});
+        let mut disabled = flag(json!(false), false);
+        disabled["metadata"] = json!({"owner": "platform"});
+        let mut malformed = flag(json!(true), true);
+        malformed["metadata"] = json!("not-an-object");
+        install(
+            &provider,
+            json!({"flags": {
+                "enabled": enabled,
+                "disabled": disabled,
+                "malformed": malformed,
+                "absent": flag(json!(true), true)
+            }}),
+        );
+        let context = EvaluationContext::default();
+
+        let enabled = provider
+            .resolve_bool_value("enabled", &context)
+            .await
+            .unwrap();
+        let disabled = provider
+            .resolve_bool_value("disabled", &context)
+            .await
+            .unwrap();
+        let malformed = provider
+            .resolve_bool_value("malformed", &context)
+            .await
+            .unwrap();
+        let absent = provider
+            .resolve_bool_value("absent", &context)
+            .await
+            .unwrap();
+
+        let enabled = enabled.flag_metadata.unwrap();
+        let values = metadata_values(&enabled);
+        assert_eq!(values.len(), 2);
+        assert_eq!(values["owner"], &FlagMetadataValue::String("growth".into()));
+        assert_eq!(values["tier"], &FlagMetadataValue::Int(2));
+        assert_eq!(disabled.reason, Some(OpenFeatureReason::Disabled));
+        assert_eq!(
+            metadata_values(&disabled.flag_metadata.unwrap())["owner"],
+            &FlagMetadataValue::String("platform".into())
+        );
+        assert!(malformed.flag_metadata.unwrap().values.is_empty());
+        assert!(absent.flag_metadata.unwrap().values.is_empty());
+    }
+
+    #[tokio::test]
+    async fn remote_provider_returns_metadata_including_cache_hits() {
+        let (endpoint, server) = server(
+            br#"{"flagKey":"flag","value":true,"variant":"on","reason":"STATIC","metadata":{"owner":"growth","tier":2,"nested":{"x":1}}}"#,
+        );
+        let provider = FlagshipServerProvider::builder(endpoint_options(&endpoint, false))
+            .cache_ttl(Duration::from_secs(60))
+            .build()
+            .expect("cached provider");
+        let context = EvaluationContext::default();
+
+        let first = provider.resolve_bool_value("flag", &context).await.unwrap();
+        server.join().expect("server thread");
+        let second = provider.resolve_bool_value("flag", &context).await.unwrap();
+
+        assert_eq!(second.reason, Some(OpenFeatureReason::Cached));
+        for details in [first, second] {
+            let metadata = details.flag_metadata.unwrap();
+            let values = metadata_values(&metadata);
+            assert_eq!(values.len(), 2);
+            assert_eq!(values["owner"], &FlagMetadataValue::String("growth".into()));
+            assert_eq!(values["tier"], &FlagMetadataValue::Int(2));
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_provider_treats_missing_or_malformed_metadata_as_empty() {
+        for body in [
+            &br#"{"flagKey":"flag","value":true}"#[..],
+            &br#"{"flagKey":"flag","value":true,"metadata":null}"#[..],
+            &br#"{"flagKey":"flag","value":true,"metadata":["a"]}"#[..],
+        ] {
+            let (endpoint, server) = server(body);
+            let provider = FlagshipServerProvider::builder(endpoint_options(&endpoint, false))
+                .build()
+                .expect("provider");
+
+            let details = provider
+                .resolve_bool_value("flag", &EvaluationContext::default())
+                .await
+                .unwrap();
+            server.join().expect("server thread");
+
+            assert!(details.flag_metadata.unwrap().values.is_empty());
+        }
     }
 
     #[tokio::test]

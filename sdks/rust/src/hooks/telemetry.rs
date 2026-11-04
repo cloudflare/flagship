@@ -549,7 +549,7 @@ mod tests {
             TelemetryEvent::error(&context, &evaluation_error())
         );
 
-        for secret in [
+        for (index, secret) in [
             "flag secret",
             "target secret",
             "field secret",
@@ -560,8 +560,14 @@ mod tests {
             "metadata secret",
             "code secret",
             "message secret",
-        ] {
-            assert!(!output.contains(secret), "debug leaked {secret:?}");
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(
+                !output.contains(secret),
+                "debug leaked sensitive fixture #{index}"
+            );
         }
         assert!(output.contains("flag_key_len: 11"));
         assert!(output.contains("value_type: String"));

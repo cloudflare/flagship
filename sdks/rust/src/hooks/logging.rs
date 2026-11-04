@@ -288,13 +288,19 @@ mod tests {
         );
 
         let output = format!("{events:?}");
-        for secret in [
+        for (index, secret) in [
             "secret target",
             "secret@example.com",
             "secret default",
             "secret result",
-        ] {
-            assert!(!output.contains(secret), "event leaked {secret:?}");
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(
+                !output.contains(secret),
+                "event leaked sensitive fixture #{index}"
+            );
         }
     }
 

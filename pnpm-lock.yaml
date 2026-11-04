@@ -58,6 +58,8 @@ importers:
 
   sdks/python: {}
 
+  sdks/rust: {}
+
   sdks/typescript:
     dependencies:
       lru-cache:

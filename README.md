@@ -3,11 +3,12 @@
 [![npm version](https://img.shields.io/npm/v/@cloudflare/flagship.svg)](https://www.npmjs.com/package/@cloudflare/flagship)
 [![PyPI version](https://img.shields.io/pypi/v/cloudflare-flagship.svg)](https://pypi.org/project/cloudflare-flagship/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/cloudflare/flagship/sdks/go.svg)](https://pkg.go.dev/github.com/cloudflare/flagship/sdks/go)
+[![crates.io version](https://img.shields.io/crates/v/cloudflare-flagship.svg)](https://crates.io/crates/cloudflare-flagship)
 [![license](https://img.shields.io/npm/l/@cloudflare/flagship.svg)](LICENSE)
 
 Flagship is Cloudflare's feature flag platform. This repository contains the official Flagship SDKs for application developers who want to evaluate feature flags through [OpenFeature](https://openfeature.dev/).
 
-The TypeScript SDK is recommended for most use cases. It supports HTTP evaluation, browser-side caching, and the native Flagship Workers binding — which skips HTTP entirely and requires no auth token configuration. If you are building on Cloudflare Workers, use the TypeScript SDK with the Workers binding. The Python and Go SDKs are available for server-side applications and support HTTP evaluation only.
+The TypeScript SDK is recommended for most use cases. It supports HTTP evaluation, browser-side caching, and the native Flagship Workers binding — which skips HTTP entirely and requires no auth token configuration. If you are building on Cloudflare Workers, use the TypeScript SDK with the Workers binding. The Python and Go SDKs are available for server-side applications and support HTTP evaluation only. The Rust SDK supports remote HTTP evaluation, local evaluation, and an optional cache, but does not support the Workers binding.
 
 ## SDKs
 
@@ -16,6 +17,7 @@ The TypeScript SDK is recommended for most use cases. It supports HTTP evaluatio
 | TypeScript | [`@cloudflare/flagship`](https://www.npmjs.com/package/@cloudflare/flagship) | Node.js, Cloudflare Workers, browsers | Workers binding, HTTP, browser prefetch cache | [`sdks/typescript`](sdks/typescript) |
 | Python     | [`cloudflare-flagship`](https://pypi.org/project/cloudflare-flagship/)       | Python server applications            | HTTP                                          | [`sdks/python`](sdks/python)         |
 | Go         | [`github.com/cloudflare/flagship/sdks/go`](sdks/go)                          | Go server applications                | HTTP                                          | [`sdks/go`](sdks/go)                 |
+| Rust       | [`cloudflare-flagship`](https://crates.io/crates/cloudflare-flagship)        | Rust server applications              | HTTP, local evaluation, cache                 | [`sdks/rust`](sdks/rust)             |
 
 ## TypeScript
 
@@ -148,6 +150,16 @@ func main() {
 
 The Go SDK supports HTTP evaluation only.
 
+## Rust
+
+Install from crates.io:
+
+```sh
+cargo add cloudflare-flagship
+```
+
+See the [Rust SDK README](sdks/rust/README.md) for remote evaluation, local evaluation, caching, TLS options, and OpenFeature examples. The Rust SDK is for server applications and does not provide the Cloudflare Workers binding.
+
 ## Repository Layout
 
 | Path                                     | Description                                                  |
@@ -155,6 +167,7 @@ The Go SDK supports HTTP evaluation only.
 | [`sdks/typescript`](sdks/typescript)     | TypeScript SDK source, tests, examples, and package metadata |
 | [`sdks/python`](sdks/python)             | Python SDK source, tests, examples, and package metadata     |
 | [`sdks/go`](sdks/go)                     | Go SDK source, tests, examples, and module metadata          |
+| [`sdks/rust`](sdks/rust)                 | Rust SDK source, tests, examples, and Cargo metadata         |
 | [`.changeset`](.changeset)               | Release intent files and Changesets configuration            |
 | [`.github/workflows`](.github/workflows) | Pull request checks and publish workflows                    |
 
@@ -172,6 +185,7 @@ pnpm run check
 - [TypeScript examples](sdks/typescript/examples)
 - [Python examples](sdks/python/examples)
 - [Go examples](sdks/go/examples)
+- [Rust SDK documentation and examples](sdks/rust/README.md)
 - [OpenFeature specification](https://openfeature.dev/specification/)
 - [Issues](https://github.com/cloudflare/flagship/issues)
 

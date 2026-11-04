@@ -1,6 +1,6 @@
 {
 	"name": "@cloudflare/flagship-rust",
-	"version": "0.6.0",
+	"version": "0.7.0",
 	"description": "OpenFeature provider for Cloudflare Flagship feature flags (Rust)",
 	"private": true,
 	"license": "Apache-2.0",

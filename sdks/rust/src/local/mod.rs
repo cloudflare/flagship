@@ -1,6 +1,6 @@
 //! Local evaluation and definition refresh lifecycle.
 
-mod coercion;
+pub(crate) mod coercion;
 mod evaluator;
 mod murmur;
 

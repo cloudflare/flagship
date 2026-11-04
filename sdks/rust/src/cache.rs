@@ -48,7 +48,7 @@ impl fmt::Debug for CacheToken {
 
 #[derive(Debug)]
 pub(crate) struct CacheLookup {
-    pub(crate) response: Option<FlagshipEvaluationResponse>,
+    pub(crate) response: Option<Arc<FlagshipEvaluationResponse>>,
     pub(crate) token: CacheToken,
 }
 
@@ -68,34 +68,12 @@ struct State {
 
 impl State {
     fn next_access(&mut self) -> u64 {
-        if self.access_sequence == u64::MAX {
-            self.renumber_accesses();
-        }
-
         self.access_sequence += 1;
 
         self.access_sequence
     }
 
-    fn renumber_accesses(&mut self) {
-        let old_recency = std::mem::take(&mut self.recency);
-        let mut next = 0_u64;
-
-        for (_, key) in old_recency {
-            let Some(entry) = self.items.get_mut(&key) else {
-                continue;
-            };
-
-            next += 1;
-            entry.last_access = next;
-            self.recency.insert(next, key);
-        }
-
-        self.access_sequence = next;
-    }
-
     fn get_live(&mut self, key: &str, now: Duration) -> Option<Arc<FlagshipEvaluationResponse>> {
-        let last_access = self.next_access();
         let entry = self.items.get_mut(key)?;
 
         if now >= entry.expires_at {
@@ -106,14 +84,12 @@ impl State {
             return None;
         }
 
-        let previous_access = entry.last_access;
-        entry.last_access = last_access;
+        self.access_sequence += 1;
+        let previous_access = std::mem::replace(&mut entry.last_access, self.access_sequence);
         let response = Arc::clone(&entry.response);
-        let indexed_key = self
-            .recency
-            .remove(&previous_access)
-            .unwrap_or_else(|| key.to_owned());
-        self.recency.insert(last_access, indexed_key);
+        if let Some(indexed_key) = self.recency.remove(&previous_access) {
+            self.recency.insert(self.access_sequence, indexed_key);
+        }
 
         Some(response)
     }
@@ -139,15 +115,9 @@ impl State {
     }
 
     fn evict_to_capacity(&mut self, capacity: usize) {
-        while self.items.len() > capacity {
-            let Some((_, key)) = self.recency.pop_first() else {
-                // Discard all entries if the indexes are inconsistent and no
-                // trustworthy eviction order remains.
-                self.items.clear();
-
-                break;
-            };
-
+        while self.items.len() > capacity
+            && let Some((_, key)) = self.recency.pop_first()
+        {
             self.items.remove(&key);
         }
     }
@@ -168,22 +138,11 @@ impl State {
     }
 }
 
-/// A synchronous, mutex-protected fixed-TTL and LRU response cache.
+/// Fixed-TTL LRU response cache. Reads don't extend expiry; expired entries are
+/// removed lazily on lookup.
 ///
-/// TTL starts at insertion. Reads update LRU recency but never extend expiry,
-/// and replacement resets both expiry and recency. Expired entries are removed
-/// lazily when their key is looked up rather than by a background sweep.
-///
-/// The provider owns enablement, the default capacity of 1000, and the decision
-/// to cache only successful, eligible responses. Lookups deliberately have no
-/// singleflight behavior: duplicate misses can evaluate and insert concurrently,
-/// with the last insertion winning. Clearing increments an epoch so evaluations
-/// started before the clear cannot repopulate the cache.
-///
-/// A poisoned mutex is treated as an invariant failure rather than being
-/// recovered, because a panic could have left the item and recency indexes
-/// inconsistent. All methods are synchronous, so the mutex cannot be held
-/// across an `.await`.
+/// Clearing bumps an epoch so evaluations started before the clear cannot
+/// repopulate the cache.
 pub(crate) struct ResponseCache {
     ttl: Duration,
     capacity: NonZeroUsize,
@@ -210,16 +169,15 @@ impl ResponseCache {
         })
     }
 
-    /// Looks up an evaluation and returns a token suitable for a later insert.
-    ///
-    /// The cached response is held by `Arc` while locked, then deep-cloned after
-    /// releasing the mutex. Callers may therefore rewrite the returned reason or
-    /// mutate JSON objects and arrays without changing cached storage.
+    pub(crate) const fn capacity(&self) -> NonZeroUsize {
+        self.capacity
+    }
+
+    /// Looks up an evaluation and returns a token for a later insert.
     ///
     /// # Errors
     ///
-    /// Returns an error if the normalized context cannot be serialized into its
-    /// canonical cache-key representation.
+    /// Returns an error if the context cannot be serialized into a cache key.
     pub(crate) fn lookup(
         &self,
         flag_key: &str,
@@ -231,10 +189,8 @@ impl ResponseCache {
         let now = self.clock.now();
         let epoch = state.epoch;
 
-        let cached = state.get_live(&key, now);
-
+        let response = state.get_live(&key, now);
         drop(state);
-        let response = cached.map(|response| response.as_ref().clone());
 
         Ok(CacheLookup {
             response,
@@ -242,11 +198,7 @@ impl ResponseCache {
         })
     }
 
-    /// Inserts an owned response when the lookup token is from the current epoch.
-    ///
-    /// Returns `false` when a clear occurred after the token was issued. The
-    /// response is wrapped before locking to keep allocation outside the critical
-    /// section. Expiry uses saturating addition for extremely large TTL values.
+    /// Inserts a response; returns `false` if the cache was cleared since the token was issued.
     pub(crate) fn insert(&self, token: CacheToken, response: FlagshipEvaluationResponse) -> bool {
         let response = Arc::new(response);
         let mut state = self.lock_state();
@@ -557,47 +509,24 @@ mod tests {
     }
 
     #[test]
-    fn sequence_exhaustion_renumbers_without_changing_order() {
+    fn misses_do_not_advance_the_access_sequence() {
         let clock = Arc::new(TestClock::default());
-        let cache = cache(Duration::from_secs(10), 3, &clock);
+        let cache = cache(Duration::from_secs(10), 2, &clock);
         let context = empty_context();
         insert(
             &cache,
-            "a",
+            "flag",
             ExpectedFlagType::Bool,
             &context,
-            response("a", json!(true)),
+            response("flag", json!(true)),
         );
-        insert(
-            &cache,
-            "b",
-            ExpectedFlagType::Bool,
-            &context,
-            response("b", json!(true)),
-        );
-        insert(
-            &cache,
-            "c",
-            ExpectedFlagType::Bool,
-            &context,
-            response("c", json!(true)),
-        );
-        cache.lock_state().access_sequence = u64::MAX;
+        let before = cache.lock_state().access_sequence;
 
-        assert!(contains(&cache, "b"));
-        insert(
-            &cache,
-            "d",
-            ExpectedFlagType::Bool,
-            &context,
-            response("d", json!(true)),
-        );
-
-        assert!(!contains(&cache, "a"));
-        assert!(contains(&cache, "b"));
-        assert!(contains(&cache, "c"));
-        assert!(contains(&cache, "d"));
-        assert_consistent(&cache);
+        assert!(!contains(&cache, "missing"));
+        assert_eq!(cache.lock_state().access_sequence, before);
+        assert!(contains(&cache, "flag"));
+        assert_eq!(cache.lock_state().access_sequence, before + 1);
+        assert_eq!(cache.capacity().get(), 2);
     }
 
     #[test]
@@ -760,7 +689,7 @@ mod tests {
     }
 
     #[test]
-    fn returned_objects_do_not_alias_cached_storage() {
+    fn hits_share_cached_storage_without_cloning() {
         let clock = Arc::new(TestClock::default());
         let cache = cache(Duration::from_secs(10), 2, &clock);
         let context = empty_context();
@@ -772,15 +701,14 @@ mod tests {
             response("flag", json!({"nested": {"value": 1}})),
         );
 
-        let mut first = lookup(&cache, "flag", ExpectedFlagType::Object, &context)
+        let first = lookup(&cache, "flag", ExpectedFlagType::Object, &context)
             .response
             .unwrap();
-        first.value["nested"]["value"] = json!(2);
-        first.reason = EvaluationReason::from("CACHED");
         let second = lookup(&cache, "flag", ExpectedFlagType::Object, &context)
             .response
             .unwrap();
 
+        assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(second.value, json!({"nested": {"value": 1}}));
         assert_eq!(second.reason, EvaluationReason::DEFAULT);
     }

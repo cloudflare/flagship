@@ -1,10 +1,8 @@
 //! Resolution of validated Flagship configuration into API endpoint URLs.
-//!
-//! Configuration validation belongs to [`crate::config`]. This module only
-//! constructs evaluation URLs and derives definitions URLs from those validated
-//! values.
 
-use crate::config::{FlagshipEndpoint, Url};
+use reqwest::Url;
+
+use crate::config::FlagshipEndpoint;
 use crate::error::ConfigError;
 
 const CLIENT_API_PREFIX: &str = "client/v4/accounts";
@@ -13,58 +11,40 @@ const EVALUATE_PATH: &str = "evaluate";
 const DEFINITIONS_PATH: &str = "definitions";
 const EVALUATE_SUFFIX: &str = "/evaluate";
 const DEFINITIONS_SUFFIX: &str = "/definitions";
-const EVALUATION_ACCOUNT_ERROR: &str = "account_id is required to resolve the evaluation endpoint";
-const DEFINITIONS_ACCOUNT_ERROR: &str =
-    "account_id is required to resolve the definitions endpoint";
-const BASE_URL_ERROR: &str = "configured base_url cannot be used to construct an API endpoint";
 const DEFINITIONS_DERIVATION_ERROR: &str =
     "explicit endpoint path must end in /evaluate to derive the definitions endpoint";
 const HEX_DIGITS: &[u8; 16] = b"0123456789ABCDEF";
 
-/// Resolves the remote-evaluation URL from validated endpoint configuration.
-pub(crate) fn resolve_evaluation_endpoint(endpoint: &FlagshipEndpoint) -> Result<Url, ConfigError> {
+pub(crate) fn resolve_evaluation_endpoint(endpoint: &FlagshipEndpoint) -> Url {
     match endpoint {
-        FlagshipEndpoint::App(app) => {
-            let account_id = endpoint
-                .account_id()
-                .ok_or_else(|| ConfigError::new(EVALUATION_ACCOUNT_ERROR))?;
-
-            resolve_app_endpoint(app.base_url(), account_id, app.app_id(), EVALUATE_PATH)
-        }
-        FlagshipEndpoint::Explicit(explicit) => Ok(explicit.endpoint().clone()),
+        FlagshipEndpoint::App(app) => resolve_app_endpoint(
+            app.base_url(),
+            app.account_id(),
+            app.app_id(),
+            EVALUATE_PATH,
+        ),
+        FlagshipEndpoint::Explicit(explicit) => explicit.endpoint().clone(),
     }
 }
 
-/// Resolves the local-evaluation definitions URL from validated configuration.
 pub(crate) fn resolve_definitions_endpoint(
     endpoint: &FlagshipEndpoint,
 ) -> Result<Url, ConfigError> {
     match endpoint {
-        FlagshipEndpoint::App(app) => {
-            let account_id = endpoint
-                .account_id()
-                .ok_or_else(|| ConfigError::new(DEFINITIONS_ACCOUNT_ERROR))?;
-
-            resolve_app_endpoint(app.base_url(), account_id, app.app_id(), DEFINITIONS_PATH)
-        }
+        FlagshipEndpoint::App(app) => Ok(resolve_app_endpoint(
+            app.base_url(),
+            app.account_id(),
+            app.app_id(),
+            DEFINITIONS_PATH,
+        )),
         FlagshipEndpoint::Explicit(explicit) => derive_definitions_endpoint(explicit.endpoint()),
     }
 }
 
-fn resolve_app_endpoint(
-    base_url: &Url,
-    account_id: &str,
-    app_id: &str,
-    resource: &str,
-) -> Result<Url, ConfigError> {
+fn resolve_app_endpoint(base_url: &Url, account_id: &str, app_id: &str, resource: &str) -> Url {
     let mut endpoint = base_url.clone();
-    if endpoint.cannot_be_a_base() {
-        return Err(ConfigError::new(BASE_URL_ERROR));
-    }
 
-    // `set_path` normalizes literal dot segments. Config validation rejects `.`
-    // and `..` slash-delimited ID segments before they reach this point, while
-    // escaping `/` keeps every validated ID in exactly one URL path segment.
+    // Escaping `/` keeps each ID in one path segment; config rejects `.`/`..`.
     let base_path = endpoint.path().trim_end_matches('/');
     let account_id = escape_path_segment(account_id);
     let app_id = escape_path_segment(app_id);
@@ -73,14 +53,10 @@ fn resolve_app_endpoint(
     endpoint.set_query(None);
     endpoint.set_fragment(None);
 
-    Ok(endpoint)
+    endpoint
 }
 
-/// Derives a definitions URL without decoding already escaped path segments.
-///
-/// Go's `url.URL.Path` replacement can turn an encoded slash into a path
-/// separator. Operating on the serialized path deliberately differs from that
-/// buggy behavior and keeps `%2F` inside the original ID segment.
+/// Works on the serialized path so escaped `%2F` stays inside its segment.
 fn derive_definitions_endpoint(evaluation_endpoint: &Url) -> Result<Url, ConfigError> {
     let normalized_path = evaluation_endpoint.path().trim_end_matches('/');
     let Some(prefix) = normalized_path.strip_suffix(EVALUATE_SUFFIX) else {
@@ -124,10 +100,6 @@ mod tests {
     use super::*;
     use crate::config::FlagshipClientOptions;
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     fn app_endpoint(app_id: &str, account_id: &str, base_url: Option<&str>) -> FlagshipEndpoint {
         let mut builder = FlagshipClientOptions::builder()
             .app_id(app_id)
@@ -137,44 +109,21 @@ mod tests {
             builder = builder.base_url(base_url);
         }
 
-        builder
-            .build()
-            .expect("valid app configuration")
-            .endpoint()
-            .clone()
+        builder.build_endpoint().expect("valid app configuration")
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     fn explicit_endpoint(value: &str) -> FlagshipEndpoint {
         FlagshipClientOptions::builder()
             .endpoint(value)
-            .build()
+            .build_endpoint()
             .expect("valid explicit endpoint")
-            .endpoint()
-            .clone()
     }
 
-    #[cfg(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    ))]
-    #[test]
-    fn definitions_resolver_compiles_without_constructing_a_client() {
-        let _: fn(&FlagshipEndpoint) -> Result<Url, ConfigError> = resolve_definitions_endpoint;
-    }
-
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn resolves_default_app_endpoints() {
         let config = app_endpoint("app-123", "acct-456", None);
 
-        let evaluation = resolve_evaluation_endpoint(&config).expect("evaluation endpoint");
+        let evaluation = resolve_evaluation_endpoint(&config);
         let definitions = resolve_definitions_endpoint(&config).expect("definitions endpoint");
 
         assert_eq!(
@@ -187,10 +136,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn resolves_custom_base_paths_after_trailing_slash_normalization() {
         let config = app_endpoint(
@@ -199,7 +144,7 @@ mod tests {
             Some("https://api.example.com/prefix////"),
         );
 
-        let evaluation = resolve_evaluation_endpoint(&config).expect("evaluation endpoint");
+        let evaluation = resolve_evaluation_endpoint(&config);
 
         assert_eq!(
             evaluation.as_str(),
@@ -207,15 +152,11 @@ mod tests {
         );
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn encodes_ids_as_single_safe_path_segments() {
         let config = app_endpoint("my app/version%2", "a/b c", None);
 
-        let evaluation = resolve_evaluation_endpoint(&config).expect("evaluation endpoint");
+        let evaluation = resolve_evaluation_endpoint(&config);
 
         assert_eq!(
             evaluation.as_str(),
@@ -239,15 +180,11 @@ mod tests {
         assert_eq!(escape_path_segment("\0\u{7f}"), "%00%7F");
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn resolved_endpoint_retains_go_path_escape_safe_characters() {
         let config = app_endpoint("safe-$&+:=@~. value/part", "account", None);
 
-        let evaluation = resolve_evaluation_endpoint(&config).expect("evaluation endpoint");
+        let evaluation = resolve_evaluation_endpoint(&config);
 
         assert!(
             evaluation
@@ -265,22 +202,18 @@ mod tests {
             let error = FlagshipClientOptions::builder()
                 .app_id(app_id)
                 .account_id(account_id)
-                .build()
+                .build_endpoint()
                 .expect_err("dot segment must be rejected");
 
             assert_eq!(error.message(), expected);
         }
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn preserves_explicit_evaluation_endpoint_and_custom_path() {
         let config = explicit_endpoint("https://api.example.com/custom/v1/apps/app/evaluate/");
 
-        let evaluation = resolve_evaluation_endpoint(&config).expect("evaluation endpoint");
+        let evaluation = resolve_evaluation_endpoint(&config);
         let definitions = resolve_definitions_endpoint(&config).expect("definitions endpoint");
 
         assert_eq!(
@@ -293,14 +226,10 @@ mod tests {
         );
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn app_endpoint_round_trips_to_explicit_definitions_with_encoded_ids() {
         let app = app_endpoint("my app/version", "account/team", None);
-        let evaluation = resolve_evaluation_endpoint(&app).expect("app evaluation endpoint");
+        let evaluation = resolve_evaluation_endpoint(&app);
         let explicit = explicit_endpoint(evaluation.as_str());
 
         let app_definitions = resolve_definitions_endpoint(&app).expect("app definitions endpoint");
@@ -312,10 +241,6 @@ mod tests {
         assert!(explicit_definitions.as_str().contains("my%20app%2Fversion"));
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn definitions_derivation_preserves_encoded_slashes() {
         let config = explicit_endpoint(
@@ -330,10 +255,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn encoded_slash_does_not_satisfy_evaluate_suffix() {
         let config = explicit_endpoint("https://api.example.com/apps/app%2Fevaluate");
@@ -343,10 +264,6 @@ mod tests {
         assert_eq!(error.message(), DEFINITIONS_DERIVATION_ERROR);
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn derives_definitions_from_root_evaluate_path() {
         let config = explicit_endpoint("https://api.example.com/evaluate");
@@ -356,10 +273,6 @@ mod tests {
         assert_eq!(definitions.as_str(), "https://api.example.com/definitions");
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn definitions_derivation_requires_trailing_evaluate_segment() {
         let config = explicit_endpoint("https://api.example.com/custom/evaluate-flags");
@@ -370,19 +283,15 @@ mod tests {
         assert!(!error.to_string().contains("api.example.com"));
     }
 
-    #[cfg(not(all(
-        feature = "rustls-no-provider",
-        not(any(feature = "rustls", feature = "native-tls"))
-    )))]
     #[test]
     fn resolved_urls_never_gain_a_query_or_fragment() {
         let app = app_endpoint("app", "account", Some("https://api.example.com/base"));
         let explicit = explicit_endpoint("https://api.example.com/custom/evaluate");
 
         for endpoint in [
-            resolve_evaluation_endpoint(&app).expect("app evaluation endpoint"),
+            resolve_evaluation_endpoint(&app),
             resolve_definitions_endpoint(&app).expect("app definitions endpoint"),
-            resolve_evaluation_endpoint(&explicit).expect("explicit evaluation endpoint"),
+            resolve_evaluation_endpoint(&explicit),
             resolve_definitions_endpoint(&explicit).expect("explicit definitions endpoint"),
         ] {
             assert!(endpoint.query().is_none());
@@ -391,7 +300,7 @@ mod tests {
 
         let error = FlagshipClientOptions::builder()
             .endpoint("https://api.example.com/evaluate?token=secret#fragment")
-            .build()
+            .build_endpoint()
             .expect_err("query and fragment must be rejected");
         assert_eq!(
             error.message(),

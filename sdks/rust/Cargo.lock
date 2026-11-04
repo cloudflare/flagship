@@ -112,7 +112,6 @@ name = "cloudflare-flagship"
 version = "0.6.0"
 dependencies = [
  "open-feature",
- "rand",
  "reqwest",
  "ryu-js",
  "serde",
@@ -1019,8 +1018,6 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
- "serde",
- "serde_json",
  "sync_wrapper",
  "tokio",
  "tokio-native-tls",

@@ -19,19 +19,16 @@ rustls = ["reqwest/rustls"]
 rustls-no-provider = ["reqwest/rustls-no-provider"]
 
 [dependencies]
-# open-feature 0.3 compiles its LoggingHook unconditionally while gating `log`
-# behind its default features. Disabling defaults therefore fails to compile and
-# the default `test-util`/mockall feature remains enabled until upstream fixes it.
+# Default features stay on: open-feature 0.3 fails to build without them.
 open-feature = "0.3.0"
-rand = "0.10.3"
-reqwest = { version = "0.13.5", default-features = false, features = ["http2", "json"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["http2"] }
 ryu-js = "1.0.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip", "raw_value"] }
-tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "test-util"] }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "test-util"] }
 
 [lints.rust]
 missing_docs = "warn"

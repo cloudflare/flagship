@@ -1,13 +1,11 @@
-//! Remote Flagship evaluation through `OpenFeature` and the direct client.
+//! Remote evaluation through `OpenFeature` and the direct client.
 //!
-//! Set `FLAGSHIP_APP_ID`, `FLAGSHIP_ACCOUNT_ID`, and `FLAGSHIP_AUTH_TOKEN`
-//! before running this example. Primitive context values are sent in the GET
-//! request URL, so do not put sensitive data in them.
+//! Requires `FLAGSHIP_APP_ID`, `FLAGSHIP_ACCOUNT_ID`, and `FLAGSHIP_AUTH_TOKEN`.
 
 use std::time::Duration;
 
 use cloudflare_flagship::open_feature::{
-    EvaluationContext, EvaluationErrorCode, OpenFeature, StructValue,
+    EvaluationContext, EvaluationError, EvaluationErrorCode, OpenFeature, StructValue,
 };
 use cloudflare_flagship::{
     FlagshipClient, FlagshipClientOptions, FlagshipServerProvider, LoggingHook, TelemetryHook,
@@ -25,10 +23,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     let logging = LoggingHook::new(|event| {
-        eprintln!("{:?}: {}", event.stage(), event.flag_key());
+        eprintln!("{:?}: {:?}", event.kind, event.flag_key);
     });
+    // Telemetry events contain the evaluation context and resolved values.
     let telemetry = TelemetryHook::new(|event| {
-        // Telemetry may contain customer context and resolved values.
         let _ = event;
     });
     let provider = FlagshipServerProvider::builder(options.clone())
@@ -50,27 +48,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dark_mode = client
         .get_bool_value("dark-mode", Some(&context), None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
     let welcome_message = client
         .get_string_value("welcome-message", Some(&context), None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
     let max_uploads = client
         .get_int_value("max-uploads", Some(&context), None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
     let sample_rate = client
         .get_float_value("sample-rate", Some(&context), None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
     let theme_config = client
         .get_struct_value::<StructValue>("theme-config", Some(&context), None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
     let details = client
         .get_bool_details("premium-features", Some(&context), None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
 
     println!("dark-mode: {dark_mode}");
     println!("welcome-message: {welcome_message:?}");
@@ -82,26 +80,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         details.value, details.reason, details.variant
     );
 
-    // OpenFeature 0.3 for Rust returns errors instead of accepting a caller
-    // default, so apply the missing-flag fallback explicitly without hiding
-    // transport, authentication, or other evaluation failures.
+    // OpenFeature 0.3 takes no default value, so fall back explicitly.
     let unknown_flag = match client
         .get_bool_value("non-existent-flag", Some(&context), None)
         .await
     {
         Ok(value) => value,
         Err(error) if error.code == EvaluationErrorCode::FlagNotFound => false,
-        Err(error) => return Err(std::io::Error::other(format!("{error:?}")).into()),
+        Err(error) => return Err(eval_error(error).into()),
     };
     println!("non-existent-flag: {unknown_flag}");
 
     let beta_access = client
         .get_bool_value("beta-access", None, None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
     println!("beta-access: {beta_access}");
 
-    let direct_client = FlagshipClient::new(options)?;
+    let direct_client = FlagshipClient::new(options);
     let response = direct_client.evaluate("welcome-message", &context).await?;
     println!(
         "direct welcome-message: {:?} ({:?})",
@@ -109,4 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     Ok(())
+}
+
+fn eval_error(error: EvaluationError) -> std::io::Error {
+    let message = error.message.unwrap_or_default();
+
+    std::io::Error::other(format!("{:?}: {message}", error.code))
 }

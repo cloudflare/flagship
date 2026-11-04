@@ -7,10 +7,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use reqwest;
 pub use reqwest::header::{HeaderMap, HeaderValue};
-pub use reqwest::{Client, Url};
+use reqwest::{Client, Url};
 
+use crate::endpoint::resolve_evaluation_endpoint;
 use crate::error::ConfigError;
 
 const USER_AGENT: &str = concat!("cloudflare-flagship-rust/", env!("CARGO_PKG_VERSION"));
@@ -20,36 +20,18 @@ pub const FLAGSHIP_DEFAULT_BASE_URL: &str = "https://api.cloudflare.com";
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_RETRIES: u32 = 1;
-/// Maximum retry attempts accepted by client configuration and retry execution.
 pub(crate) const MAX_RETRIES: u32 = 10;
 const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
-/// Maximum fixed delay accepted by client configuration and retry execution.
 pub(crate) const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 
-/// Error returned by a [`HeaderFactory`].
+/// Error returned by a [`FlagshipClientOptionsBuilder::header_factory`] future.
 pub type HeaderFactoryError = Box<dyn Error + Send + Sync + 'static>;
 
 type HeaderFuture =
     Pin<Box<dyn Future<Output = Result<HeaderMap, HeaderFactoryError>> + Send + 'static>>;
 
-/// An asynchronous source of dynamic headers for individual HTTP attempts.
-///
-/// The client invokes the factory exactly once for every attempt, including
-/// retries. The factory can therefore fetch or refresh short-lived credentials.
-/// Its future runs inside the attempt timeout budget. Caller cancellation or an
-/// attempt timeout drops that future, so implementations must be cancellation
-/// safe and must not rely on asynchronous cleanup completing.
-///
-/// Factory failures become retryable `GENERAL` [`crate::error::FlagshipError`]
-/// values and follow the configured retry policy. The client marks every value
-/// returned by the factory as sensitive before merging it into request headers.
-///
-/// Header names are case-insensitive. Dynamic values replace all static values
-/// with the same name. Static values replace the configured bearer header, and
-/// dynamic values replace either source. Thus precedence is dynamic headers,
-/// then static headers, then `auth_token`, matching the Go SDK.
 #[derive(Clone)]
-pub struct HeaderFactory {
+pub(crate) struct HeaderFactory {
     inner: Arc<dyn Fn() -> HeaderFuture + Send + Sync + 'static>,
 }
 
@@ -79,13 +61,11 @@ impl fmt::Debug for HeaderFactory {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TimeoutPolicy {
-    /// Limit the complete attempt, including its header factory and HTTP I/O, to
-    /// the given non-zero duration.
+    /// Limit each complete attempt, including the header factory and HTTP I/O,
+    /// to this non-zero duration.
     Duration(Duration),
-    /// Do not impose an SDK attempt deadline.
-    ///
-    /// Caller cancellation and timeouts configured on an injected Reqwest
-    /// [`Client`] still apply.
+    /// No SDK deadline. Caller cancellation and an injected [`Client`]'s own
+    /// timeouts still apply.
     Disabled,
 }
 
@@ -95,9 +75,8 @@ impl Default for TimeoutPolicy {
     }
 }
 
-/// Validated application-based endpoint configuration.
 #[derive(Clone, Eq, PartialEq)]
-pub struct AppEndpoint {
+pub(crate) struct AppEndpoint {
     app_id: String,
     account_id: String,
     base_url: Url,
@@ -106,6 +85,10 @@ pub struct AppEndpoint {
 impl AppEndpoint {
     pub(crate) fn app_id(&self) -> &str {
         &self.app_id
+    }
+
+    pub(crate) fn account_id(&self) -> &str {
+        &self.account_id
     }
 
     pub(crate) fn base_url(&self) -> &Url {
@@ -124,9 +107,8 @@ impl fmt::Debug for AppEndpoint {
     }
 }
 
-/// Validated explicit endpoint configuration.
 #[derive(Clone, Eq, PartialEq)]
-pub struct ExplicitEndpoint {
+pub(crate) struct ExplicitEndpoint {
     endpoint: Url,
     account_id: Option<String>,
 }
@@ -150,24 +132,14 @@ impl fmt::Debug for ExplicitEndpoint {
     }
 }
 
-/// Mutually exclusive ways to locate the Flagship evaluation API.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum FlagshipEndpoint {
-    /// Build the endpoint from an application, account, and API base URL.
+pub(crate) enum FlagshipEndpoint {
     App(AppEndpoint),
-    /// Use an absolute endpoint directly.
     Explicit(ExplicitEndpoint),
 }
 
 impl FlagshipEndpoint {
-    /// Returns the account ID available for local-evaluation rollout hashing.
-    ///
-    /// Application mode always has an account ID. Explicit mode returns the
-    /// optional account ID supplied to the builder; remote evaluation itself
-    /// does not require one in that mode.
-    #[must_use]
-    pub fn account_id(&self) -> Option<&str> {
+    pub(crate) fn account_id(&self) -> Option<&str> {
         match self {
             Self::App(endpoint) => Some(&endpoint.account_id),
             Self::Explicit(endpoint) => endpoint.account_id.as_deref(),
@@ -177,15 +149,13 @@ impl FlagshipEndpoint {
 
 /// Validated options for a Flagship HTTP client.
 ///
-/// Construct this type with [`FlagshipClientOptions::builder`]. Construction is
-/// synchronous and does not require a Tokio runtime. Executing requests and an
-/// asynchronous [`HeaderFactory`] requires a Tokio runtime.
-///
-/// Its debug representation never includes identifiers, tokens, header values,
-/// or URLs.
+/// Build with [`FlagshipClientOptions::builder`]; construction does not need a
+/// Tokio runtime, but executing requests does. `Debug` output redacts
+/// identifiers, tokens, header values, and URLs.
 #[derive(Clone)]
 pub struct FlagshipClientOptions {
     endpoint: FlagshipEndpoint,
+    evaluation_url: Url,
     bearer_header: Option<HeaderValue>,
     static_headers: HeaderMap,
     header_factory: Option<HeaderFactory>,
@@ -215,10 +185,18 @@ impl FlagshipClientOptions {
         FlagshipClientOptionsBuilder::default()
     }
 
-    /// Returns the validated endpoint mode.
+    /// Returns the configured account ID, if any.
     #[must_use]
-    pub fn endpoint(&self) -> &FlagshipEndpoint {
+    pub fn account_id(&self) -> Option<&str> {
+        self.endpoint.account_id()
+    }
+
+    pub(crate) fn endpoint(&self) -> &FlagshipEndpoint {
         &self.endpoint
+    }
+
+    pub(crate) fn evaluation_url(&self) -> &Url {
+        &self.evaluation_url
     }
 
     /// Returns the request timeout policy.
@@ -227,13 +205,13 @@ impl FlagshipClientOptions {
         self.timeout
     }
 
-    /// Returns the number of retry attempts after capping at ten.
+    /// Returns the number of retry attempts (capped at 10).
     #[must_use]
     pub fn retries(&self) -> u32 {
         self.retries
     }
 
-    /// Returns the fixed delay between retry attempts after capping at 30 seconds.
+    /// Returns the fixed delay between retry attempts (capped at 30 seconds).
     #[must_use]
     pub fn retry_delay(&self) -> Duration {
         self.retry_delay
@@ -261,6 +239,7 @@ impl fmt::Debug for FlagshipClientOptions {
         formatter
             .debug_struct("FlagshipClientOptions")
             .field("endpoint", &self.endpoint)
+            .field("evaluation_url", &"<configured>")
             .field(
                 "bearer_header",
                 &self.bearer_header.as_ref().map(|_| "<redacted>"),
@@ -278,15 +257,8 @@ impl fmt::Debug for FlagshipClientOptions {
 /// Builder for [`FlagshipClientOptions`].
 ///
 /// Supply either `app_id` plus `account_id`, or `endpoint`. `base_url` only
-/// applies to application mode. `account_id` may accompany an explicit endpoint
-/// so the same options can later be validated for local evaluation.
-///
-/// Calling [`Self::timeout`] and [`Self::disable_timeout`] more than once is
-/// allowed; the last call wins. The SDK timeout covers the complete attempt,
-/// including dynamic-header generation and HTTP I/O. Dropping the caller's
-/// evaluation future cancels the SDK work by dropping in-progress futures.
-/// Disabling the SDK timeout does not disable an injected Reqwest client's own
-/// timeout.
+/// applies to application mode. For [`Self::timeout`] and
+/// [`Self::disable_timeout`], the last call wins.
 #[derive(Clone, Default)]
 pub struct FlagshipClientOptionsBuilder {
     app_id: Option<String>,
@@ -303,12 +275,10 @@ pub struct FlagshipClientOptionsBuilder {
 }
 
 impl FlagshipClientOptionsBuilder {
-    /// Sets the application ID for application-based endpoint construction.
+    /// Sets the application ID.
     ///
-    /// The ID must be non-empty, have no leading or trailing whitespace or
-    /// control characters, and contain no `.` or `..` slash-delimited path
-    /// segments. Interior spaces and ordinary slash-delimited segments are
-    /// preserved exactly.
+    /// Rejects empty values, surrounding whitespace, control characters, and
+    /// `.`/`..` path segments. Interior spaces and slashes are preserved.
     #[must_use]
     pub fn app_id(mut self, app_id: impl Into<String>) -> Self {
         self.app_id = Some(app_id.into());
@@ -316,13 +286,10 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Sets the account ID required by application mode and optionally used by
-    /// explicit-endpoint local evaluation.
+    /// Sets the account ID; required in application mode, optional with
+    /// [`Self::endpoint`] (used for local evaluation).
     ///
-    /// Local evaluation uses this ID as its rollout hash seed. The same strict
-    /// rules as [`Self::app_id`] apply: no empty value, surrounding whitespace,
-    /// control characters, or `.`/`..` path segments; interior spaces and
-    /// ordinary slash-delimited segments are preserved.
+    /// Validated like [`Self::app_id`].
     #[must_use]
     pub fn account_id(mut self, account_id: impl Into<String>) -> Self {
         self.account_id = Some(account_id.into());
@@ -332,8 +299,8 @@ impl FlagshipClientOptionsBuilder {
 
     /// Sets an explicit absolute evaluation endpoint.
     ///
-    /// Endpoints must use HTTP(S), include a host, and contain no credentials,
-    /// query, fragment, control characters, or obviously malformed host syntax.
+    /// Must be HTTP(S) with a valid host and no credentials, query, fragment,
+    /// or control characters.
     #[must_use]
     pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.endpoint = Some(endpoint.into());
@@ -341,10 +308,10 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Sets the API base URL used only in application mode.
+    /// Sets the API base URL for application mode (default
+    /// [`FLAGSHIP_DEFAULT_BASE_URL`]).
     ///
-    /// The same URL restrictions as [`Self::endpoint`] apply. All trailing
-    /// slashes in the base path are removed during validation.
+    /// Validated like [`Self::endpoint`]; trailing slashes are ignored.
     #[must_use]
     pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = Some(base_url.into());
@@ -352,11 +319,11 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Sets the bearer token used when no static or dynamic `Authorization`
-    /// header overrides it.
+    /// Sets the bearer token, unless overridden by a static or dynamic
+    /// `Authorization` header.
     ///
-    /// An empty token is treated as absent. A non-empty token must consist only
-    /// of visible ASCII characters and cannot contain whitespace.
+    /// An empty token is treated as absent; otherwise it must be visible ASCII
+    /// without whitespace.
     #[must_use]
     pub fn auth_token(mut self, auth_token: impl Into<String>) -> Self {
         self.auth_token = Some(auth_token.into());
@@ -364,12 +331,10 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Replaces the static headers applied to every request attempt.
+    /// Replaces the static headers sent on every attempt.
     ///
-    /// Every value is marked sensitive during [`Self::build`], so Reqwest debug
-    /// output does not expose credentials. Static `Authorization` values replace
-    /// the configured bearer value. Dynamic factory values replace all static
-    /// values with the same case-insensitive header name.
+    /// Values are marked sensitive. A static `Authorization` header replaces
+    /// the bearer token; dynamic headers replace static ones with the same name.
     #[must_use]
     pub fn static_headers(mut self, headers: HeaderMap) -> Self {
         self.static_headers = headers;
@@ -377,12 +342,13 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Sets an asynchronous header factory invoked once per request attempt.
+    /// Sets an async source of dynamic headers, called once per attempt
+    /// (including retries), e.g. to refresh short-lived credentials.
     ///
-    /// The closure and returned future must be thread-safe because one client
-    /// can serve concurrent evaluations. The client marks returned values
-    /// sensitive before use. See [`HeaderFactory`] for cancellation, timeout,
-    /// error, and header-replacement behavior.
+    /// The future runs inside the attempt timeout and must be cancellation
+    /// safe. Failures become retryable `GENERAL` errors. Values are marked
+    /// sensitive. Dynamic headers override static headers, which override
+    /// `auth_token`.
     ///
     /// # Examples
     ///
@@ -408,30 +374,9 @@ impl FlagshipClientOptionsBuilder {
 
     /// Injects the Reqwest client used for HTTP requests.
     ///
-    /// The injected client's transport settings remain active. The Flagship
-    /// client applies [`TimeoutPolicy::Duration`] as an outer deadline, while
-    /// [`TimeoutPolicy::Disabled`] removes only that SDK deadline. Dynamic,
-    /// static, and bearer headers are request-level headers and override
-    /// matching default headers configured on the injected client. Injected
-    /// default headers are used only when no request-level value exists.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// mod external_consumer {
-    ///     use cloudflare_flagship::config::{reqwest, FlagshipClientOptions};
-    ///     use cloudflare_flagship::error::ConfigError;
-    ///
-    ///     pub fn options(
-    ///         client: reqwest::Client,
-    ///     ) -> Result<FlagshipClientOptions, ConfigError> {
-    ///         FlagshipClientOptions::builder()
-    ///             .endpoint("https://example.com/evaluate")
-    ///             .http_client(client)
-    ///             .build()
-    ///     }
-    /// }
-    /// ```
+    /// Its transport settings and timeouts stay active; the SDK timeout is
+    /// applied as an outer deadline. SDK headers override its default headers.
+    /// The default client does not follow redirects.
     #[must_use]
     pub fn http_client(mut self, client: Client) -> Self {
         self.http_client = Some(client);
@@ -439,9 +384,7 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Sets a non-zero timeout for each complete HTTP attempt.
-    ///
-    /// This replaces an earlier [`Self::disable_timeout`] or timeout setting.
+    /// Sets a non-zero timeout for each complete attempt (default 5 seconds).
     #[must_use]
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(TimeoutPolicy::Duration(timeout));
@@ -449,10 +392,7 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Disables the SDK timeout.
-    ///
-    /// Caller cancellation and injected-client timeouts still apply. This
-    /// replaces an earlier [`Self::timeout`] setting.
+    /// Disables the SDK timeout. Injected-client timeouts still apply.
     #[must_use]
     pub fn disable_timeout(mut self) -> Self {
         self.timeout = Some(TimeoutPolicy::Disabled);
@@ -460,10 +400,7 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Sets retry attempts, capped at ten.
-    ///
-    /// Passing zero explicitly disables retries. Omitting this setting defaults
-    /// to one retry.
+    /// Sets retry attempts: default 1, capped at 10, `0` disables retries.
     #[must_use]
     pub fn retries(mut self, retries: u32) -> Self {
         self.retries = Some(retries);
@@ -471,9 +408,8 @@ impl FlagshipClientOptionsBuilder {
         self
     }
 
-    /// Sets the fixed retry delay, capped at 30 seconds.
-    ///
-    /// A zero duration is accepted for immediate retries.
+    /// Sets the fixed retry delay: default 1 second, capped at 30 seconds,
+    /// zero allowed.
     #[must_use]
     pub fn retry_delay(mut self, retry_delay: Duration) -> Self {
         self.retry_delay = Some(retry_delay);
@@ -483,26 +419,20 @@ impl FlagshipClientOptionsBuilder {
 
     /// Validates and constructs client options.
     ///
-    /// When no client was injected, this method constructs one with
-    /// [`Client::builder`] and reports ordinary construction failures as
-    /// [`ConfigError`].
-    ///
     /// # Errors
     ///
-    /// Returns [`ConfigError`] when no endpoint mode is selected, endpoint modes
-    /// conflict, an identifier, URL, token, or timeout is invalid, or the default
-    /// Reqwest client cannot be constructed.
+    /// Returns [`ConfigError`] when no endpoint mode is selected, modes
+    /// conflict, an identifier, URL, token, or timeout is invalid, or the
+    /// default Reqwest client cannot be built.
     ///
     /// # Panics
     ///
-    /// When this crate is built with only the `rustls-no-provider` feature,
-    /// Reqwest may panic while constructing its default client if the process
-    /// has not installed a Rustls crypto provider. Install a provider before
-    /// calling this method or inject an already constructed [`Client`] with
-    /// [`Self::http_client`]. Other validation failures are returned as
-    /// [`ConfigError`].
+    /// With only the `rustls-no-provider` feature, Reqwest may panic if no
+    /// Rustls crypto provider is installed. Install one first or inject a
+    /// client with [`Self::http_client`].
     pub fn build(self) -> Result<FlagshipClientOptions, ConfigError> {
         let endpoint = self.build_endpoint()?;
+        let evaluation_url = resolve_evaluation_endpoint(&endpoint);
         let timeout = self.timeout.unwrap_or_default();
         if matches!(timeout, TimeoutPolicy::Duration(duration) if duration.is_zero()) {
             return Err(ConfigError::new(
@@ -518,6 +448,7 @@ impl FlagshipClientOptionsBuilder {
             Some(client) => client,
             None => Client::builder()
                 .user_agent(USER_AGENT)
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|error| {
                     ConfigError::new("default HTTP client could not be constructed")
@@ -527,6 +458,7 @@ impl FlagshipClientOptionsBuilder {
 
         Ok(FlagshipClientOptions {
             endpoint,
+            evaluation_url,
             bearer_header,
             static_headers,
             header_factory: self.header_factory,
@@ -540,7 +472,7 @@ impl FlagshipClientOptionsBuilder {
         })
     }
 
-    fn build_endpoint(&self) -> Result<FlagshipEndpoint, ConfigError> {
+    pub(crate) fn build_endpoint(&self) -> Result<FlagshipEndpoint, ConfigError> {
         if self.endpoint.is_some() && self.app_id.is_some() {
             return Err(ConfigError::new(
                 "endpoint and app_id are mutually exclusive",
@@ -551,7 +483,7 @@ impl FlagshipClientOptionsBuilder {
         }
 
         if let Some(endpoint) = &self.endpoint {
-            let endpoint = parse_http_url(endpoint, "endpoint", false)?;
+            let endpoint = parse_http_url(endpoint, "endpoint")?;
             let account_id = validate_optional_id(self.account_id.as_deref(), "account_id")?;
 
             return Ok(FlagshipEndpoint::Explicit(ExplicitEndpoint {
@@ -572,7 +504,7 @@ impl FlagshipClientOptionsBuilder {
             .base_url
             .as_deref()
             .unwrap_or(FLAGSHIP_DEFAULT_BASE_URL);
-        let base_url = parse_http_url(base_url, "base_url", true)?;
+        let base_url = parse_http_url(base_url, "base_url")?;
 
         Ok(FlagshipEndpoint::App(AppEndpoint {
             app_id,
@@ -675,7 +607,7 @@ fn mark_sensitive(headers: &mut HeaderMap) {
     }
 }
 
-fn parse_http_url(value: &str, name: &str, normalize_base_path: bool) -> Result<Url, ConfigError> {
+fn parse_http_url(value: &str, name: &str) -> Result<Url, ConfigError> {
     if value.is_empty() {
         return Err(ConfigError::new(format!("{name} must not be empty")));
     }
@@ -685,7 +617,7 @@ fn parse_http_url(value: &str, name: &str, normalize_base_path: bool) -> Result<
         )));
     }
 
-    let mut url = Url::parse(value).map_err(|error| {
+    let url = Url::parse(value).map_err(|error| {
         ConfigError::new(format!("{name} must be an absolute HTTP(S) URL")).with_source(error)
     })?;
     if !matches!(url.scheme(), "http" | "https") || !url.has_host() {
@@ -705,11 +637,6 @@ fn parse_http_url(value: &str, name: &str, normalize_base_path: bool) -> Result<
         return Err(ConfigError::new(format!(
             "{name} must not contain a query or fragment"
         )));
-    }
-
-    if normalize_base_path {
-        let path = url.path().trim_end_matches('/').to_owned();
-        url.set_path(&path);
     }
 
     Ok(url)
@@ -762,8 +689,12 @@ mod tests {
         };
 
         assert_eq!(endpoint.app_id(), "app-123");
-        assert_eq!(options.endpoint().account_id(), Some("account-456"));
+        assert_eq!(options.account_id(), Some("account-456"));
         assert_eq!(endpoint.base_url().as_str(), "https://api.cloudflare.com/");
+        assert_eq!(
+            options.evaluation_url().as_str(),
+            "https://api.cloudflare.com/client/v4/accounts/account-456/flagship/apps/app-123/evaluate"
+        );
         assert_eq!(
             options.timeout(),
             TimeoutPolicy::Duration(Duration::from_secs(5))
@@ -774,19 +705,6 @@ mod tests {
         assert!(options.static_headers().is_empty());
         assert!(options.header_factory().is_none());
         let _ = options.http_client();
-    }
-
-    #[test]
-    fn base_url_trailing_slashes_are_normalized() {
-        let endpoint = app_builder()
-            .base_url("http://localhost:8787/api////")
-            .build_endpoint()
-            .expect("valid endpoint");
-        let FlagshipEndpoint::App(endpoint) = endpoint else {
-            panic!("expected app endpoint");
-        };
-
-        assert_eq!(endpoint.base_url().as_str(), "http://localhost:8787/api");
     }
 
     #[test]

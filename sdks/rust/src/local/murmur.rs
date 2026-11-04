@@ -8,14 +8,7 @@ const FINAL_MULTIPLIER_TWO: u32 = 0xc2b2_ae35;
 const BUCKET_COUNT: u32 = 100;
 const HASH_QUOTIENT_RANGE: u32 = 42_949_673; // ceil(2^32 / 100)
 
-/// Computes canonical `MurmurHash3` `x86_32` over the input's exact UTF-8 bytes.
-///
-/// Blocks are decoded as little-endian words. Every multiplication and addition
-/// wraps modulo 2^32, including seed mixing and finalization.
-///
-/// The input contract is valid Rust UTF-8. Rust strings cannot contain lone
-/// UTF-16 surrogates; a caller converting JavaScript strings must replace lone
-/// surrogates with `U+FFFD` first, matching `TextEncoder` behavior.
+/// Canonical `MurmurHash3` `x86_32` over the input's UTF-8 bytes.
 pub(crate) fn murmurhash3(input: &str, seed: u32) -> u32 {
     let bytes = input.as_bytes();
     let (chunks, remaining) = bytes.as_chunks::<4>();
@@ -62,25 +55,14 @@ pub(crate) fn murmurhash3(input: &str, seed: u32) -> u32 {
     hash
 }
 
-/// Derives the stable seed for one account and flag.
-///
-/// This is `murmurhash3("{account_id}:{flag_key}", 0) % 100`. The modulo and
-/// input format are compatibility requirements: changing either reshuffles
-/// existing users across rollout buckets.
+/// Stable per-flag seed; changing the format or modulo reshuffles existing rollouts.
 pub(crate) fn rollout_seed(account_id: &str, flag_key: &str) -> u32 {
     let seed_input = format!("{account_id}:{flag_key}");
 
     murmurhash3(&seed_input, 0) % BUCKET_COUNT
 }
 
-/// Returns the deterministic Flagship rollout bucket in the half-open range `[0, 100)`.
-///
-/// `attribute` must already use JavaScript string coercion semantics; this
-/// function hashes it exactly as supplied with a seed from [`rollout_seed`]. It
-/// then computes `(hash % 100) + floor(hash / 100) / ceil(2^32 / 100)`.
-/// Changing any part of this formula reshuffles existing users.
-/// Missing and null attributes must not be passed here: they require a random
-/// bucket instead of deterministic hashing.
+/// Deterministic rollout bucket in `[0, 100)`; the formula must match other SDKs exactly.
 pub(crate) fn rollout_bucket(attribute: &str, seed: u32) -> f64 {
     let hash = murmurhash3(attribute, seed);
 

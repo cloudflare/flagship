@@ -1,28 +1,7 @@
 //! Flag-definition fetching and immutable snapshots for local evaluation.
 //!
-//! The fetcher reuses the shared client's headers, per-attempt timeout, retry,
-//! and HTTP-status behavior. Responses below 400 are parsed as definitions,
-//! including non-200 2xx and final 3xx responses, except that a 304 is accepted
-//! only when the caller supplied a prior `ETag`. HTTP response errors retain
-//! their category and status but discard response-body, server-code, and source
-//! details because definitions may contain sensitive configuration.
-//!
-//! Snapshots retain each flag as an owned [`RawValue`]. A flag is materialized
-//! as a [`Value`] only on first lookup, then its success or sanitized error is
-//! cached in a [`OnceLock`]. Concurrent first lookups of the same flag may block
-//! briefly on that synchronous parse; lookups never hold a lock across an await.
-//! The returned value reference lives as long as its snapshot, so providers can
-//! share immutable generations through [`std::sync::Arc`] without copying flag
-//! values. Invalid UTF-8 anywhere or invalid Unicode top-level field names or
-//! flag keys reject the snapshot; invalid strings or keys nested inside one raw
-//! flag remain isolated to that flag. The response is never lossily converted.
-//!
-//! `serde_json`'s default recursion bound is intentionally retained for stack
-//! safety. It permits 127 nested JSON containers and rejects the 128th. Because
-//! a logical condition level contains multiple JSON objects and arrays, deeply
-//! nested conditions can reach this structural bound before the evaluator's
-//! separate 100-condition semantic cap. This module deliberately does not use
-//! `unbounded_depth` or stack-growing deserialization.
+//! Each flag is kept raw and parsed lazily on first lookup, so one malformed flag doesn't break
+//! the snapshot. HTTP error bodies are redacted because definitions may be sensitive.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -37,12 +16,10 @@ use serde_json::value::RawValue;
 use crate::client::{FlagshipClient, RawRequest, RawResponse};
 use crate::error::{ErrorCode, FlagshipError};
 
-/// Definitions are substantially larger than individual evaluations, but remain
-/// bounded so an unexpected response cannot consume arbitrary process memory.
-const DEFINITIONS_BODY_LIMIT: usize = 16 * 1024 * 1024;
+const DEFINITIONS_BODY_LIMIT: usize = 32 * 1024 * 1024;
 const ERROR_KEY_LIMIT: usize = 128;
 
-/// A cheap-to-clone fetcher for one provider-supplied definitions endpoint.
+/// Fetches definitions from one endpoint.
 #[derive(Clone)]
 pub(crate) struct DefinitionsFetcher {
     client: FlagshipClient,
@@ -54,24 +31,17 @@ impl DefinitionsFetcher {
         Self { client, endpoint }
     }
 
-    /// Fetches a complete snapshot, conditionally when a prior validated `ETag` exists.
+    /// Fetches a snapshot, sending `If-None-Match` when `prior_etag` is set.
     ///
-    /// A 304 produces [`DefinitionsFetchResult::NotModified`] only when
-    /// `prior_etag` is `Some`; headers injected by client configuration do not
-    /// establish provider snapshot state. Every other status below 400 is
-    /// parsed, including non-200 2xx and final 3xx responses.
+    /// A 304 is only accepted when `prior_etag` is `Some`.
     ///
     /// # Errors
     ///
-    /// Returns [`FlagshipError`] for header-factory, transport, timeout, HTTP,
-    /// body-limit, envelope, and JSON failures. HTTP response body details are
-    /// redacted after the shared retry/status pipeline completes.
+    /// Returns [`FlagshipError`] on request, HTTP, or parse failure.
     ///
     /// # Panics
     ///
-    /// Request execution requires a Tokio runtime with I/O enabled. Configured
-    /// timeouts and non-zero retry delays additionally require Tokio time; Tokio
-    /// panics when those runtime drivers are unavailable.
+    /// Panics outside a Tokio runtime with I/O and time enabled.
     pub(crate) async fn fetch(
         &self,
         prior_etag: Option<&HeaderValue>,
@@ -101,8 +71,6 @@ impl DefinitionsFetcher {
             };
         }
 
-        // Match the shared client's evaluation semantics: every status below
-        // 400 reaches the response parser. Thus an empty 204 is a parse error.
         let snapshot = DefinitionsSnapshot::from_response(response)?;
 
         Ok(DefinitionsFetchResult::Updated(snapshot))
@@ -121,9 +89,8 @@ impl fmt::Debug for DefinitionsFetcher {
 
 /// The result of a conditional definitions fetch.
 pub(crate) enum DefinitionsFetchResult {
-    /// A response supplied a replacement snapshot.
     Updated(DefinitionsSnapshot),
-    /// The server returned 304; the provider must retain its prior snapshot and `ETag`.
+    /// 304: keep the prior snapshot and `ETag`.
     NotModified,
 }
 
@@ -158,16 +125,12 @@ impl FlagEntry {
     }
 }
 
-/// An immutable definitions generation with independently parsed flag entries.
+/// An immutable set of lazily parsed flag definitions.
 pub(crate) struct DefinitionsSnapshot {
     flags: BTreeMap<String, FlagEntry>,
     etag: Option<HeaderValue>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used when the local provider is wired up")
-)]
 impl DefinitionsSnapshot {
     fn from_response(response: RawResponse) -> Result<Self, FlagshipError> {
         let RawResponse {
@@ -191,10 +154,12 @@ impl DefinitionsSnapshot {
         Ok(Self { flags, etag })
     }
 
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.flags.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.flags.is_empty()
     }
@@ -208,7 +173,13 @@ impl DefinitionsSnapshot {
         self.flags.get(key).map(|entry| entry.get(key))
     }
 
-    /// Constructs a snapshot from response JSON for provider lifecycle tests.
+    #[cfg(test)]
+    pub(crate) fn with_etag(mut self, etag: Option<HeaderValue>) -> Self {
+        self.etag = etag;
+
+        self
+    }
+
     #[cfg(test)]
     pub(crate) fn from_json_bytes(body: &[u8]) -> Result<Self, FlagshipError> {
         Self::from_response(RawResponse {
@@ -251,16 +222,12 @@ fn redact_http_response_error(error: FlagshipError) -> FlagshipError {
         return error;
     }
 
-    let mut redacted = FlagshipError::new(
-        error.code().clone(),
+    FlagshipError::new(
+        error.code(),
         format!("definitions request failed with HTTP {status}"),
     )
-    .with_status(status);
-    if let Some(retryable) = error.retryable_override() {
-        redacted = redacted.with_retryable(retryable);
-    }
-
-    redacted
+    .with_status(status)
+    .with_retryable(error.is_retryable())
 }
 
 fn malformed_flag_error(key: &str) -> FlagshipError {
@@ -337,7 +304,7 @@ mod tests {
         ] {
             let error = snapshot(body).expect_err("invalid envelope");
 
-            assert_eq!(error.code(), &ErrorCode::ParseError);
+            assert_eq!(error.code(), ErrorCode::ParseError);
             assert_eq!(error.status(), Some(200));
             assert!(!error.is_retryable());
             assert_eq!(
@@ -357,7 +324,7 @@ mod tests {
         ] {
             let error = snapshot(body).expect_err("invalid JSON text");
 
-            assert_eq!(error.code(), &ErrorCode::ParseError);
+            assert_eq!(error.code(), ErrorCode::ParseError);
             assert_eq!(error.status(), Some(200));
             assert_eq!(
                 error.message(),
@@ -375,7 +342,7 @@ mod tests {
             .get("bad")
             .expect("bad flag present")
             .expect_err("lone surrogate is invalid Unicode");
-        assert_eq!(error.code(), &ErrorCode::ParseError);
+        assert_eq!(error.code(), ErrorCode::ParseError);
         assert_eq!(
             snapshot
                 .get("good")
@@ -434,7 +401,7 @@ mod tests {
             .get("bad")
             .expect("bad present")
             .expect_err("cached error");
-        assert_eq!(first_error.code(), &ErrorCode::ParseError);
+        assert_eq!(first_error.code(), ErrorCode::ParseError);
         assert_eq!(first_error.message(), second_error.message());
         let cached_error = snapshot.flags["bad"]
             .parsed
@@ -475,7 +442,7 @@ mod tests {
         let error = snapshot.get(&key).expect("present").expect_err("too deep");
         let rendered = error.to_string();
 
-        assert_eq!(error.code(), &ErrorCode::ParseError);
+        assert_eq!(error.code(), ErrorCode::ParseError);
         assert!(error.message().len() < 256);
         assert!(rendered.contains(r#"private\n\u{202e}\\\""#));
         assert!(rendered.contains('…'));
@@ -516,7 +483,7 @@ mod tests {
             .get("rejected")
             .expect("present")
             .expect_err("128th container exceeds serde_json's default bound");
-        assert_eq!(error.code(), &ErrorCode::ParseError);
+        assert_eq!(error.code(), ErrorCode::ParseError);
     }
 
     #[test]
@@ -600,7 +567,7 @@ mod tests {
 
         assert_eq!(accepted.len(), 0);
         assert_eq!(redirect.len(), 0);
-        assert_eq!(no_content.code(), &ErrorCode::ParseError);
+        assert_eq!(no_content.code(), ErrorCode::ParseError);
         assert_eq!(no_content.status(), Some(204));
     }
 
@@ -682,7 +649,7 @@ mod tests {
 
         fn fetcher(endpoint: Url, builder: FlagshipClientOptionsBuilder) -> DefinitionsFetcher {
             let options = builder.build().expect("options");
-            let client = FlagshipClient::new(options).expect("client");
+            let client = FlagshipClient::new(options);
 
             DefinitionsFetcher::new(client, endpoint)
         }
@@ -817,7 +784,7 @@ mod tests {
             server.join().expect("server thread");
 
             assert!(request.contains("if-none-match: injected-etag"));
-            assert_eq!(error.code(), &ErrorCode::ParseError);
+            assert_eq!(error.code(), ErrorCode::ParseError);
             assert_eq!(error.status(), Some(304));
             assert!(!error.is_retryable());
         }
@@ -843,7 +810,7 @@ mod tests {
             server.join().expect("server thread");
 
             assert!(!request.to_ascii_lowercase().contains("if-none-match:"));
-            assert_eq!(error.code(), &ErrorCode::ParseError);
+            assert_eq!(error.code(), ErrorCode::ParseError);
             assert_eq!(error.status(), Some(304));
             assert!(!error.is_retryable());
         }
@@ -943,7 +910,7 @@ mod tests {
                 server.join().expect("server thread");
                 let debug = format!("{error:?}");
 
-                assert_eq!(error.code(), &expected_code);
+                assert_eq!(error.code(), expected_code);
                 assert_eq!(error.status(), Some(status));
                 assert_eq!(
                     error.message(),
@@ -1004,9 +971,13 @@ mod tests {
             let error = definitions.fetch(None).await.expect_err("oversized body");
             server.join().expect("server thread");
 
-            assert_eq!(error.code(), &ErrorCode::ParseError);
+            assert_eq!(error.code(), ErrorCode::ParseError);
             assert_eq!(error.status(), Some(200));
-            assert!(error.message().contains("16777216-byte"));
+            assert!(
+                error
+                    .message()
+                    .contains(&format!("{DEFINITIONS_BODY_LIMIT}-byte"))
+            );
         }
 
         #[tokio::test]
@@ -1040,9 +1011,13 @@ mod tests {
             let error = definitions.fetch(None).await.expect_err("oversized body");
             server.join().expect("server thread");
 
-            assert_eq!(error.code(), &ErrorCode::ParseError);
+            assert_eq!(error.code(), ErrorCode::ParseError);
             assert_eq!(error.status(), Some(200));
-            assert!(error.message().contains("16777216-byte"));
+            assert!(
+                error
+                    .message()
+                    .contains(&format!("{DEFINITIONS_BODY_LIMIT}-byte"))
+            );
         }
 
         #[tokio::test(start_paused = true)]
@@ -1060,7 +1035,7 @@ mod tests {
 
             let error = definitions.fetch(None).await.expect_err("timeout");
 
-            assert_eq!(error.code(), &ErrorCode::TimeoutError);
+            assert_eq!(error.code(), ErrorCode::TimeoutError);
         }
 
         #[test]

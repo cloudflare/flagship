@@ -1,22 +1,11 @@
-//! Internal value coercion for local evaluation.
-//!
-//! Scalar number and collection coercion follows ECMAScript semantics used by
-//! Flagship. Date ordering follows the canonical Go evaluator, including its
-//! RFC3339 parser's accepted syntax and strict calendar validation. Extremely
-//! large arbitrary-precision JSON numbers map to signed infinity here; the
-//! current Go implementation instead treats `json.Number.Float64` range errors
-//! as failed numeric coercion (or preserves their text during string coercion).
+//! Value coercion for local evaluation, following the ECMAScript number, string, and
+//! `Date.parse` semantics the Flagship evaluator uses.
 
 use std::{borrow::Cow, cmp::Ordering, collections::HashMap};
 
 use serde_json::{Number, Value};
 
-/// Caches pure coercions for immutable context values during one evaluation.
-///
-/// The cache keys are value addresses rather than serialized values so a large
-/// context string is parsed at most once for each coercion kind even when many
-/// rules reference it. Callers must keep the referenced values alive and
-/// unchanged for the cache's lifetime; the evaluator does both.
+/// Per-evaluation coercion cache keyed by value address; values must outlive it unchanged.
 #[derive(Default)]
 pub(crate) struct CoercionCache {
     numbers: HashMap<*const Value, f64>,
@@ -67,19 +56,17 @@ impl CoercionCache {
     }
 }
 
-/// Whether a JSON value corresponds to a JavaScript scalar accepted by the
-/// evaluator. JSON null is deliberately not a scalar.
+/// Bool, number, or string (not null).
 pub(crate) fn is_scalar(value: &Value) -> bool {
     matches!(value, Value::Bool(_) | Value::Number(_) | Value::String(_))
 }
 
-/// Whether a JSON value corresponds to a JavaScript primitive used by the
-/// evaluator. Missing attributes are represented by the caller, not as null.
+/// Null or a scalar.
 pub(crate) fn is_primitive(value: &Value) -> bool {
     value.is_null() || is_scalar(value)
 }
 
-/// Format an IEEE-754 number exactly like ECMAScript `String(number)`.
+/// Formats like ECMAScript `String(number)`.
 pub(crate) fn js_string_f64(number: f64) -> String {
     let mut buffer = ryu_js::Buffer::new();
 
@@ -95,10 +82,7 @@ fn number_to_f64(number: &Number) -> f64 {
         return number;
     }
 
-    // With serde_json's arbitrary_precision feature, valid JSON such as 1e400
-    // remains reachable even though it is outside f64. ECMAScript converts it
-    // to signed infinity. The current Go evaluator diverges because it treats
-    // strconv range errors as failed conversion despite receiving +/-Inf.
+    // Out-of-range arbitrary-precision numbers become signed infinity, as in ECMAScript.
     if number.to_string().starts_with('-') {
         f64::NEG_INFINITY
     } else {
@@ -114,7 +98,7 @@ fn js_string_array(values: &[Value]) -> String {
             result.push(',');
         }
 
-        // Array.prototype.toString treats null array elements as empty slots.
+        // JS renders null array elements as empty.
         if !value.is_null() {
             result.push_str(js_string(value).as_ref());
         }
@@ -123,8 +107,7 @@ fn js_string_array(values: &[Value]) -> String {
     result
 }
 
-/// Convert a JSON value using the JavaScript `String` rules relevant to local
-/// evaluation, including array element conversion used by collection checks.
+/// Converts like JavaScript `String(value)`.
 pub(crate) fn js_string(value: &Value) -> Cow<'_, str> {
     match value {
         Value::Null => Cow::Borrowed("null"),
@@ -320,8 +303,7 @@ fn parse_prefixed_number(value: &str) -> PrefixedNumber {
     parse_radix_number(&bytes[2..], radix).map_or(PrefixedNumber::Invalid, PrefixedNumber::Value)
 }
 
-/// Parse a string using JavaScript `Number` syntax, except that the Flagship
-/// evaluator intentionally maps an empty or whitespace-only string to NaN.
+/// JavaScript `Number(string)`, except blank strings are NaN.
 pub(crate) fn js_number_string(value: &str) -> f64 {
     let value = trim_js_whitespace(value);
     if value.is_empty() {
@@ -346,12 +328,7 @@ pub(crate) fn js_number_string(value: &str) -> f64 {
     value.parse().unwrap_or(f64::NAN)
 }
 
-/// Apply Flagship's `to_number` coercion to a JSON value.
-///
-/// This follows ECMAScript number coercion for supported scalars, except
-/// Flagship deliberately maps blank strings, null, arrays, and objects to NaN.
-/// Arbitrary-precision JSON numbers outside the f64 range map to signed
-/// infinity; see the module-level note about the current Go divergence.
+/// ECMAScript number coercion, except null, arrays, objects, and blank strings are NaN.
 pub(crate) fn js_number(value: &Value) -> f64 {
     match value {
         Value::Bool(true) => 1.0,
@@ -362,10 +339,7 @@ pub(crate) fn js_number(value: &Value) -> f64 {
     }
 }
 
-/// Whether a target selects the evaluator's strict date-ordering mode.
-///
-/// This checks only the RFC3339-like lexical shape. Calendar validity is
-/// checked by [`parse_iso_millis`].
+/// Whether a target has the RFC3339 shape that selects date comparison.
 pub(crate) fn is_iso_target(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() < 20 {
@@ -441,13 +415,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-/// Parse a Go-compatible RFC3339 timestamp as UTC epoch milliseconds.
-///
-/// Fractional seconds are truncated to milliseconds. Following Go's
-/// `time.Parse(time.RFC3339Nano, ...)`, attributes may use a one-digit hour or
-/// comma fractional separator, and offsets permit hour 24 or minute 60. The
-/// calendar date and clock hour remain strict. This deliberately differs from
-/// TypeScript `Date.parse`, which can accept or roll over other invalid dates.
+/// Parses an RFC3339 timestamp to UTC epoch milliseconds, truncating fractional seconds.
 pub(crate) fn parse_iso_millis(value: &str) -> Option<i64> {
     let bytes = value.as_bytes();
     if bytes.len() < 19
@@ -556,8 +524,7 @@ fn compare_values(actual: &Value, expected: &Value) -> Option<Ordering> {
     cache.compare_values(actual, expected)
 }
 
-/// Whether an array has a non-null element whose JavaScript string form equals
-/// the target's string form. Used by `in` and `not_in`.
+/// `in`/`not_in`: any non-null element string-equals the target.
 pub(crate) fn contains_value(values: &[Value], target: &Value) -> bool {
     let expected = js_string(target);
 
@@ -566,8 +533,7 @@ pub(crate) fn contains_value(values: &[Value], target: &Value) -> bool {
         .any(|value| !value.is_null() && js_string(value) == expected)
 }
 
-/// Whether an array has a scalar element whose JavaScript string form equals
-/// the target's string form. Used by `has` and `not_has`.
+/// `has`/`not_has`: any scalar element string-equals the target.
 pub(crate) fn contains_primitive_value(values: &[Value], target: &Value) -> bool {
     let expected = js_string(target);
 
@@ -687,9 +653,7 @@ mod tests {
 
     #[test]
     fn radix_rounding_uses_discarded_sticky_bits_and_handles_carry() {
-        // Repeated float multiply/add rounds this value twice and produces the
-        // adjacent lower float. One exact integer conversion must retain the
-        // low sticky bit before rounding.
+        // Naive multiply/add double-rounds this to the lower float.
         assert_eq!(
             js_number_string("0x1000000000000081").to_bits(),
             0x43b0_0000_0000_0001
@@ -869,9 +833,7 @@ mod tests {
         let positive = serde_json::from_str::<Value>("1e400");
         let negative = serde_json::from_str::<Value>("-1e400");
         if positive.is_err() || negative.is_err() {
-            // The default serde_json configuration rejects these at the wire
-            // boundary. The assertions below run when arbitrary_precision is
-            // enabled explicitly for the dependency.
+            // Only reachable with serde_json's arbitrary_precision feature.
             assert!(positive.is_err());
             assert!(negative.is_err());
             return;

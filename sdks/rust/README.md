@@ -1,16 +1,22 @@
-# Cloudflare Flagship Rust SDK
+# cloudflare-flagship
 
-Native asynchronous feature evaluation for [Cloudflare Flagship](https://developers.cloudflare.com/flagship/), with an [OpenFeature](https://openfeature.dev/) 0.3 provider and a direct HTTP client.
+[![crates.io](https://img.shields.io/crates/v/cloudflare-flagship.svg)](https://crates.io/crates/cloudflare-flagship)
+[![docs.rs](https://img.shields.io/docsrs/cloudflare-flagship)](https://docs.rs/cloudflare-flagship)
+[![license](https://img.shields.io/crates/l/cloudflare-flagship.svg)](LICENSE)
 
-## Install
+[OpenFeature](https://openfeature.dev)-compliant provider SDK for [Cloudflare Flagship](https://developers.cloudflare.com/flagship/) in async Rust server applications.
 
-```console
+> The Rust SDK supports HTTP mode only. The Cloudflare Workers binding mode is exclusive to the TypeScript SDK.
+
+## Installation
+
+```sh
 cargo add cloudflare-flagship
 ```
 
-The default TLS backend is Rustls. See [TLS features](#tls-features) before changing defaults.
+Requires Rust 1.88+ and a Tokio runtime.
 
-## Remote evaluation with OpenFeature
+## Quick start
 
 ```rust,no_run
 use cloudflare_flagship::{
@@ -20,178 +26,178 @@ use cloudflare_flagship::{
 
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 let options = FlagshipClientOptions::builder()
-    .app_id("app-123")
-    .account_id("account-456")
-    .auth_token("secret-token")
+    .app_id("your-app-id")
+    .account_id("your-account-id")
+    .auth_token("your-token")
     .build()?;
 let provider = FlagshipServerProvider::new(options)?;
 
 let mut api = OpenFeature::default();
 api.set_provider(provider).await;
-let client = api.create_named_client("checkout");
-let context = EvaluationContext::default().with_targeting_key("user-123");
+
+let client = api.create_client();
+let context = EvaluationContext::default()
+    .with_targeting_key("user-123")
+    .with_custom_field("plan", "premium");
 let enabled = client
-    .get_bool_value("new-checkout", Some(&context), None)
+    .get_bool_value("dark-mode", Some(&context), None)
     .await
-    .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    .unwrap_or(false);
 # let _ = enabled;
 # Ok(())
 # }
 ```
 
-## Direct client
+See [`examples/server.rs`](examples/server.rs) and [`examples/local.rs`](examples/local.rs) for complete programs.
 
-Use the native response when OpenFeature type conversion is unnecessary:
+## Configuration
 
-```rust,no_run
-use cloudflare_flagship::{FlagshipClient, FlagshipClientOptions, open_feature::EvaluationContext};
+`FlagshipClientOptions::builder()` accepts either `app_id` plus `account_id` or a full `endpoint` URL.
 
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
-let options = FlagshipClientOptions::builder()
-    .app_id("app-123")
-    .account_id("account-456")
-    .auth_token("secret-token")
-    .build()?;
-let client = FlagshipClient::new(options)?;
-let response = client
-    .evaluate(
-        "new-checkout",
-        &EvaluationContext::default().with_targeting_key("user-123"),
-    )
-    .await?;
-println!("{} ({})", response.value, response.reason);
-# Ok(())
-# }
-```
+| Option           | Description                                                                     |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `app_id`         | Flagship app ID. Mutually exclusive with `endpoint`.                            |
+| `account_id`     | Required with `app_id`, and always required for local evaluation.               |
+| `base_url`       | Base URL override used with `app_id`; defaults to `https://api.cloudflare.com`. |
+| `endpoint`       | Full absolute evaluation endpoint URL.                                          |
+| `auth_token`     | Adds `Authorization: Bearer <token>` to each request.                           |
+| `static_headers` | Static headers. Explicit `Authorization` overrides `auth_token`.                |
+| `header_factory` | Async per-request headers. Values override `static_headers` and `auth_token`.   |
+| `http_client`    | Custom `reqwest::Client`.                                                       |
+| `timeout`        | Per-attempt timeout; defaults to 5 seconds. `disable_timeout()` removes it.     |
+| `retries`        | Retry attempts on transient errors; defaults to 1 and is capped at 10.          |
+| `retry_delay`    | Delay between retries; defaults to 1 second and is capped at 30 seconds.        |
 
-## Local evaluation and lifecycle
+`FlagshipServerProvider::builder(options)` adds provider options:
 
-Local mode downloads definitions, evaluates in-process, and refreshes them in the background. In application mode, local evaluation requires both `app_id` and `account_id`. With an explicit endpoint, provide `account_id` as well so rollout hashing has an account identity, and make the endpoint path end in `/evaluate`; the SDK derives `/definitions` by replacing that final path segment. Initialize explicitly so the first fetch can return an error; OpenFeature 0.3's provider initialization API cannot return one. Shut down explicitly because that API also has no provider shutdown callback.
+| Option              | Description                                                           |
+| ------------------- | --------------------------------------------------------------------- |
+| `cache_ttl`         | Cache TTL; enables response caching when greater than zero.           |
+| `cache_max_entries` | Maximum cached entries; defaults to 1000.                             |
+| `local_evaluation`  | Downloads definitions and evaluates flags in-process; off by default. |
+| `refresh_interval`  | Background definitions refresh period in local mode; defaults to 30s. |
+| `hook`              | Adds a provider-level OpenFeature hook.                               |
+
+## Local evaluation
+
+With local evaluation, the provider downloads the app's flag definitions, evaluates flags in-process with no network call per evaluation, and refreshes definitions in the background.
+
+OpenFeature 0.3 has no provider initialization or shutdown callbacks, so call `initialize_provider` before registering the provider and `shutdown_provider` when you're done:
 
 ```rust,no_run
 use std::time::Duration;
-use cloudflare_flagship::{
-    FlagshipClientOptions, FlagshipServerProvider,
-    open_feature::OpenFeature,
-};
+use cloudflare_flagship::{FlagshipClientOptions, FlagshipServerProvider, open_feature::OpenFeature};
 
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 let options = FlagshipClientOptions::builder()
-    .app_id("app-123")
-    .account_id("account-456")
-    .auth_token("secret-token")
+    .app_id("your-app-id")
+    .account_id("your-account-id")
+    .auth_token("your-read-token")
     .build()?;
 let provider = FlagshipServerProvider::builder(options)
     .local_evaluation(true)
     .refresh_interval(Duration::from_secs(30))
     .build()?;
 
-provider.initialize_provider().await?;
+provider.initialize_provider().await?; // fails if the first definitions fetch fails
 let mut api = OpenFeature::default();
 api.set_provider(provider.clone()).await;
-let client = api.create_named_client("checkout");
-let enabled = client
-    .get_bool_value("new-checkout", None, None)
-    .await
-    .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-# let _ = enabled;
+
+// ... evaluate flags ...
+
 provider.shutdown_provider().await;
 # Ok(())
 # }
 ```
 
-Dropping an evaluation future cancels its in-progress SDK work. Dropping the final local-provider clone aborts its refresh task. In remote mode, `shutdown_provider` only clears the response cache and the provider keeps evaluating, as in the TypeScript and Go SDKs.
+- The auth token needs app **read** permission, not `evaluate`.
+- `endpoint`, when set, must end in `/evaluate` so the definitions URL can be derived, and `account_id` must match the account in that URL, because rollout bucketing uses it.
+- Incompatible with `cache_ttl`.
+- Local evaluations do **not** appear in server-side analytics.
+- Later refresh failures mark the provider `STALE` and keep the last good definitions. `last_refresh_error()` returns the most recent fetch failure.
 
-If a background refresh fails after initialization, the provider becomes `STALE` but retains the last good definitions snapshot, so local evaluations continue. A later successful refresh replaces the snapshot and returns the provider to `READY`.
+## Response caching
 
-## Cache and hooks
+Caching is off by default and enabled by setting `cache_ttl`. Entries are keyed by flag key, flag type, and the full evaluation context, and are LRU-evicted beyond `cache_max_entries`. Cache hits resolve with the `CACHED` reason. Disabled flags, errors, and type mismatches are never cached. `shutdown_provider` clears the cache. Each entry stores the serialized context, so large contexts use more memory.
 
-The optional remote cache has fixed TTL, bounded LRU capacity, and no singleflight behavior. It cannot be combined with local evaluation. Disabled responses, type mismatches, and errors are never cached. A cache hit retains the response value, variant and flag metadata and reports the `CACHED` evaluation reason.
+## Hooks
+
+`LoggingHook` reports evaluation stages without context or values; strings are passed raw, so escape them for your log format. `TelemetryHook` includes the evaluation context and resolved value, so treat its events as sensitive.
 
 ```rust,no_run
-use std::time::Duration;
-use cloudflare_flagship::{
-    FlagshipClientOptions, FlagshipServerProvider, LoggingHook, TelemetryHook,
-};
+use cloudflare_flagship::{FlagshipClientOptions, FlagshipServerProvider, LoggingHook};
 
-# fn build() -> Result<(), Box<dyn std::error::Error>> {
-let options = FlagshipClientOptions::builder()
-    .app_id("app-123")
-    .account_id("account-456")
-    .build()?;
-let logging = LoggingHook::new(|event| {
-    eprintln!("{:?}: {}", event.stage(), event.flag_key());
-});
-let telemetry = TelemetryHook::new(|event| {
-    // This event may contain customer context and resolved values.
-    let _ = event;
-});
+# fn build(options: FlagshipClientOptions) -> Result<(), Box<dyn std::error::Error>> {
 let provider = FlagshipServerProvider::builder(options)
-    .cache_ttl(Duration::from_secs(15))
-    .cache_max_entries(1_000)
-    .hook(logging)
-    .hook(telemetry)
+    .hook(LoggingHook::new(|event| eprintln!("{:?}: {:?}", event.kind, event.flag_key)))
     .build()?;
 # let _ = provider;
 # Ok(())
 # }
 ```
 
-Logging events omit context and values. Telemetry explicitly exposes them and should be handled as sensitive data. OpenFeature 0.3 does not provide safely correlatable hook calls or readable hook hints, so telemetry contains neither duration nor hints.
+## Direct client
 
-## TLS features
+`FlagshipClient` evaluates flags without OpenFeature and returns the raw JSON value, variant, reason, and metadata:
 
-Exactly one TLS strategy is recommended:
+```rust,no_run
+use cloudflare_flagship::{FlagshipClient, FlagshipClientOptions, open_feature::EvaluationContext};
 
-| Feature              | Behavior                                                                                                                                     |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rustls` (default)   | Reqwest Rustls backend with a default crypto provider                                                                                        |
-| `native-tls`         | Platform-native TLS; requires `default-features = false`                                                                                     |
-| `rustls-no-provider` | Rustls without selecting a crypto provider; requires `default-features = false`; the application must install one before client construction |
+# async fn run(options: FlagshipClientOptions) -> Result<(), Box<dyn std::error::Error>> {
+let client = FlagshipClient::new(options);
+let context = EvaluationContext::default().with_targeting_key("user-123");
+let response = client.evaluate("dark-mode", &context).await?;
+println!("{} ({})", response.value, response.reason);
+# Ok(())
+# }
+```
 
-For example: `cargo add cloudflare-flagship --no-default-features --features native-tls`. The `rustls-no-provider` configuration likewise requires `default-features = false`:
+## Evaluation context
 
-```console
+Primitive-only context is sent as URL query parameters, so it can appear in request logs. Context containing structs, arrays, or nulls uses a JSON POST request. Context over [Flagship's limits](https://developers.cloudflare.com/flagship/reference/limits/) returns `INVALID_CONTEXT` before any request is made.
+
+## Error handling
+
+The lower-level `FlagshipClient` returns `FlagshipError` with an `ErrorCode`, HTTP status, and server error code when available. The server's message is kept for 400 and 404 responses. Provider errors use the matching OpenFeature error code with a fixed message, so server error text never reaches OpenFeature logs.
+
+| Error code           | Cause                                                                |
+| -------------------- | -------------------------------------------------------------------- |
+| `FLAG_NOT_FOUND`     | Flag key does not exist (HTTP 404 or missing from local definitions) |
+| `BAD_REQUEST`        | Evaluation request was invalid (HTTP 400)                            |
+| `INVALID_CONTEXT`    | Evaluation context is unsupported or over Flagship's limits          |
+| `NETWORK_ERROR`      | Network request failed                                               |
+| `TIMEOUT_ERROR`      | Request timed out                                                    |
+| `PARSE_ERROR`        | API response or flag definition was invalid                          |
+| `PROVIDER_NOT_READY` | Local evaluation used before initialization or after shutdown        |
+| `GENERAL`            | Any other transient or unexpected failure                            |
+
+Network errors, timeouts, and HTTP 408, 425, 429, and 5xx responses are retried. Other HTTP errors, including 400, 401, 403, and 404, are not, and neither is a server-side flag configuration error. The default HTTP client does not follow redirects.
+
+## Differences from other SDKs
+
+These come from limits of the `open-feature` 0.3 crate:
+
+- A disabled flag resolves to the value served by Flagship, not your default, because providers never receive the default. Check for the `Disabled` reason if you need to fall back.
+- Flag values that are JSON `null` or arrays at the root return `TYPE_MISMATCH`. Use `FlagshipClient` for arbitrary JSON.
+- `EvaluationError` does not implement `std::error::Error`, so it needs converting before you can use `?`.
+
+## TLS
+
+The default `rustls` feature uses Rustls with its default crypto provider. For platform TLS, or to install your own Rustls provider before building a client:
+
+```sh
+cargo add cloudflare-flagship --no-default-features --features native-tls
 cargo add cloudflare-flagship --no-default-features --features rustls-no-provider
 ```
 
-Cargo features are additive and unified across the dependency graph, so another dependency can enable additional Reqwest TLS features. This crate rejects a build with no TLS transport feature, but does not reject valid feature-unified combinations or providerless Rustls. With `rustls-no-provider`, the application is responsible for installing a Rustls crypto provider before constructing a default client.
-
-## Runtime and compatibility
-
-- Rust 1.88 or newer; Rust 2024 edition.
-- Native Tokio runtime and Reqwest transport. Tokio I/O is required for requests; Tokio time is required for SDK timeouts, retry delays, and local refresh.
-- WebAssembly and Cloudflare Workers bindings are out of scope. Use the TypeScript SDK's native Workers binding.
-- OpenFeature 0.3 cannot represent null or an array at the root of `StructValue`; nested nulls also fail conversion. Use the direct client when arbitrary JSON is required.
-- OpenFeature 0.3's `EvaluationError` does not implement `std::error::Error`; adapt it at application error boundaries when using `?`.
-- A disabled flag resolves successfully to the value served by Flagship. The TypeScript, Python, and Go SDKs return the caller's default instead, but OpenFeature 0.3 never passes the default to a provider. Check for the `Disabled` reason if your code must fall back.
-- Provider errors carry a fixed message such as `FLAG_NOT_FOUND (HTTP 404): requested flag was not found`, not the server's error details, so backend text never reaches logs through OpenFeature. Use the direct client's `FlagshipError` when you need the server message or code.
-- A 400 response whose body reports `INVALID_CONTEXT` resolves with the OpenFeature `InvalidContext` code. The Python and Go SDKs report it as `GENERAL`.
-- The public API exposes Reqwest 0.13 and `open-feature` 0.3 types, such as `FlagshipClientOptionsBuilder::http_client` and the re-exported `open_feature` crate. Upgrading either dependency is a breaking release of this crate.
-- Flag metadata configured in Flagship is returned as OpenFeature `flag_metadata` in remote and local modes, including for disabled flags and cache hits. Only string, boolean and numeric entries are kept; missing or malformed metadata resolves to an empty map.
-
-## Requests, retries, and security
-
-The default is one retry with a one-second fixed delay and a five-second timeout **per attempt**, including dynamic-header generation and HTTP I/O. Network, timeout, provider-not-ready, general, and unknown errors are retryable; bad request, missing flag, parse, and invalid-context errors are terminal. Dynamic headers are produced once per attempt. Header precedence is dynamic headers, static headers, bearer token, then injected Reqwest defaults. The default Reqwest client sends `User-Agent: cloudflare-flagship-rust/<version>`; an injected client keeps its own.
-
-Contexts containing only primitive values are sent as GET query parameters. Those values, along with the flag key, can therefore appear in request URLs and proxy or server logs; use the structured POST path where appropriate and treat context data as sensitive regardless.
-
-The SDK enforces [Flagship's evaluation context limits](https://developers.cloudflare.com/flagship/reference/limits/) before evaluating: 100 top-level attributes, 1–256 characters per top-level key, 10 value-nesting levels, and 32 KiB of serialized JSON. Remote evaluation also enforces the 10,000 visited-values limit, which Flagship applies only to data-plane HTTP and Workers binding evaluation.
-
-Do not embed tokens in endpoint URLs or evaluation context. URLs with credentials, query strings, or fragments are rejected. SDK-generated debug output redacts configured URLs and credentials, and request headers are marked sensitive. Telemetry callbacks are an explicit sensitive-data boundary and must avoid blocking or panicking.
-
 ## Development
 
-From `sdks/rust`:
-
-```console
+```sh
 cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-RUSTDOCFLAGS='-D warnings' cargo doc --all-features --no-deps
-cargo package --allow-dirty
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
 ```
 
-Inspect package contents with `cargo package --allow-dirty --list`. The packaged crate includes `src/local/cases.json`, which is required by evaluator tests.
+## License
 
-Licensed under Apache-2.0. See [`LICENSE`](LICENSE).
+[Apache-2.0](LICENSE)

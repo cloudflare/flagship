@@ -12,9 +12,7 @@ use serde_json::Value;
 
 use crate::config::{FlagshipClientOptions, HeaderFactory, TimeoutPolicy};
 use crate::context::{NormalizedContext, normalize_context};
-use crate::endpoint::resolve_evaluation_endpoint;
-use crate::error::{ConfigError, ErrorCode, FlagshipError};
-use crate::retry::RetryPolicy;
+use crate::error::{ErrorCode, FlagshipError};
 use crate::types::FlagshipEvaluationResponse;
 
 const EVALUATION_BODY_LIMIT: usize = 1024 * 1024;
@@ -24,16 +22,12 @@ const SERVER_CODE_LIMIT: usize = 64;
 
 /// An asynchronous client for the Flagship remote-evaluation API.
 ///
-/// The client is cheap to clone and may be shared between concurrent tasks. Each
-/// evaluation owns its request state, invokes the configured header factory once
-/// per attempt, and rebuilds its request for every retry. The timeout applies to
-/// each attempt independently, not to the complete sequence of attempts and
-/// retry delays. Dropping the evaluation future cancels in-progress SDK work.
+/// Cheap to clone and safe to share between tasks. The header factory is called
+/// once per attempt, and the timeout applies to each attempt, not to the whole
+/// retry sequence. Dropping the evaluation future cancels in-progress work.
 ///
-/// Flag-not-found, bad-request, parse, and invalid-context failures are terminal.
-/// Network, timeout, general, provider-not-ready, and unknown failures use the
-/// configured retry policy. Evaluation response bodies are limited to 1 MiB;
-/// error bodies are truncated to 64 KiB without replacing their HTTP status.
+/// Network failures, timeouts, and HTTP 408, 425, 429, and 5xx responses are
+/// retried; other failures are not. Response bodies are limited to 1 MiB.
 ///
 /// # Examples
 ///
@@ -48,7 +42,7 @@ const SERVER_CODE_LIMIT: usize = 64;
 ///     .account_id("account-456")
 ///     .auth_token("secret-token")
 ///     .build()?;
-/// let client = FlagshipClient::new(options)?;
+/// let client = FlagshipClient::new(options);
 /// let response = client
 ///     .evaluate(
 ///         "dark-mode",
@@ -77,12 +71,9 @@ struct ClientInner {
 
 impl FlagshipClient {
     /// Constructs a client from validated options.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ConfigError`] if the validated endpoint cannot be resolved.
-    pub fn new(options: FlagshipClientOptions) -> Result<Self, ConfigError> {
-        let endpoint = resolve_evaluation_endpoint(options.endpoint())?;
+    #[must_use]
+    pub fn new(options: FlagshipClientOptions) -> Self {
+        let endpoint = options.evaluation_url().clone();
         let mut base_headers = HeaderMap::new();
         if let Some(bearer) = options.bearer_header() {
             base_headers.insert(AUTHORIZATION, bearer.clone());
@@ -95,7 +86,7 @@ impl FlagshipClient {
         let retry_delay = options.retry_delay();
         drop(options);
 
-        Ok(Self {
+        Self {
             inner: Arc::new(ClientInner {
                 endpoint,
                 http_client,
@@ -105,7 +96,7 @@ impl FlagshipClient {
                 retries,
                 retry_delay,
             }),
-        })
+        }
     }
 
     /// Returns the resolved evaluation endpoint without a request query.
@@ -128,20 +119,19 @@ impl FlagshipClient {
 
     /// Evaluates `flag_key` using an `OpenFeature` evaluation context.
     ///
-    /// Primitive-only contexts use a GET query. Contexts containing nulls,
-    /// arrays, or objects use a JSON POST body. The explicit `flag_key` always
-    /// controls the requested flag, even when the context contains `flagKey`.
+    /// Primitive-only contexts are sent as a GET query; contexts with nulls,
+    /// arrays, or objects as a JSON POST. `flag_key` overrides any `flagKey` in
+    /// the context.
     ///
     /// # Errors
     ///
-    /// Returns [`FlagshipError`] when context conversion, dynamic headers,
-    /// transport, HTTP status handling, or response parsing fails.
+    /// Returns [`FlagshipError`] if context conversion, headers, transport,
+    /// the HTTP status, or response parsing fails.
     ///
     /// # Panics
     ///
-    /// Request execution requires a Tokio runtime with I/O enabled. Configured
-    /// timeouts and non-zero retry delays additionally require Tokio time. Tokio
-    /// panics if those drivers are unavailable.
+    /// Panics outside a Tokio runtime with I/O enabled, or without the time
+    /// driver when a timeout or non-zero retry delay is configured.
     pub async fn evaluate(
         &self,
         flag_key: &str,
@@ -152,31 +142,36 @@ impl FlagshipClient {
         self.evaluate_normalized(flag_key, &context).await
     }
 
-    /// Evaluates an already normalized context for provider and cache paths.
     pub(crate) async fn evaluate_normalized(
         &self,
         flag_key: &str,
         context: &NormalizedContext,
     ) -> Result<FlagshipEvaluationResponse, FlagshipError> {
-        let request = EvaluationRequest::build(&self.inner.endpoint, flag_key, context)?;
-        let response = self.send_raw(&request.raw).await?;
+        let request = evaluation_request(&self.inner.endpoint, flag_key, context)?;
+        let response = self.send_raw(&request).await?;
 
         parse_evaluation_response(response.status, &response.body)
     }
 
-    /// Sends a replayable request through shared headers, timeout, and retry logic.
-    ///
-    /// Statuses below 400 are returned to the caller. Bodies for statuses at or
-    /// above 400 are truncated to a small diagnostic limit, converted to a
-    /// status-preserving error, and retried according to their category.
-    /// Successful oversized bodies produce a terminal parse error.
+    /// Sends `request` with headers, timeout, and retries. Error statuses
+    /// (see [`is_error_status`]) become errors.
     pub(crate) async fn send_raw(
         &self,
         request: &RawRequest,
     ) -> Result<RawResponse, FlagshipError> {
-        let policy = RetryPolicy::new(self.inner.retries, self.inner.retry_delay);
+        let mut retries_left = self.inner.retries;
 
-        policy.run(|_| self.execute_attempt(request)).await
+        loop {
+            match self.execute_attempt(request).await {
+                Err(error) if error.is_retryable() && retries_left > 0 => {
+                    retries_left -= 1;
+                    if !self.inner.retry_delay.is_zero() {
+                        tokio::time::sleep(self.inner.retry_delay).await;
+                    }
+                }
+                result => return result,
+            }
+        }
     }
 
     async fn execute_attempt(&self, request: &RawRequest) -> Result<RawResponse, FlagshipError> {
@@ -211,8 +206,8 @@ impl FlagshipClient {
         let response = builder.send().await.map_err(FlagshipError::from_reqwest)?;
         let response = read_response(response, request.body_limit).await?;
 
-        if let Some(code) = status_error_code(response.status) {
-            return Err(http_error(code, response.status, &response.body));
+        if is_error_status(response.status) {
+            return Err(http_error(response.status, &response.body));
         }
 
         Ok(response)
@@ -238,10 +233,8 @@ impl FlagshipClient {
     }
 }
 
-impl TryFrom<FlagshipClientOptions> for FlagshipClient {
-    type Error = ConfigError;
-
-    fn try_from(options: FlagshipClientOptions) -> Result<Self, Self::Error> {
+impl From<FlagshipClientOptions> for FlagshipClient {
+    fn from(options: FlagshipClientOptions) -> Self {
         Self::new(options)
     }
 }
@@ -258,62 +251,45 @@ impl fmt::Debug for FlagshipClient {
     }
 }
 
-struct EvaluationRequest {
-    raw: RawRequest,
-}
-
-impl EvaluationRequest {
-    fn build(
-        endpoint: &Url,
-        flag_key: &str,
-        context: &NormalizedContext,
-    ) -> Result<Self, FlagshipError> {
-        if context.requires_post() {
-            let body = serde_json::to_vec(&PostBody {
-                flag_key,
-                context: context.values(),
-            })
-            .map_err(|source| {
-                FlagshipError::new(
-                    ErrorCode::InvalidContext,
-                    "failed to serialize evaluation context",
-                )
-                .with_source(source)
-            })?;
-
-            return Ok(Self {
-                raw: RawRequest::new(
-                    Method::POST,
-                    endpoint.clone(),
-                    EVALUATION_BODY_LIMIT,
-                    HeaderMap::new(),
-                )
-                .with_body(body),
-            });
-        }
-
-        let mut url = endpoint.clone();
-        url.query_pairs_mut()
-            .extend_pairs(context.query_pairs(flag_key)?);
-
-        Ok(Self {
-            raw: RawRequest::new(Method::GET, url, EVALUATION_BODY_LIMIT, HeaderMap::new()),
+fn evaluation_request(
+    endpoint: &Url,
+    flag_key: &str,
+    context: &NormalizedContext,
+) -> Result<RawRequest, FlagshipError> {
+    if context.requires_post() {
+        let body = serde_json::to_vec(&PostBody {
+            flag_key,
+            context: context.values(),
         })
+        .map_err(|source| {
+            FlagshipError::new(
+                ErrorCode::InvalidContext,
+                "failed to serialize evaluation context",
+            )
+            .with_source(source)
+        })?;
+
+        return Ok(RawRequest::new(
+            Method::POST,
+            endpoint.clone(),
+            EVALUATION_BODY_LIMIT,
+            HeaderMap::new(),
+        )
+        .with_body(body));
     }
+
+    let mut url = endpoint.clone();
+    url.query_pairs_mut()
+        .extend_pairs(context.query_pairs(flag_key)?);
+
+    Ok(RawRequest::new(
+        Method::GET,
+        url,
+        EVALUATION_BODY_LIMIT,
+        HeaderMap::new(),
+    ))
 }
 
-impl fmt::Debug for EvaluationRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("EvaluationRequest")
-            .field("method", &self.raw.method)
-            .field("url", &"<redacted>")
-            .field("body", &self.raw.body.as_ref().map(|_| "<redacted>"))
-            .finish()
-    }
-}
-
-/// A replayable internal HTTP request used by evaluation and definitions fetches.
 pub(crate) struct RawRequest {
     method: Method,
     url: Url,
@@ -323,7 +299,6 @@ pub(crate) struct RawRequest {
 }
 
 impl RawRequest {
-    /// Creates a request with a caller-selected successful-response body limit.
     pub(crate) fn new(
         method: Method,
         url: Url,
@@ -339,7 +314,6 @@ impl RawRequest {
         }
     }
 
-    /// Adds a replayable body. JSON content type is supplied when no source does.
     pub(crate) fn with_body(mut self, body: Vec<u8>) -> Self {
         self.body = Some(body);
 
@@ -347,7 +321,17 @@ impl RawRequest {
     }
 }
 
-/// A fully buffered internal HTTP response.
+impl fmt::Debug for RawRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RawRequest")
+            .field("method", &self.method)
+            .field("url", &"<redacted>")
+            .field("body", &self.body.as_ref().map(|_| "<redacted>"))
+            .finish_non_exhaustive()
+    }
+}
+
 pub(crate) struct RawResponse {
     pub(crate) status: StatusCode,
     pub(crate) headers: HeaderMap,
@@ -393,7 +377,7 @@ async fn read_response(
 ) -> Result<RawResponse, FlagshipError> {
     let status = response.status();
     let headers = response.headers().clone();
-    let is_error = status_error_code(status).is_some();
+    let is_error = is_error_status(status);
     let limit = if is_error {
         ERROR_BODY_LIMIT
     } else {
@@ -416,11 +400,16 @@ async fn read_response(
             .min(limit),
     );
 
-    while let Some(chunk) = response.chunk().await.map_err(|source| {
-        let error = FlagshipError::from_reqwest(source);
-
-        error.with_status(status.as_u16())
-    })? {
+    loop {
+        let chunk = match response.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            // A truncated error body still yields the status-based error.
+            Err(_) if is_error => break,
+            Err(source) => {
+                return Err(FlagshipError::from_reqwest(source).with_status(status.as_u16()));
+            }
+        };
         let remaining = limit.saturating_sub(body.len());
         if chunk.len() > remaining {
             if is_error {
@@ -454,10 +443,6 @@ fn parse_evaluation_response(
     status: StatusCode,
     body: &[u8],
 ) -> Result<FlagshipEvaluationResponse, FlagshipError> {
-    if let Some(code) = status_error_code(status) {
-        return Err(http_error(code, status, body));
-    }
-
     serde_json::from_slice(body).map_err(|source| {
         FlagshipError::new(ErrorCode::ParseError, "response JSON could not be parsed")
             .with_status(status.as_u16())
@@ -465,16 +450,22 @@ fn parse_evaluation_response(
     })
 }
 
-fn status_error_code(status: StatusCode) -> Option<ErrorCode> {
-    match status.as_u16() {
-        404 => Some(ErrorCode::FlagNotFound),
-        400 => Some(ErrorCode::BadRequest),
-        401..=999 => Some(ErrorCode::General),
-        _ => None,
-    }
+/// Statuses >= 400 and redirects other than 304 (which the default client
+/// does not follow) are errors.
+fn is_error_status(status: StatusCode) -> bool {
+    status.as_u16() >= 400 || (status.is_redirection() && status != StatusCode::NOT_MODIFIED)
 }
 
-fn http_error(code: ErrorCode, status: StatusCode, body: &[u8]) -> FlagshipError {
+const fn is_retryable_status(status: u16) -> bool {
+    matches!(status, 408 | 425 | 429 | 500..=599)
+}
+
+fn http_error(status: StatusCode, body: &[u8]) -> FlagshipError {
+    let code = match status.as_u16() {
+        404 => ErrorCode::FlagNotFound,
+        400 => ErrorCode::BadRequest,
+        _ => ErrorCode::General,
+    };
     let details = parse_error_body(body);
     let message = if matches!(code, ErrorCode::FlagNotFound | ErrorCode::BadRequest) {
         details.message.unwrap_or_else(|| status_line(status))
@@ -482,7 +473,15 @@ fn http_error(code: ErrorCode, status: StatusCode, body: &[u8]) -> FlagshipError
         format!("HTTP {}: {}", status.as_u16(), status_text(status))
     };
 
-    let mut error = FlagshipError::new(code, message).with_status(status.as_u16());
+    // A server-side flag configuration error is deterministic, so don't retry it.
+    let (code, retryable) = if details.server_code.as_deref() == Some("PARSE_ERROR") {
+        (ErrorCode::ParseError, false)
+    } else {
+        (code, is_retryable_status(status.as_u16()))
+    };
+    let mut error = FlagshipError::new(code, message)
+        .with_status(status.as_u16())
+        .with_retryable(retryable);
     if let Some(server_code) = details.server_code {
         error = error.with_server_code(server_code);
     }
@@ -662,7 +661,7 @@ mod tests {
     fn build_client(builder: FlagshipClientOptionsBuilder) -> FlagshipClient {
         let options = builder.build().expect("test options");
 
-        FlagshipClient::new(options).expect("test client")
+        FlagshipClient::new(options)
     }
 
     fn local_server(responses: Vec<(u16, Vec<u8>)>) -> (String, Receiver<Vec<u8>>, JoinHandle<()>) {
@@ -878,14 +877,14 @@ mod tests {
             })
             .build()
             .expect("test options");
-        let client = FlagshipClient::new(options).expect("test client");
+        let client = FlagshipClient::new(options);
 
         let error = client
             .evaluate("flag", &EvaluationContext::default())
             .await
             .expect_err("header factory should time out");
 
-        assert_eq!(error.code(), &ErrorCode::TimeoutError);
+        assert_eq!(error.code(), ErrorCode::TimeoutError);
         assert_eq!(error.message(), "request timed out");
     }
 
@@ -915,7 +914,7 @@ mod tests {
         release.send(()).expect("release server");
         server.join().expect("test server did not panic");
 
-        assert_eq!(error.code(), &ErrorCode::TimeoutError);
+        assert_eq!(error.code(), ErrorCode::TimeoutError);
     }
 
     #[tokio::test]
@@ -931,7 +930,7 @@ mod tests {
             .disable_timeout()
             .build()
             .expect("test options");
-        let client = FlagshipClient::new(options).expect("test client");
+        let client = FlagshipClient::new(options);
 
         let error = client
             .evaluate(
@@ -944,7 +943,7 @@ mod tests {
             .source()
             .and_then(|source| source.downcast_ref::<reqwest::Error>());
 
-        assert_eq!(error.code(), &ErrorCode::NetworkError);
+        assert_eq!(error.code(), ErrorCode::NetworkError);
         assert!(source.is_some_and(|source| source.url().is_none()));
         assert!(!error.to_string().contains(&endpoint));
         assert!(!error.to_string().contains(targeting_sentinel));
@@ -986,38 +985,127 @@ mod tests {
                 .expect_err("terminal status should fail");
             server.join().expect("test server did not panic");
 
-            assert_eq!(error.code(), &expected);
+            assert_eq!(error.code(), expected);
             assert_eq!(calls.load(Ordering::SeqCst), 1);
         }
     }
 
     #[tokio::test]
-    async fn unauthorized_and_forbidden_statuses_retry_without_exposing_bodies() {
-        for status in [401, 403] {
+    async fn non_transient_client_errors_do_not_retry_or_expose_bodies() {
+        for status in [401, 403, 409, 422] {
             let private_body = br#"{"error":"private authorization details"}"#.to_vec();
-            let (endpoint, requests, server) = local_server(vec![
-                (status, private_body.clone()),
-                (status, private_body.clone()),
-            ]);
+            let (endpoint, requests, server) = local_server(vec![(status, private_body)]);
             let client = build_client(
                 client_builder(&endpoint)
-                    .retries(1)
+                    .retries(3)
                     .retry_delay(Duration::ZERO),
             );
 
             let error = client
                 .evaluate("flag", &EvaluationContext::default())
                 .await
-                .expect_err("authorization status should fail after retry");
+                .expect_err("client error should fail");
+            server.join().expect("test server did not panic");
 
-            assert_eq!(error.code(), &ErrorCode::General);
+            assert_eq!(error.code(), ErrorCode::General);
             assert_eq!(error.status(), Some(status));
-            assert!(error.is_retryable());
+            assert!(!error.is_retryable());
             assert!(!error.message().contains("private"));
             assert!(!format!("{error:?}").contains("private"));
-            assert_eq!(requests.iter().count(), 2);
-            server.join().expect("test server did not panic");
+            assert_eq!(requests.iter().count(), 1);
         }
+    }
+
+    #[tokio::test]
+    async fn transient_statuses_retry_until_success() {
+        for status in [408, 425, 429, 500, 503] {
+            let success = br#"{"flagKey":"flag","value":true}"#.to_vec();
+            let (endpoint, requests, server) = local_server(vec![
+                (status, b"busy".to_vec()),
+                (status, b"busy".to_vec()),
+                (200, success),
+            ]);
+            let client = build_client(
+                client_builder(&endpoint)
+                    .retries(2)
+                    .retry_delay(Duration::ZERO),
+            );
+
+            let result = client
+                .evaluate("flag", &EvaluationContext::default())
+                .await
+                .expect("transient status should be retried");
+            server.join().expect("test server did not panic");
+
+            assert_eq!(result.value, Value::Bool(true));
+            assert_eq!(requests.iter().count(), 3);
+        }
+    }
+
+    #[tokio::test]
+    async fn transient_status_is_returned_after_retries_are_exhausted() {
+        let (endpoint, requests, server) = local_server(vec![
+            (503, Vec::new()),
+            (503, Vec::new()),
+            (503, Vec::new()),
+        ]);
+        let client = build_client(
+            client_builder(&endpoint)
+                .retries(2)
+                .retry_delay(Duration::ZERO),
+        );
+
+        let error = client
+            .evaluate("flag", &EvaluationContext::default())
+            .await
+            .expect_err("all attempts fail");
+        server.join().expect("test server did not panic");
+
+        assert_eq!(error.code(), ErrorCode::General);
+        assert_eq!(error.status(), Some(503));
+        assert!(error.is_retryable());
+        assert_eq!(requests.iter().count(), 3);
+    }
+
+    #[tokio::test]
+    async fn redirects_are_not_followed() {
+        let (endpoint, requests, server) = local_server(vec![(302, Vec::new())]);
+        let client = build_client(client_builder(&endpoint).retries(2));
+
+        let error = client
+            .evaluate("flag", &EvaluationContext::default())
+            .await
+            .expect_err("redirect should fail");
+        server.join().expect("test server did not panic");
+
+        assert_eq!(error.code(), ErrorCode::General);
+        assert_eq!(error.status(), Some(302));
+        assert!(!error.is_retryable());
+        assert_eq!(requests.iter().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn truncated_error_body_keeps_status_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local test server");
+        let address = listener.local_addr().expect("local test address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test request");
+            let _request = read_request(&mut stream);
+            let _ = stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial",
+            );
+        });
+        let client = build_client(client_builder(&format!("http://{address}/evaluate")).retries(2));
+
+        let error = client
+            .evaluate("flag", &EvaluationContext::default())
+            .await
+            .expect_err("truncated 404 should fail");
+        server.join().expect("test server did not panic");
+
+        assert_eq!(error.code(), ErrorCode::FlagNotFound);
+        assert_eq!(error.status(), Some(404));
+        assert!(!error.is_retryable());
     }
 
     #[tokio::test]
@@ -1031,7 +1119,7 @@ mod tests {
             .expect_err("600 status should fail");
         server.join().expect("test server did not panic");
 
-        assert_eq!(error.code(), &ErrorCode::General);
+        assert_eq!(error.code(), ErrorCode::General);
         assert_eq!(error.status(), Some(600));
     }
 
@@ -1055,14 +1143,79 @@ mod tests {
                 }),
         );
 
+        let start = tokio::time::Instant::now();
         let error = client
             .evaluate("flag", &EvaluationContext::default())
             .await
             .expect_err("factory always fails");
 
-        assert_eq!(error.code(), &ErrorCode::General);
+        assert_eq!(error.code(), ErrorCode::General);
         assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert_eq!(start.elapsed(), Duration::from_secs(6));
         assert!(!format!("{error:?}").contains("factory secret"));
+    }
+
+    fn failing_factory_client(
+        retries: u32,
+        delay: Duration,
+        calls: &Arc<AtomicUsize>,
+    ) -> FlagshipClient {
+        let factory_calls = Arc::clone(calls);
+
+        build_client(
+            client_builder("http://127.0.0.1:1/evaluate")
+                .retries(retries)
+                .retry_delay(delay)
+                .header_factory(move || {
+                    factory_calls.fetch_add(1, Ordering::SeqCst);
+
+                    async {
+                        Err::<HeaderMap, _>(Box::new(std::io::Error::other("unavailable"))
+                            as crate::config::HeaderFactoryError)
+                    }
+                }),
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_delay_is_exact_and_dropping_cancels_later_attempts() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let client = failing_factory_client(2, Duration::from_secs(5), &calls);
+        let task =
+            tokio::spawn(
+                async move { client.evaluate("flag", &EvaluationContext::default()).await },
+            );
+
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        tokio::time::advance(Duration::from_secs(5) - Duration::from_nanos(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        tokio::time::advance(Duration::from_nanos(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        task.abort();
+        assert!(task.await.expect_err("task cancelled").is_cancelled());
+        tokio::time::advance(Duration::from_secs(60)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn zero_retry_delay_does_not_require_a_time_driver() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let client = failing_factory_client(2, Duration::ZERO, &calls);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime without drivers");
+
+        let error = runtime
+            .block_on(client.evaluate("flag", &EvaluationContext::default()))
+            .expect_err("factory always fails");
+
+        assert_eq!(error.code(), ErrorCode::General);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
@@ -1093,7 +1246,7 @@ mod tests {
             .await
             .expect_err("unsupported context should fail");
 
-        assert_eq!(error.code(), &ErrorCode::InvalidContext);
+        assert_eq!(error.code(), ErrorCode::InvalidContext);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
@@ -1205,7 +1358,7 @@ mod tests {
             .await
             .expect_err("successful body exceeds limit");
         server.join().expect("test server did not panic");
-        assert_eq!(error.code(), &ErrorCode::ParseError);
+        assert_eq!(error.code(), ErrorCode::ParseError);
         assert_eq!(error.status(), Some(200));
         assert!(!error.is_retryable());
         assert!(error.message().contains("8-byte"));
@@ -1218,7 +1371,7 @@ mod tests {
             .await
             .expect_err("large error response should remain a status error");
         server.join().expect("test server did not panic");
-        assert_eq!(error.code(), &ErrorCode::BadRequest);
+        assert_eq!(error.code(), ErrorCode::BadRequest);
         assert_eq!(error.status(), Some(400));
         assert!(error.message().len() <= ERROR_MESSAGE_LIMIT);
     }
@@ -1240,7 +1393,7 @@ mod tests {
             .expect_err("chunked response exceeds limit");
         server.join().expect("test server did not panic");
 
-        assert_eq!(error.code(), &ErrorCode::ParseError);
+        assert_eq!(error.code(), ErrorCode::ParseError);
         assert_eq!(error.status(), Some(200));
         assert!(error.message().contains("8-byte"));
     }
@@ -1270,28 +1423,34 @@ mod tests {
 
     #[test]
     fn response_errors_include_status_details_and_server_code() {
-        let not_found = parse_evaluation_response(
+        let not_found = http_error(
             StatusCode::NOT_FOUND,
             br#"{"errorDetails":"missing","errorCode":"FLAG_UNKNOWN"}"#,
-        )
-        .expect_err("404 should fail");
-        assert_eq!(not_found.code(), &ErrorCode::FlagNotFound);
+        );
+        assert_eq!(not_found.code(), ErrorCode::FlagNotFound);
         assert_eq!(not_found.status(), Some(404));
         assert_eq!(not_found.message(), "missing");
         assert_eq!(not_found.server_code(), Some("FLAG_UNKNOWN"));
 
-        let bad_request = parse_evaluation_response(StatusCode::BAD_REQUEST, b" invalid request ")
-            .expect_err("400 should fail");
-        assert_eq!(bad_request.code(), &ErrorCode::BadRequest);
+        let bad_request = http_error(StatusCode::BAD_REQUEST, b" invalid request ");
+        assert_eq!(bad_request.code(), ErrorCode::BadRequest);
         assert_eq!(bad_request.message(), "invalid request");
 
-        let general = parse_evaluation_response(
+        let general = http_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             br#"{"errorCode":"BUSY"}"#,
-        )
-        .expect_err("500 should fail");
-        assert_eq!(general.code(), &ErrorCode::General);
+        );
+        assert_eq!(general.code(), ErrorCode::General);
         assert_eq!(general.server_code(), Some("BUSY"));
+        assert!(general.is_retryable());
+
+        let parse = http_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            br#"{"success":false,"error":"Flag evaluation failed","errorCode":"PARSE_ERROR"}"#,
+        );
+        assert_eq!(parse.code(), ErrorCode::ParseError);
+        assert_eq!(parse.status(), Some(500));
+        assert!(!parse.is_retryable());
 
         let unsafe_detail = format!("line\n\u{202e}{}", "é".repeat(600));
         let body = serde_json::to_vec(&json!({
@@ -1300,8 +1459,7 @@ mod tests {
             "errors": [{"code": "GENERIC_MUST_BE_IGNORED"}]
         }))
         .expect("error JSON");
-        let sanitized =
-            parse_evaluation_response(StatusCode::BAD_REQUEST, &body).expect_err("400 should fail");
+        let sanitized = http_error(StatusCode::BAD_REQUEST, &body);
         assert!(sanitized.message().len() <= ERROR_MESSAGE_LIMIT);
         assert!(sanitized.message().contains("\\u{a}"));
         assert!(sanitized.message().contains("\\u{202e}"));
@@ -1370,24 +1528,22 @@ mod tests {
         ] {
             let error =
                 parse_evaluation_response(StatusCode::OK, body).expect_err("invalid response");
-            assert_eq!(error.code(), &ErrorCode::ParseError);
+            assert_eq!(error.code(), ErrorCode::ParseError);
             assert_eq!(error.status(), Some(200));
         }
 
         let oversized = body_too_large(StatusCode::OK, 1234);
-        assert_eq!(oversized.code(), &ErrorCode::ParseError);
+        assert_eq!(oversized.code(), ErrorCode::ParseError);
         assert!(!oversized.is_retryable());
         assert!(oversized.message().contains("1234-byte"));
 
-        let request = EvaluationRequest {
-            raw: RawRequest::new(
-                Method::POST,
-                Url::parse("https://secret.example/evaluate?token=secret").expect("test URL"),
-                EVALUATION_BODY_LIMIT,
-                HeaderMap::new(),
-            )
-            .with_body(b"private context".to_vec()),
-        };
+        let request = RawRequest::new(
+            Method::POST,
+            Url::parse("https://secret.example/evaluate?token=secret").expect("test URL"),
+            EVALUATION_BODY_LIMIT,
+            HeaderMap::new(),
+        )
+        .with_body(b"private context".to_vec());
         let debug = format!("{request:?}");
         assert!(!debug.contains("secret"));
         assert!(!debug.contains("private context"));
@@ -1405,7 +1561,7 @@ mod tests {
             .http_client(reqwest::Client::new())
             .build()
             .expect("test options");
-        let client = FlagshipClient::new(options).expect("test client");
+        let client = FlagshipClient::new(options);
         let cloned = client.clone();
         assert!(Arc::ptr_eq(&client.inner, &cloned.inner));
         let context = EvaluationContext::default();
@@ -1421,7 +1577,7 @@ mod tests {
             .http_client(reqwest::Client::new())
             .build()
             .expect("test options");
-        let client = FlagshipClient::new(options).expect("test client");
+        let client = FlagshipClient::new(options);
         let debug = format!("{client:?}");
 
         assert!(debug.contains("17s"));

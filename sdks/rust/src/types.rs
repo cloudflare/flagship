@@ -1,7 +1,4 @@
-//! Flagship wire-format and domain types.
-//!
-//! These types model the native Flagship server API and are independent of
-//! `OpenFeature`'s evaluation reason and resolution-detail types.
+//! Flagship wire-format types.
 
 use std::convert::Infallible;
 use std::fmt;
@@ -10,13 +7,11 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-/// The native Flagship reason for selecting an evaluation value.
+/// Flagship's reason for selecting an evaluation value.
 ///
-/// The named constants cover reasons currently defined by Flagship. Values
-/// introduced by a newer server are preserved verbatim when deserialized, so
-/// callers should compare against known constants rather than assume this list
-/// is exhaustive. This wire reason is separate from `OpenFeature`'s reason type;
-/// providers are responsible for mapping between them.
+/// Reasons introduced by newer servers are preserved verbatim, so don't assume
+/// the constants are exhaustive. This is separate from `OpenFeature`'s reason
+/// type; the provider maps between them.
 ///
 /// Known constants can be used as patterns:
 ///
@@ -52,7 +47,7 @@ impl EvaluationReason {
     /// The enabled flag has no rules and served its default variation.
     pub const STATIC: Self = Self(EvaluationReasonRepr::Static);
 
-    /// A targeting rule without a partial percentage rollout matched.
+    /// A targeting rule without a percentage rollout matched.
     pub const TARGETING_MATCH: Self = Self(EvaluationReasonRepr::TargetingMatch);
 
     /// The flag has rules, but none matched, so its default variation was served.
@@ -61,7 +56,7 @@ impl EvaluationReason {
     /// The flag is disabled and served its default variation.
     pub const DISABLED: Self = Self(EvaluationReasonRepr::Disabled);
 
-    /// A matching rule's partial percentage rollout selected the variation.
+    /// A matching rule's percentage rollout selected the variation.
     pub const SPLIT: Self = Self(EvaluationReasonRepr::Split);
 
     /// Returns this reason's exact Flagship wire string.
@@ -187,19 +182,13 @@ where
     })
 }
 
-/// A successful response from the native Flagship evaluation API.
+/// A successful response from the Flagship evaluation API.
 ///
-/// `value` retains any JSON value, including `null`. A missing or `null`
-/// `variant` is represented as an empty string, matching the string field used
-/// by the Go and Python SDKs. Missing or `null` reasons default to
-/// [`EvaluationReason::DEFAULT`].
+/// Integers from [`i64::MIN`] through [`u64::MAX`] stay integers; larger values
+/// become floats and may lose precision.
 ///
-/// JSON numbers follow [`serde_json::Number`] limits. Integers from [`i64::MIN`]
-/// through [`u64::MAX`] retain an integer representation; integers outside that
-/// range are represented as floating-point numbers and may lose precision.
-///
-/// The type is non-exhaustive so new wire fields can be added compatibly. Use
-/// [`Self::new`] and the builder methods rather than a struct literal.
+/// The type is non-exhaustive; construct it with [`Self::new`] and the `with_*`
+/// methods.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[non_exhaustive]
 #[serde(rename_all = "camelCase")]
@@ -207,22 +196,20 @@ pub struct FlagshipEvaluationResponse {
     /// The key of the evaluated flag.
     pub flag_key: String,
 
-    /// The JSON value selected for the flag, subject to [`serde_json::Number`] limits.
+    /// The served JSON value, which may be `null`.
     pub value: Value,
 
     /// The key of the selected variant, or an empty string when missing or `null`.
     #[serde(default, deserialize_with = "null_as_default")]
     pub variant: String,
 
-    /// The reason this value was selected, defaulting to
-    /// [`EvaluationReason::DEFAULT`] when missing or `null`.
+    /// The selection reason; [`EvaluationReason::DEFAULT`] when missing or `null`.
     #[serde(default, deserialize_with = "null_as_default")]
     pub reason: EvaluationReason,
 
-    /// The flag metadata configured in Flagship.
+    /// Flag metadata configured in Flagship; empty when missing or not an object.
     ///
-    /// Empty when the response has no metadata or it is not a JSON object.
-    /// The `OpenFeature` provider exposes only string, boolean and numeric entries.
+    /// The `OpenFeature` provider exposes only string, boolean, and numeric entries.
     #[serde(
         default,
         deserialize_with = "object_or_default",

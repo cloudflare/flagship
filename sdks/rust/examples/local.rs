@@ -1,12 +1,11 @@
-//! In-process Flagship evaluation with periodically refreshed definitions.
+//! In-process evaluation with periodically refreshed definitions.
 //!
-//! Set `FLAGSHIP_APP_ID`, `FLAGSHIP_ACCOUNT_ID`, and `FLAGSHIP_READ_TOKEN`
-//! before running this example. The token needs app read permission. Local
-//! evaluations do not appear in server-side analytics.
+//! Requires `FLAGSHIP_APP_ID`, `FLAGSHIP_ACCOUNT_ID`, and `FLAGSHIP_READ_TOKEN`
+//! (a token with app read permission).
 
 use std::time::Duration;
 
-use cloudflare_flagship::open_feature::{EvaluationContext, OpenFeature};
+use cloudflare_flagship::open_feature::{EvaluationContext, EvaluationError, OpenFeature};
 use cloudflare_flagship::{FlagshipClientOptions, FlagshipServerProvider, LoggingHook};
 
 #[tokio::main(flavor = "current_thread")]
@@ -23,12 +22,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .local_evaluation(true)
         .refresh_interval(Duration::from_secs(30))
         .hook(LoggingHook::new(|event| {
-            eprintln!("{:?}: {}", event.stage(), event.flag_key());
+            eprintln!("{:?}: {:?}", event.kind, event.flag_key);
         }))
         .build()?;
 
-    // OpenFeature 0.3 cannot report provider initialization errors, so fetch
-    // the first definitions snapshot explicitly before registration.
+    // OpenFeature 0.3 has no provider init or shutdown callbacks.
     provider.initialize_provider().await?;
 
     let mut api = OpenFeature::default();
@@ -40,11 +38,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dark_mode = client
         .get_bool_value("dark-mode", Some(&context), None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
     let details = client
         .get_bool_details("premium-features", Some(&context), None)
         .await
-        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        .map_err(eval_error)?;
 
     println!("dark-mode: {dark_mode}");
     println!(
@@ -52,8 +50,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         details.value, details.reason, details.variant
     );
 
-    // OpenFeature 0.3 has no provider shutdown callback either.
     provider.shutdown_provider().await;
 
     Ok(())
+}
+
+fn eval_error(error: EvaluationError) -> std::io::Error {
+    let message = error.message.unwrap_or_default();
+
+    std::io::Error::other(format!("{:?}: {message}", error.code))
 }

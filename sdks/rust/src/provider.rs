@@ -1,18 +1,17 @@
-//! Native asynchronous `OpenFeature` provider integration.
+//! Asynchronous `OpenFeature` provider.
 //!
-//! `open-feature` 0.3 does not pass a default value to provider resolution
-//! methods and returns provider errors directly. A disabled Flagship flag is a
-//! successful resolution and returns its served value after exact type checking.
-//! This differs from the TypeScript, Python, and Go providers, which return the
-//! caller's default for a disabled flag; this provider never receives it. The
-//! same `open-feature` version has no null value and only exposes structured
-//! objects at the resolution root. JSON nulls (including nested nulls),
-//! unsupported numbers, and array roots consequently produce a type mismatch.
+//! `open-feature` 0.3 never passes the caller's default value to providers, so
+//! a disabled flag is a successful resolution that returns its served value
+//! (after type checking). Provider errors are returned directly.
+//!
+//! `open-feature` 0.3 also has no null value and only supports objects at the
+//! resolution root, so JSON nulls (including nested nulls), unsupported numbers,
+//! and array roots produce a type mismatch.
 
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
 use std::time::Duration;
 
 use open_feature::provider::{
@@ -29,12 +28,10 @@ use tokio::sync::watch;
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio::time::{Interval, MissedTickBehavior};
 
-use crate::cache::{CacheToken, ResponseCache};
+use crate::cache::ResponseCache;
 use crate::client::FlagshipClient;
 use crate::config::FlagshipClientOptions;
-use crate::context::{
-    ExpectedFlagType, NormalizedContext, normalize_context, normalize_local_context,
-};
+use crate::context::{ExpectedFlagType, normalize_context, normalize_local_context};
 use crate::definitions::{DefinitionsFetchResult, DefinitionsFetcher, DefinitionsSnapshot};
 use crate::endpoint::resolve_definitions_endpoint;
 use crate::error::{ConfigError, ErrorCode, FlagshipError};
@@ -64,7 +61,8 @@ impl FlagshipServerProviderBuilder {
     /// Enables or disables local evaluation, which defaults to disabled.
     ///
     /// Local mode requires an account ID and an evaluation endpoint from which
-    /// the definitions endpoint can be derived. It cannot use the response cache.
+    /// the definitions endpoint can be derived. It cannot be combined with the
+    /// response cache.
     #[must_use]
     pub fn local_evaluation(mut self, enabled: bool) -> Self {
         self.local_evaluation = enabled;
@@ -72,9 +70,9 @@ impl FlagshipServerProviderBuilder {
         self
     }
 
-    /// Sets the local definitions refresh period, which defaults to 30 seconds.
+    /// Sets the definitions refresh period, which defaults to 30 seconds.
     ///
-    /// This option is validated and used only in local mode.
+    /// Used only in local mode; must be non-zero.
     #[must_use]
     pub fn refresh_interval(mut self, interval: Duration) -> Self {
         self.refresh_interval = interval;
@@ -82,7 +80,7 @@ impl FlagshipServerProviderBuilder {
         self
     }
 
-    /// Sets the remote cache TTL. It defaults to zero, which disables caching.
+    /// Sets the response cache TTL. Defaults to zero, which disables caching.
     ///
     /// The cache applies only in remote mode.
     #[must_use]
@@ -92,7 +90,7 @@ impl FlagshipServerProviderBuilder {
         self
     }
 
-    /// Sets the remote cache capacity, which defaults to 1000 entries.
+    /// Sets the response cache capacity, which defaults to 1000 entries.
     ///
     /// Zero is rejected when caching is enabled and otherwise ignored.
     #[must_use]
@@ -115,8 +113,7 @@ impl FlagshipServerProviderBuilder {
     /// # Errors
     ///
     /// Returns [`ConfigError`] for incompatible modes, invalid limits, a missing
-    /// local-evaluation account ID, or an endpoint that cannot produce the
-    /// required client URLs.
+    /// local-evaluation account ID, or an unusable endpoint.
     pub fn build(self) -> Result<FlagshipServerProvider, ConfigError> {
         if self.local_evaluation && self.refresh_interval.is_zero() {
             return Err(ConfigError::new(
@@ -149,9 +146,7 @@ impl FlagshipServerProviderBuilder {
             None
         };
 
-        // Client construction is intentionally last so provider-specific validation
-        // fails before any fallible transport setup.
-        let client = FlagshipClient::new(self.client_options)?;
+        let client = FlagshipClient::new(self.client_options);
         let mode = if let Some((account_id, definitions_endpoint)) = local_config {
             ProviderMode::Local {
                 source: Arc::new(DefinitionsFetcher::new(client, definitions_endpoint)),
@@ -162,11 +157,7 @@ impl FlagshipServerProviderBuilder {
             let capacity = NonZeroUsize::new(self.cache_max_entries).unwrap_or(NonZeroUsize::MIN);
             let cache = ResponseCache::new(self.cache_ttl, capacity).map(Arc::new);
 
-            ProviderMode::Remote {
-                client,
-                cache,
-                cache_max_entries: self.cache_max_entries,
-            }
+            ProviderMode::Remote { client, cache }
         };
         let initial_status = if matches!(mode, ProviderMode::Remote { .. }) {
             STATUS_READY
@@ -178,6 +169,7 @@ impl FlagshipServerProviderBuilder {
             status: AtomicU8::new(initial_status),
             generation: AtomicU64::new(0),
             lifecycle: Mutex::new(LifecycleState::default()),
+            snapshot: RwLock::new(None),
         };
 
         Ok(FlagshipServerProvider {
@@ -208,29 +200,18 @@ impl fmt::Debug for FlagshipServerProviderBuilder {
     }
 }
 
-/// Native asynchronous Flagship `OpenFeature` server provider.
+/// Flagship `OpenFeature` server provider.
 ///
 /// Remote providers are ready immediately. Local providers start not-ready and
-/// require [`Self::initialize_provider`] to complete the first definitions fetch.
-/// The refresh task runs until explicit shutdown or the last provider clone is
-/// dropped. `open-feature` 0.3 does not call a provider shutdown method.
+/// become ready once [`Self::initialize_provider`] completes the first
+/// definitions fetch. The refresh task runs until [`Self::shutdown_provider`]
+/// or until the last clone is dropped; `open-feature` 0.3 never calls shutdown.
 ///
-/// In `open-feature` 0.3, `set_provider` holds the provider-registry write lock
-/// while trait initialization runs. `set_named_provider` removes an existing
-/// provider first, initializes without that write lock, then inserts the new
-/// provider; lookups for that missing name temporarily fall back to the default
-/// provider.
-///
-/// Pre-initialize local providers when startup errors must be observed. Registering
-/// a ready provider preserves its active session. Registering immediately after a
-/// failed pre-initialization starts a new attempt. Registering while explicit
-/// initialization is still running does not cancel it: registration waits for the
-/// same initialization result. If that attempt later fails, its error result is
-/// visible only to the explicit caller, while every clone observes
-/// [`ProviderStatus::Error`]; no automatic retry follows. Likewise, a trait-path
-/// initial failure can only set Error status because `open-feature` 0.3 cannot
-/// return or automatically retry the error. Call [`Self::initialize_provider`]
-/// explicitly, or register the failed provider again, to recover.
+/// Call [`Self::initialize_provider`] before registering a local provider so
+/// startup errors are returned to you. Registering a ready provider keeps its
+/// session; registering a provider whose initialization failed retries once and
+/// otherwise only sets [`ProviderStatus::Error`]. Use
+/// [`Self::last_refresh_error`] to inspect fetch failures.
 ///
 /// ```no_run
 /// # use cloudflare_flagship::config::FlagshipClientOptions;
@@ -259,11 +240,12 @@ pub struct FlagshipServerProvider {
 }
 
 impl FlagshipServerProvider {
-    /// Constructs a remote-evaluation provider with default provider options.
+    /// Constructs a remote-evaluation provider with default options.
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError`] if the evaluation endpoint cannot be resolved.
+    /// Never fails with the default options; the `Result` matches
+    /// [`FlagshipServerProviderBuilder::build`].
     pub fn new(client_options: FlagshipClientOptions) -> Result<Self, ConfigError> {
         Self::builder(client_options).build()
     }
@@ -283,24 +265,19 @@ impl FlagshipServerProvider {
 
     /// Initializes the provider and, in local mode, starts periodic refreshes.
     ///
-    /// Reinitialization invalidates and cancels the previous session. A concurrent
-    /// newer initialize or shutdown deterministically prevents an older fetch from
-    /// publishing state.
+    /// Remote providers return immediately. In local mode, reinitializing cancels
+    /// the previous session, and a newer initialize or shutdown prevents an older
+    /// fetch from publishing state. Dropping the returned future does not cancel
+    /// a session that has already started.
     ///
     /// # Errors
     ///
-    /// Returns the sanitized definitions-fetch failure in local mode, a general
-    /// error if a definitions-fetch task ends unexpectedly, or a provider-not-ready
-    /// error if this initialization was superseded. Dropping this method's future
-    /// after its session is spawned does not cancel that session.
+    /// Returns the definitions-fetch failure, a general error if the fetch task
+    /// ends unexpectedly, or provider-not-ready if this call was superseded.
     ///
     /// # Panics
     ///
-    /// Local initialization requires a Tokio runtime with time enabled. A missing
-    /// runtime or time driver panics in the caller while spawning the session or
-    /// creating its interval. Missing Tokio I/O support instead ends the isolated
-    /// fetch task and returns a general error with provider status
-    /// [`ProviderStatus::Error`].
+    /// Panics in local mode if called outside a Tokio runtime with time enabled.
     pub async fn initialize_provider(&self) -> Result<(), FlagshipError> {
         let ProviderMode::Local {
             source,
@@ -344,14 +321,13 @@ impl FlagshipServerProvider {
         Err(superseded_error())
     }
 
-    /// Stops refresh work, clears snapshots and cache state, and leaves a local
+    /// Stops refreshes, clears definitions and cache state, and leaves a local
     /// provider not-ready.
     ///
-    /// A remote provider has no session state, so shutdown only clears its cache
-    /// and the provider keeps evaluating, matching the TypeScript and Go providers.
+    /// A remote provider only clears its cache and keeps evaluating.
     pub async fn shutdown_provider(&self) {
         if matches!(&self.inner.mode, ProviderMode::Remote { .. }) {
-            self.inner.reset_remote_cache();
+            self.inner.clear_remote_cache();
 
             return;
         }
@@ -367,6 +343,17 @@ impl FlagshipServerProvider {
         self.inner.provider_status()
     }
 
+    /// Returns the most recent definitions fetch failure in local mode.
+    ///
+    /// Set when the initial fetch or a background refresh fails, including
+    /// initialization started by `OpenFeature` registration. Cleared by the next
+    /// successful fetch, a new initialization, or shutdown. Always `None` in
+    /// remote mode.
+    #[must_use]
+    pub fn last_refresh_error(&self) -> Option<FlagshipError> {
+        self.inner.lifecycle().last_refresh_error.clone()
+    }
+
     async fn resolve_typed<T>(
         &self,
         flag_key: &str,
@@ -375,25 +362,53 @@ impl FlagshipServerProvider {
         expected_name: &'static str,
         convert: impl FnOnce(&JsonValue) -> Result<T, ()>,
     ) -> EvaluationResult<ResolutionDetails<T>> {
-        let (response, cache_token, generation) = match &self.inner.mode {
-            ProviderMode::Remote { client, cache, .. } => {
-                let generation = self.inner.remote_generation()?;
+        match &self.inner.mode {
+            ProviderMode::Remote { client, cache } => {
                 let normalized = normalize_context(context).map_err(map_flagship_error)?;
-                let (response, token) = evaluate_remote(
-                    client,
-                    cache.as_deref(),
-                    flag_key,
-                    &normalized,
-                    expected_type,
-                )
-                .await?;
+                let token = if let Some(cache) = cache {
+                    let lookup = cache
+                        .lookup(flag_key, expected_type, &normalized)
+                        .map_err(map_flagship_error)?;
+                    if let Some(response) = lookup.response {
+                        return resolution_details(
+                            &response,
+                            OpenFeatureReason::Cached,
+                            expected_name,
+                            convert,
+                        );
+                    }
 
-                (response, token, generation)
+                    Some((cache, lookup.token))
+                } else {
+                    None
+                };
+
+                let response = client
+                    .evaluate_normalized(flag_key, &normalized)
+                    .await
+                    .map_err(map_flagship_error)?;
+                let details = resolution_details(
+                    &response,
+                    map_reason(&response.reason),
+                    expected_name,
+                    convert,
+                )?;
+
+                if response.reason != EvaluationReason::DISABLED
+                    && let Some((cache, token)) = token
+                {
+                    // The cache rejects tokens issued before its last clear.
+                    let _ = cache.insert(token, response);
+                }
+
+                Ok(details)
             }
             ProviderMode::Local { account_id, .. } => {
-                let (generation, snapshot) = self.inner.local_snapshot()?;
+                let snapshot = self.inner.local_snapshot()?;
                 let definition = snapshot.get(flag_key).ok_or_else(flag_not_found)?;
                 let definition = definition.map_err(map_flagship_error)?;
+                // Checked before context normalization so a malformed definition
+                // reports a parse error regardless of the context.
                 if !definition.is_object() {
                     return Err(parse_evaluation_error());
                 }
@@ -405,45 +420,42 @@ impl FlagshipServerProvider {
                     .with_reason(result.reason)
                     .with_metadata(result.metadata);
 
-                (response, None, generation)
+                resolution_details(
+                    &response,
+                    map_reason(&response.reason),
+                    expected_name,
+                    convert,
+                )
             }
-        };
-
-        let value =
-            convert(&response.value).map_err(|()| type_mismatch(expected_name, &response.value))?;
-        let details = ResolutionDetails {
-            value,
-            variant: (!response.variant.is_empty()).then(|| response.variant.clone()),
-            reason: Some(map_reason(&response.reason)),
-            flag_metadata: Some(to_flag_metadata(&response.metadata)),
-        };
-
-        if response.reason != EvaluationReason::DISABLED
-            && self.inner.is_current(generation)
-            && let Some(token) = cache_token
-            && let ProviderMode::Remote {
-                cache: Some(cache), ..
-            } = &self.inner.mode
-        {
-            let _ = cache.insert(token, response);
         }
-
-        Ok(details)
     }
+}
+
+fn resolution_details<T>(
+    response: &FlagshipEvaluationResponse,
+    reason: OpenFeatureReason,
+    expected_name: &'static str,
+    convert: impl FnOnce(&JsonValue) -> Result<T, ()>,
+) -> EvaluationResult<ResolutionDetails<T>> {
+    let value =
+        convert(&response.value).map_err(|()| type_mismatch(expected_name, &response.value))?;
+
+    Ok(ResolutionDetails {
+        value,
+        variant: (!response.variant.is_empty()).then(|| response.variant.clone()),
+        reason: Some(reason),
+        flag_metadata: Some(to_flag_metadata(&response.metadata)),
+    })
 }
 
 impl fmt::Debug for FlagshipServerProvider {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (mode, refresh_interval, cache_enabled, cache_max_entries) = match &self.inner.mode {
-            ProviderMode::Remote {
-                cache,
-                cache_max_entries,
-                ..
-            } => (
+            ProviderMode::Remote { cache, .. } => (
                 "remote",
                 None,
                 cache.is_some(),
-                cache.as_ref().map(|_| *cache_max_entries),
+                cache.as_ref().map(|cache| cache.capacity().get()),
             ),
             ProviderMode::Local {
                 refresh_interval, ..
@@ -466,7 +478,6 @@ enum ProviderMode {
     Remote {
         client: FlagshipClient,
         cache: Option<Arc<ResponseCache>>,
-        cache_max_entries: usize,
     },
     Local {
         source: Arc<dyn DefinitionsSource>,
@@ -475,20 +486,14 @@ enum ProviderMode {
     },
 }
 
+/// A definitions source. Must only return [`DefinitionsFetchResult::NotModified`]
+/// when given a prior `ETag`.
 #[async_trait]
 trait DefinitionsSource: Send + Sync {
     async fn fetch(
         &self,
         prior_etag: Option<&HeaderValue>,
-    ) -> Result<DefinitionsSourceResult, FlagshipError>;
-}
-
-enum DefinitionsSourceResult {
-    Updated {
-        snapshot: DefinitionsSnapshot,
-        etag: Option<HeaderValue>,
-    },
-    NotModified,
+    ) -> Result<DefinitionsFetchResult, FlagshipError>;
 }
 
 #[derive(Clone)]
@@ -502,15 +507,8 @@ impl DefinitionsSource for DefinitionsFetcher {
     async fn fetch(
         &self,
         prior_etag: Option<&HeaderValue>,
-    ) -> Result<DefinitionsSourceResult, FlagshipError> {
-        match DefinitionsFetcher::fetch(self, prior_etag).await? {
-            DefinitionsFetchResult::Updated(snapshot) => {
-                let etag = snapshot.etag().cloned();
-
-                Ok(DefinitionsSourceResult::Updated { snapshot, etag })
-            }
-            DefinitionsFetchResult::NotModified => Ok(DefinitionsSourceResult::NotModified),
-        }
+    ) -> Result<DefinitionsFetchResult, FlagshipError> {
+        DefinitionsFetcher::fetch(self, prior_etag).await
     }
 }
 
@@ -519,14 +517,16 @@ struct ProviderInner {
     status: AtomicU8,
     generation: AtomicU64,
     lifecycle: Mutex<LifecycleState>,
+    /// The active local snapshot. Written only while holding `lifecycle`: set
+    /// before the status becomes ready and cleared after it leaves ready.
+    snapshot: RwLock<Option<Arc<DefinitionsSnapshot>>>,
 }
 
 #[derive(Default)]
 struct LifecycleState {
-    snapshot: Option<Arc<DefinitionsSnapshot>>,
-    etag: Option<HeaderValue>,
     initialization: Option<watch::Receiver<InitializationState>>,
     task: Option<JoinHandle<()>>,
+    last_refresh_error: Option<FlagshipError>,
 }
 
 impl ProviderInner {
@@ -543,34 +543,22 @@ impl ProviderInner {
         }
     }
 
-    fn remote_generation(&self) -> Result<u64, EvaluationError> {
-        loop {
-            let generation = self.generation.load(Ordering::Acquire);
-            let status = self.status.load(Ordering::Acquire);
-            if generation != self.generation.load(Ordering::Acquire) {
-                continue;
-            }
-            if matches!(status, STATUS_NOT_READY | STATUS_ERROR) {
-                return Err(provider_not_ready());
-            }
-
-            return Ok(generation);
-        }
+    fn local_snapshot(&self) -> Result<Arc<DefinitionsSnapshot>, EvaluationError> {
+        self.current_snapshot().ok_or_else(provider_not_ready)
     }
 
-    fn local_snapshot(&self) -> Result<(u64, Arc<DefinitionsSnapshot>), EvaluationError> {
-        let state = self.lifecycle();
-        if matches!(
-            self.provider_status(),
-            ProviderStatus::NotReady | ProviderStatus::Error
-        ) {
-            return Err(provider_not_ready());
-        }
+    fn current_snapshot(&self) -> Option<Arc<DefinitionsSnapshot>> {
+        self.snapshot
+            .read()
+            .expect("provider snapshot lock poisoned")
+            .clone()
+    }
 
-        let generation = self.generation.load(Ordering::Acquire);
-        let snapshot = state.snapshot.clone().ok_or_else(provider_not_ready)?;
-
-        Ok((generation, snapshot))
+    fn set_snapshot(&self, snapshot: Option<Arc<DefinitionsSnapshot>>) {
+        *self
+            .snapshot
+            .write()
+            .expect("provider snapshot lock poisoned") = snapshot;
     }
 
     #[cfg(test)]
@@ -595,18 +583,12 @@ impl ProviderInner {
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
         self.set_status(STATUS_NOT_READY);
-        state.snapshot = None;
-        state.etag = None;
+        self.set_snapshot(None);
+        state.last_refresh_error = None;
         state.initialization = initialization;
         let task = state.task.take();
 
         (generation, task)
-    }
-
-    /// Invalidates in-flight cache insertions, then clears the remote cache.
-    fn reset_remote_cache(&self) {
-        self.generation.fetch_add(1, Ordering::AcqRel);
-        self.clear_remote_cache();
     }
 
     fn is_current(&self, generation: u64) -> bool {
@@ -659,22 +641,33 @@ impl ProviderInner {
         }
     }
 
-    fn publish_snapshot(
-        &self,
-        generation: u64,
-        snapshot: DefinitionsSnapshot,
-        etag: Option<HeaderValue>,
-    ) -> bool {
+    fn publish_snapshot(&self, generation: u64, snapshot: DefinitionsSnapshot) -> bool {
         let mut state = self.lifecycle();
         if !self.is_current(generation) {
             return false;
         }
 
-        state.snapshot = Some(Arc::new(snapshot));
-        state.etag = etag;
+        self.set_snapshot(Some(Arc::new(snapshot)));
+        state.last_refresh_error = None;
         self.set_status(STATUS_READY);
 
         true
+    }
+
+    fn mark_not_modified(&self, generation: u64) {
+        let mut state = self.lifecycle();
+        if self.is_current(generation) {
+            state.last_refresh_error = None;
+            self.set_status(STATUS_READY);
+        }
+    }
+
+    fn record_fetch_error(&self, generation: u64, error: FlagshipError, status: u8) {
+        let mut state = self.lifecycle();
+        if self.is_current(generation) {
+            state.last_refresh_error = Some(error);
+            self.set_status(status);
+        }
     }
 
     fn clear_remote_cache(&self) {
@@ -689,8 +682,7 @@ impl ProviderInner {
 
 impl Drop for ProviderInner {
     fn drop(&mut self) {
-        // Do not recover poisoned state during drop. A panic here could mask the
-        // original panic, so abandoning the inaccessible task handle is safer.
+        // Don't panic on poison here; it could mask the original panic.
         let Ok(state) = self.lifecycle.get_mut() else {
             return;
         };
@@ -797,7 +789,7 @@ impl Drop for AbortOnDrop {
 async fn fetch_definitions(
     source: Arc<dyn DefinitionsSource>,
     prior_etag: Option<HeaderValue>,
-) -> Result<DefinitionsSourceResult, FlagshipError> {
+) -> Result<DefinitionsFetchResult, FlagshipError> {
     let task = tokio::spawn(async move { source.fetch(prior_etag.as_ref()).await });
     let mut abort_on_drop = AbortOnDrop::new(task.abort_handle());
     let result = task.await;
@@ -818,51 +810,21 @@ async fn run_local_session(
     mut interval: Interval,
     initialized: watch::Sender<InitializationState>,
 ) {
-    let initial = fetch_definitions(Arc::clone(&source), None).await;
-    let Some(provider) = inner.upgrade() else {
-        return;
-    };
-    if !provider.is_current(generation) {
-        return;
-    }
-
-    match initial {
-        Ok(DefinitionsSourceResult::Updated { snapshot, etag }) => {
-            if !provider.publish_snapshot(generation, snapshot, etag) {
-                return;
-            }
-            initialized.send_replace(InitializationState::Complete(Ok(())));
-        }
-        Ok(DefinitionsSourceResult::NotModified) => {
-            let error = FlagshipError::new(
-                ErrorCode::ParseError,
-                "initial definitions request unexpectedly returned not modified",
-            );
-            provider.set_current_status(generation, STATUS_ERROR);
-            initialized.send_replace(InitializationState::Complete(Err(error)));
-
-            return;
-        }
-        Err(error) => {
-            provider.set_current_status(generation, STATUS_ERROR);
-            initialized.send_replace(InitializationState::Complete(Err(error)));
-
-            return;
-        }
-    }
-    drop(provider);
-
-    interval.reset();
+    let mut initialized = Some(initialized);
 
     loop {
-        interval.tick().await;
+        if initialized.is_none() {
+            interval.tick().await;
+        }
         let Some(provider) = inner.upgrade() else {
             return;
         };
         if !provider.is_current(generation) {
             return;
         }
-        let prior_etag = provider.lifecycle().etag.clone();
+        let prior_etag = provider
+            .current_snapshot()
+            .and_then(|snapshot| snapshot.etag().cloned());
         drop(provider);
 
         let result = fetch_definitions(Arc::clone(&source), prior_etag).await;
@@ -874,51 +836,31 @@ async fn run_local_session(
         }
 
         match result {
-            Ok(DefinitionsSourceResult::Updated { snapshot, etag }) => {
-                if !provider.publish_snapshot(generation, snapshot, etag) {
+            Ok(DefinitionsFetchResult::Updated(snapshot)) => {
+                if !provider.publish_snapshot(generation, snapshot) {
                     return;
                 }
             }
-            Ok(DefinitionsSourceResult::NotModified) => {
-                provider.set_current_status(generation, STATUS_READY);
+            Ok(DefinitionsFetchResult::NotModified) => provider.mark_not_modified(generation),
+            Err(error) => {
+                if let Some(initialized) = initialized.take() {
+                    provider.record_fetch_error(generation, error.clone(), STATUS_ERROR);
+                    initialized.send_replace(InitializationState::Complete(Err(error)));
+
+                    return;
+                }
+                provider.record_fetch_error(generation, error, STATUS_STALE);
             }
-            Err(_) => provider.set_current_status(generation, STATUS_STALE),
+        }
+
+        if let Some(initialized) = initialized.take() {
+            initialized.send_replace(InitializationState::Complete(Ok(())));
+            interval.reset();
         }
     }
 }
 
-async fn evaluate_remote(
-    client: &FlagshipClient,
-    cache: Option<&ResponseCache>,
-    flag_key: &str,
-    context: &NormalizedContext,
-    expected_type: ExpectedFlagType,
-) -> Result<(FlagshipEvaluationResponse, Option<CacheToken>), EvaluationError> {
-    let token = if let Some(cache) = cache {
-        let lookup = cache
-            .lookup(flag_key, expected_type, context)
-            .map_err(map_flagship_error)?;
-        if let Some(mut response) = lookup.response {
-            response.reason = EvaluationReason::from("CACHED");
-
-            return Ok((response, None));
-        }
-
-        Some(lookup.token)
-    } else {
-        None
-    };
-
-    let response = client
-        .evaluate_normalized(flag_key, context)
-        .await
-        .map_err(map_flagship_error)?;
-
-    Ok((response, token))
-}
-
-/// Converts flag metadata into `OpenFeature` metadata, keeping only string,
-/// boolean and finite numeric entries. Integers that fit in `i64` stay integers.
+/// Keeps only string, boolean, and finite numeric metadata entries.
 fn to_flag_metadata(metadata: &serde_json::Map<String, JsonValue>) -> FlagMetadata {
     let mut out = FlagMetadata::default();
 
@@ -1001,11 +943,21 @@ fn map_flagship_error(error: FlagshipError) -> EvaluationError {
             "TIMEOUT_ERROR",
             "Flagship evaluation failed",
         ),
-        ErrorCode::General | ErrorCode::Unknown(_) => (
+        ErrorCode::General => (
             EvaluationErrorCode::General("GENERAL".to_owned()),
             "GENERAL",
             "Flagship evaluation failed",
         ),
+    };
+    // Context validation messages are SDK-generated and already escape attribute
+    // paths; server-derived text never reaches OpenFeature.
+    let sdk_invalid_context = error.code() == ErrorCode::InvalidContext
+        && error.status().is_none()
+        && error.server_code().is_none();
+    let summary = if sdk_invalid_context {
+        error.message()
+    } else {
+        summary
     };
     let status = error
         .status()
@@ -1103,12 +1055,17 @@ fn json_struct(value: &JsonValue) -> Result<StructValue, ()> {
 
 #[async_trait]
 impl FeatureProvider for FlagshipServerProvider {
+    // In `open-feature` 0.3, `set_provider` holds the registry write lock while
+    // this runs, and `set_named_provider` serves the default provider for the
+    // name until it finishes. So this never restarts a ready, stale, or
+    // in-progress session: it waits for an in-progress one instead.
     async fn initialize(&mut self, _context: &EvaluationContext) {
         let mut waited_for_initialization = false;
 
         loop {
             let status = self.status();
-            if status == ProviderStatus::Ready {
+            // A stale provider still serves its last good snapshot.
+            if matches!(status, ProviderStatus::Ready | ProviderStatus::STALE) {
                 return;
             }
 
@@ -1247,6 +1204,7 @@ mod lifecycle_tests {
         response: oneshot::Sender<TestResponse>,
     }
 
+    #[derive(Clone, Copy)]
     enum TestResponse {
         Updated(&'static [u8], Option<&'static str>),
         NotModified,
@@ -1264,7 +1222,7 @@ mod lifecycle_tests {
         async fn fetch(
             &self,
             prior_etag: Option<&HeaderValue>,
-        ) -> Result<DefinitionsSourceResult, FlagshipError> {
+        ) -> Result<DefinitionsFetchResult, FlagshipError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let (sender, receiver) = oneshot::channel();
             self.requests
@@ -1296,7 +1254,7 @@ mod lifecycle_tests {
         async fn fetch(
             &self,
             _prior_etag: Option<&HeaderValue>,
-        ) -> Result<DefinitionsSourceResult, FlagshipError> {
+        ) -> Result<DefinitionsFetchResult, FlagshipError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let response = self
                 .responses
@@ -1309,15 +1267,15 @@ mod lifecycle_tests {
         }
     }
 
-    fn test_result(response: TestResponse) -> Result<DefinitionsSourceResult, FlagshipError> {
+    fn test_result(response: TestResponse) -> Result<DefinitionsFetchResult, FlagshipError> {
         match response {
             TestResponse::Updated(body, etag) => {
-                let snapshot = DefinitionsSnapshot::from_json_bytes(body)?;
-                let etag = etag.map(HeaderValue::from_static);
+                let snapshot = DefinitionsSnapshot::from_json_bytes(body)?
+                    .with_etag(etag.map(HeaderValue::from_static));
 
-                Ok(DefinitionsSourceResult::Updated { snapshot, etag })
+                Ok(DefinitionsFetchResult::Updated(snapshot))
             }
-            TestResponse::NotModified => Ok(DefinitionsSourceResult::NotModified),
+            TestResponse::NotModified => Ok(DefinitionsFetchResult::NotModified),
             TestResponse::Error(code, status) => {
                 let mut error = FlagshipError::new(code, "controlled source failure");
                 if let Some(status) = status {
@@ -1351,6 +1309,7 @@ mod lifecycle_tests {
             status: AtomicU8::new(STATUS_NOT_READY),
             generation: AtomicU64::new(0),
             lifecycle: Mutex::new(LifecycleState::default()),
+            snapshot: RwLock::new(None),
         };
         let provider = FlagshipServerProvider {
             inner: Arc::new(inner),
@@ -1402,7 +1361,7 @@ mod lifecycle_tests {
 
         let error = finish_initialization(&controlled.provider.inner, generation, Ok(Ok(())))
             .expect_err("shutdown must supersede completed initialization");
-        assert_eq!(error.code(), &ErrorCode::ProviderNotReady);
+        assert_eq!(error.code(), ErrorCode::ProviderNotReady);
         assert_eq!(controlled.provider.status(), ProviderStatus::NotReady);
     }
 
@@ -1512,6 +1471,16 @@ mod lifecycle_tests {
         assert_eq!(controlled.provider.status(), ProviderStatus::STALE);
         assert!(bool_value(&controlled.provider).await);
 
+        let mut registered = controlled.provider.clone();
+        let _ = tokio::time::timeout(
+            Duration::from_millis(1),
+            FeatureProvider::initialize(&mut registered, &EvaluationContext::default()),
+        )
+        .await;
+        assert!(controlled.requests.try_recv().is_err());
+        assert_eq!(controlled.provider.status(), ProviderStatus::STALE);
+        assert!(bool_value(&controlled.provider).await);
+
         tokio::time::advance(Duration::from_secs(10)).await;
         let recovered = controlled.requests.recv().await.expect("304 recovery");
         assert_eq!(recovered.etag.as_deref(), Some("v1"));
@@ -1553,7 +1522,7 @@ mod lifecycle_tests {
         )
         .await;
         let error = first.await.unwrap().unwrap_err();
-        assert_eq!(error.code(), &ErrorCode::NetworkError);
+        assert_eq!(error.code(), ErrorCode::NetworkError);
         assert_eq!(controlled.provider.status(), ProviderStatus::Error);
 
         let recovery = start_initialize(&controlled.provider);
@@ -1566,7 +1535,7 @@ mod lifecycle_tests {
         let request = controlled.requests.recv().await.unwrap();
         respond(request, TestResponse::Panic).await;
         let error = panic_initialization.await.unwrap().unwrap_err();
-        assert_eq!(error.code(), &ErrorCode::General);
+        assert_eq!(error.code(), ErrorCode::General);
         assert_eq!(controlled.provider.status(), ProviderStatus::Error);
     }
 
@@ -1648,7 +1617,7 @@ mod lifecycle_tests {
 
         controlled.provider.shutdown_provider().await;
         let error = blocked.await.unwrap().unwrap_err();
-        assert_eq!(error.code(), &ErrorCode::ProviderNotReady);
+        assert_eq!(error.code(), ErrorCode::ProviderNotReady);
         assert_eq!(controlled.provider.status(), ProviderStatus::NotReady);
         assert!(
             stale_request
@@ -1663,7 +1632,7 @@ mod lifecycle_tests {
         let newer_request = controlled.requests.recv().await.unwrap();
         assert_eq!(
             older.await.unwrap().unwrap_err().code(),
-            &ErrorCode::ProviderNotReady
+            ErrorCode::ProviderNotReady
         );
         assert!(
             older_request
@@ -1732,6 +1701,7 @@ mod lifecycle_tests {
                 status: AtomicU8::new(STATUS_NOT_READY),
                 generation: AtomicU64::new(0),
                 lifecycle: Mutex::new(LifecycleState::default()),
+                snapshot: RwLock::new(None),
             }),
             metadata: ProviderMetadata::new(PROVIDER_NAME),
             hooks: Vec::new(),
@@ -1787,7 +1757,7 @@ mod lifecycle_tests {
         let initialization_error = initialize.await.unwrap().unwrap_err();
         registration.await.unwrap();
 
-        assert_eq!(initialization_error.code(), &ErrorCode::ProviderNotReady);
+        assert_eq!(initialization_error.code(), ErrorCode::ProviderNotReady);
         assert_eq!(controlled.provider.status(), ProviderStatus::NotReady);
         assert!(controlled.requests.try_recv().is_err());
         assert!(request.response.is_closed());
@@ -1821,7 +1791,7 @@ mod lifecycle_tests {
         registration.await.unwrap();
         assert_eq!(
             first.await.unwrap().unwrap_err().code(),
-            &ErrorCode::ProviderNotReady
+            ErrorCode::ProviderNotReady
         );
         assert_eq!(controlled.provider.status(), ProviderStatus::Ready);
     }
@@ -1849,12 +1819,7 @@ mod lifecycle_tests {
             br#"{"flags":{"malformed":7,"good":{"key":"good","enabled":true,"default_variation":"on","variations":{"on":true},"rules":[]}}}"#,
         )
         .unwrap();
-        assert!(
-            controlled
-                .provider
-                .inner
-                .publish_snapshot(0, snapshot, None)
-        );
+        assert!(controlled.provider.inner.publish_snapshot(0, snapshot));
         let context = EvaluationContext::default().with_custom_field(
             "private-context",
             open_feature::EvaluationContextFieldValue::new_struct(UnsupportedContext),
@@ -1942,6 +1907,129 @@ mod lifecycle_tests {
         );
     }
 
+    #[tokio::test]
+    async fn sdk_context_errors_name_the_escaped_attribute() {
+        let controlled = controlled_provider(Duration::from_secs(10));
+        let snapshot = DefinitionsSnapshot::from_json_bytes(definitions(true)).unwrap();
+        assert!(controlled.provider.inner.publish_snapshot(0, snapshot));
+        let context = EvaluationContext::default()
+            .with_custom_field("bad\n\u{202e}key", f64::NAN)
+            .with_custom_field("secret", "private-value");
+
+        let error = controlled
+            .provider
+            .resolve_bool_value("flag", &context)
+            .await
+            .unwrap_err();
+        let message = error.message.unwrap();
+
+        assert_eq!(error.code, EvaluationErrorCode::InvalidContext);
+        assert_eq!(
+            message,
+            r#"INVALID_CONTEXT: context attribute "bad\n\u{202e}key" contains a non-finite number"#
+        );
+        assert!(!message.contains('\n'));
+        assert!(!message.contains('\u{202e}'));
+        assert!(!message.contains("private-value"));
+    }
+
+    #[test]
+    fn server_derived_invalid_context_text_is_not_exposed() {
+        for error in [
+            FlagshipError::new(ErrorCode::InvalidContext, "private server text").with_status(400),
+            FlagshipError::new(ErrorCode::InvalidContext, "private server text")
+                .with_server_code("INVALID_CONTEXT"),
+        ] {
+            let mapped = map_flagship_error(error);
+
+            assert_eq!(mapped.code, EvaluationErrorCode::InvalidContext);
+            assert!(!mapped.message.unwrap().contains("private"));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn last_refresh_error_tracks_fetch_failures_per_session() {
+        let mut controlled = controlled_provider(Duration::from_secs(10));
+        let initialize = start_initialize(&controlled.provider);
+        let request = controlled.requests.recv().await.unwrap();
+        respond(
+            request,
+            TestResponse::Error(ErrorCode::NetworkError, Some(503)),
+        )
+        .await;
+        initialize.await.unwrap().unwrap_err();
+        let initial = controlled.provider.last_refresh_error().unwrap();
+        assert_eq!(initial.code(), ErrorCode::NetworkError);
+        assert_eq!(initial.status(), Some(503));
+
+        let initialize = start_initialize(&controlled.provider);
+        let request = controlled.requests.recv().await.unwrap();
+        assert!(controlled.provider.last_refresh_error().is_none());
+        respond(
+            request,
+            TestResponse::Updated(definitions(true), Some("v1")),
+        )
+        .await;
+        initialize.await.unwrap().unwrap();
+        assert!(controlled.provider.last_refresh_error().is_none());
+
+        tokio::time::advance(Duration::from_secs(10)).await;
+        let failed = controlled.requests.recv().await.unwrap();
+        respond(failed, TestResponse::Error(ErrorCode::TimeoutError, None)).await;
+        assert_eq!(controlled.provider.status(), ProviderStatus::STALE);
+        assert_eq!(
+            controlled.provider.last_refresh_error().unwrap().code(),
+            ErrorCode::TimeoutError
+        );
+
+        tokio::time::advance(Duration::from_secs(10)).await;
+        let recovered = controlled.requests.recv().await.unwrap();
+        respond(recovered, TestResponse::NotModified).await;
+        assert_eq!(controlled.provider.status(), ProviderStatus::Ready);
+        assert!(controlled.provider.last_refresh_error().is_none());
+
+        tokio::time::advance(Duration::from_secs(10)).await;
+        let failed = controlled.requests.recv().await.unwrap();
+        respond(failed, TestResponse::Error(ErrorCode::General, Some(500))).await;
+        assert!(controlled.provider.last_refresh_error().is_some());
+        controlled.provider.shutdown_provider().await;
+        assert!(controlled.provider.last_refresh_error().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn registration_failure_is_exposed_through_last_refresh_error() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let source = SequenceSource {
+            responses: Mutex::new(VecDeque::from([TestResponse::Error(
+                ErrorCode::General,
+                Some(401),
+            )])),
+            calls: Arc::clone(&calls),
+        };
+        let provider = FlagshipServerProvider {
+            inner: Arc::new(ProviderInner {
+                mode: ProviderMode::Local {
+                    source: Arc::new(source),
+                    account_id: "account".to_owned(),
+                    refresh_interval: Duration::from_secs(10),
+                },
+                status: AtomicU8::new(STATUS_NOT_READY),
+                generation: AtomicU64::new(0),
+                lifecycle: Mutex::new(LifecycleState::default()),
+                snapshot: RwLock::new(None),
+            }),
+            metadata: ProviderMetadata::new(PROVIDER_NAME),
+            hooks: Vec::new(),
+        };
+
+        let mut api = OpenFeature::default();
+        api.set_named_provider("failing", provider.clone()).await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.status(), ProviderStatus::Error);
+        assert_eq!(provider.last_refresh_error().unwrap().status(), Some(401));
+    }
+
     #[test]
     fn pure_json_conversion_reports_kinds_without_values() {
         assert_eq!(json_kind(&json!(null)), "null");
@@ -2022,7 +2110,7 @@ mod tests {
         )
         .expect("definitions snapshot");
 
-        assert!(provider.inner.publish_snapshot(0, snapshot, None));
+        assert!(provider.inner.publish_snapshot(0, snapshot));
     }
 
     #[expect(
@@ -2734,7 +2822,8 @@ mod tests {
 
         provider.shutdown_provider().await;
         assert_eq!(provider.status(), ProviderStatus::NotReady);
-        assert!(provider.inner.lifecycle().snapshot.is_none());
+        assert!(provider.inner.current_snapshot().is_none());
+        assert!(provider.last_refresh_error().is_none());
     }
 
     #[tokio::test]

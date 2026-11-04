@@ -50,18 +50,10 @@ impl ExpectedFlagType {
     }
 }
 
-/// An owned, deterministic representation of an `OpenFeature` evaluation context.
+/// An `OpenFeature` evaluation context as key-sorted JSON.
 ///
-/// Objects are recursively sorted by key. Opaque `Struct` fields are accepted only
-/// when their concrete type is [`StructValue`], [`OpenFeatureValue`], or
-/// [`JsonValue`]. Other `Any` values are rejected deterministically.
-///
-/// The canonical JSON is stable SDK serialization, not RFC 8785 JSON Canonicalization.
-/// A custom `flagKey` remains context data in JSON POST bodies and canonical context,
-/// but [`Self::query_pairs`] omits it so the separately requested flag always wins on
-/// GET. `f32` context values have already been widened to `f64` by `open-feature`, so
-/// their query text can expose the exact widened value rather than Go's original
-/// 32-bit formatting. Platform context limits are validated before transport.
+/// Opaque `Struct` fields are accepted only as [`StructValue`], [`OpenFeatureValue`],
+/// or [`JsonValue`].
 #[derive(Clone, PartialEq)]
 pub(crate) struct NormalizedContext {
     values: BTreeMap<String, JsonValue>,
@@ -78,7 +70,6 @@ impl fmt::Debug for NormalizedContext {
 }
 
 impl NormalizedContext {
-    /// Returns the normalized context values.
     pub(crate) const fn values(&self) -> &BTreeMap<String, JsonValue> {
         &self.values
     }
@@ -88,7 +79,7 @@ impl NormalizedContext {
         self.values.values().any(is_structured)
     }
 
-    /// Produces sorted query pairs and makes the requested flag key authoritative.
+    /// Sorted query pairs; the requested flag key overrides any `flagKey` attribute.
     pub(crate) fn query_pairs(
         &self,
         flag_key: &str,
@@ -115,16 +106,6 @@ impl NormalizedContext {
         Ok(pairs)
     }
 
-    /// Serializes with recursively stable key ordering; this is not RFC 8785.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the forthcoming provider integration")
-    )]
-    pub(crate) fn canonical_json(&self) -> Result<String, FlagshipError> {
-        serialize_json(&self.values)
-    }
-
-    /// Builds a cache key separating requested flag, expected type, and context.
     pub(crate) fn cache_key(
         &self,
         flag_key: &str,
@@ -134,27 +115,17 @@ impl NormalizedContext {
     }
 }
 
-/// Converts an `OpenFeature` context into an owned deterministic JSON model.
+/// Normalizes a context for remote evaluation.
 ///
-/// A nonempty dedicated targeting key is authoritative. In that case a custom
-/// `targetingKey` field is skipped before validation, so even an invalid or
-/// structured colliding value cannot change the request method or fail conversion.
-/// Nesting depth starts at zero for each context attribute: values at depth 9
-/// are accepted and values at depth 10 are rejected, for ten total levels.
-///
-/// Datetimes use RFC 3339 with Go-compatible nanosecond trimming. Years must be
-/// in `0000..=9999`, offsets must be minute-aligned and less than 24 hours, and
-/// UTC is emitted as `Z`. This is intentionally stricter than `time::OffsetDateTime`.
+/// A nonempty targeting key wins over a custom `targetingKey` field, which is
+/// skipped before validation. Nesting is limited to ten levels.
 pub(crate) fn normalize_context(
     context: &EvaluationContext,
 ) -> Result<NormalizedContext, FlagshipError> {
     normalize_context_with(context, ContextTraversal::remote())
 }
 
-/// Like [`normalize_context`] for in-process evaluation.
-///
-/// Flagship applies its visited-value limit only to data-plane HTTP and Workers
-/// binding evaluation, so it is not enforced here. All other context limits apply.
+/// Like [`normalize_context`], but without the visited-value limit, which only applies remotely.
 pub(crate) fn normalize_local_context(
     context: &EvaluationContext,
 ) -> Result<NormalizedContext, FlagshipError> {
@@ -165,6 +136,11 @@ fn normalize_context_with(
     context: &EvaluationContext,
     mut traversal: ContextTraversal,
 ) -> Result<NormalizedContext, FlagshipError> {
+    // One custom field may be a `targetingKey` that the dedicated key replaces.
+    if context.custom_fields.len() > MAX_CONTEXT_ATTRIBUTES + 1 {
+        return Err(too_many_attributes());
+    }
+
     let mut values = BTreeMap::new();
     let targeting_key = context
         .targeting_key
@@ -195,15 +171,16 @@ fn normalize_context_with(
     }
 
     if values.len() > MAX_CONTEXT_ATTRIBUTES {
-        return Err(invalid_context(
-            None,
-            "exceeds the maximum of 100 top-level attributes",
-        ));
+        return Err(too_many_attributes());
     }
 
     validate_context_size(&values)?;
 
     Ok(NormalizedContext { values })
+}
+
+fn too_many_attributes() -> FlagshipError {
+    invalid_context(None, "exceeds the maximum of 100 top-level attributes")
 }
 
 fn normalize_field_value(
@@ -531,7 +508,8 @@ fn primitive_query_value(
                 && let Some(value) = value.as_f64()
                 && value.is_finite()
             {
-                Ok(value.to_string())
+                // The server only reads a query value as a number if it uses JavaScript formatting.
+                Ok(crate::local::coercion::js_string_f64(value))
             } else {
                 Err(invalid_context(
                     Some(path),
@@ -728,7 +706,7 @@ fn append_complete_sequence(sequence: &str, output: &mut String, truncated: &mut
 }
 
 const fn is_bidi_control(character: char) -> bool {
-    // Bidi controls are printable, but emitting them verbatim could visually reorder diagnostics.
+    // Emitting these verbatim could visually reorder diagnostics.
     matches!(
         character,
         '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
@@ -765,13 +743,15 @@ mod tests {
     }
 
     #[test]
-    fn primitives_have_stable_go_style_query_values() {
+    fn primitives_use_javascript_number_formatting_in_queries() {
         let context = EvaluationContext::default()
             .with_custom_field("string", "alice")
             .with_custom_field("integer", -8_i64)
             .with_custom_field("float", 1.5)
             .with_custom_field("whole_float", 1.0)
             .with_custom_field("widened_f32", 1.2_f32)
+            .with_custom_field("large", 1e21)
+            .with_custom_field("small", 1e-7)
             .with_custom_field("enabled", true);
         let normalized = normalize_context(&context).unwrap();
 
@@ -782,6 +762,8 @@ mod tests {
                 ("flagKey".to_owned(), "dark-mode".to_owned()),
                 ("float".to_owned(), "1.5".to_owned()),
                 ("integer".to_owned(), "-8".to_owned()),
+                ("large".to_owned(), "1e+21".to_owned()),
+                ("small".to_owned(), "1e-7".to_owned()),
                 ("string".to_owned(), "alice".to_owned()),
                 ("whole_float".to_owned(), "1".to_owned()),
                 ("widened_f32".to_owned(), f64::from(1.2_f32).to_string()),
@@ -806,7 +788,7 @@ mod tests {
                 ("false".to_owned(), "false".to_owned()),
                 ("flagKey".to_owned(), "flag".to_owned()),
                 ("i64_min".to_owned(), i64::MIN.to_string()),
-                ("negative_zero".to_owned(), "-0".to_owned()),
+                ("negative_zero".to_owned(), "0".to_owned()),
                 ("u64_max".to_owned(), u64::MAX.to_string()),
             ]
         );
@@ -835,7 +817,7 @@ mod tests {
 
             if is_arbitrary_precision {
                 let error = normalize_context(&context).unwrap_err();
-                assert_eq!(error.code(), &ErrorCode::InvalidContext);
+                assert_eq!(error.code(), ErrorCode::InvalidContext);
                 assert_eq!(
                     error.message(),
                     "context attribute \"huge\" contains a JSON number outside the supported numeric range"
@@ -858,7 +840,7 @@ mod tests {
         assert_eq!(normalized.values()["profile"], json!({"plan": "pro"}));
         assert_eq!(
             normalized.query_pairs("flag").unwrap_err().code(),
-            &ErrorCode::InvalidContext
+            ErrorCode::InvalidContext
         );
     }
 
@@ -936,14 +918,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            first.canonical_json().unwrap(),
-            second.canonical_json().unwrap()
-        );
-        assert_eq!(
-            first.canonical_json().unwrap(),
-            r#"{"object":{"a":true,"z":{"a":1,"b":2}}}"#
-        );
+        assert_eq!(first.values(), second.values());
         assert_eq!(
             first.cache_key("flag", ExpectedFlagType::Bool).unwrap(),
             second.cache_key("flag", ExpectedFlagType::Bool).unwrap()
@@ -1024,7 +999,7 @@ mod tests {
         let context = EvaluationContext::default().with_custom_field("score", f64::NAN);
         let error = normalize_context(&context).unwrap_err();
 
-        assert_eq!(error.code(), &ErrorCode::InvalidContext);
+        assert_eq!(error.code(), ErrorCode::InvalidContext);
         assert_eq!(
             error.message(),
             "context attribute \"score\" contains a non-finite number"
@@ -1137,9 +1112,7 @@ mod tests {
     #[test]
     fn serialized_context_size_limit_is_exact_and_value_safe() {
         let empty = EvaluationContext::default().with_custom_field("value", "");
-        let empty_length = normalize_context(&empty)
-            .unwrap()
-            .canonical_json()
+        let empty_length = serde_json::to_string(normalize_context(&empty).unwrap().values())
             .unwrap()
             .len();
         let value = "x".repeat(MAX_CONTEXT_JSON_BYTES - empty_length);
@@ -1147,7 +1120,7 @@ mod tests {
         let normalized = normalize_context(&context).unwrap();
 
         assert_eq!(
-            normalized.canonical_json().unwrap().len(),
+            serde_json::to_string(normalized.values()).unwrap().len(),
             MAX_CONTEXT_JSON_BYTES
         );
 
@@ -1179,6 +1152,33 @@ mod tests {
         let error = normalize_context(&at_limit).unwrap_err();
         assert_eq!(
             error.message(),
+            "exceeds the maximum of 100 top-level attributes"
+        );
+
+        let mut with_shadowed_targeting_key =
+            EvaluationContext::default().with_targeting_key("user");
+        for index in 0..MAX_CONTEXT_ATTRIBUTES {
+            with_shadowed_targeting_key.add_custom_field(format!("key-{index}"), true);
+        }
+        with_shadowed_targeting_key.add_custom_field(TARGETING_KEY, true);
+        assert_eq!(
+            normalize_context(&with_shadowed_targeting_key)
+                .unwrap_err()
+                .message(),
+            "exceeds the maximum of 100 top-level attributes"
+        );
+
+        let mut far_over_limit = EvaluationContext::default();
+        for index in 0..=MAX_CONTEXT_ATTRIBUTES + 1 {
+            far_over_limit.add_custom_field(
+                format!("key-{index}"),
+                EvaluationContextFieldValue::new_struct(Unsupported {
+                    secret: "unvisited",
+                }),
+            );
+        }
+        assert_eq!(
+            normalize_context(&far_over_limit).unwrap_err().message(),
             "exceeds the maximum of 100 top-level attributes"
         );
 

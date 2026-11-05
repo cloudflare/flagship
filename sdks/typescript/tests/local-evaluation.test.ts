@@ -1,9 +1,11 @@
+/// <reference types="node" />
+
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Logger } from '@openfeature/server-sdk';
-import { ErrorCode } from '@openfeature/server-sdk';
+import { ErrorCode, ProviderEvents } from '@openfeature/server-sdk';
 import { FlagshipClient, resolveDefinitionsEndpoint } from '../src/client.js';
 import { evaluateFlag, FlagConfigError, murmurhash3, type EvalFlag } from '../src/local/evaluate.js';
 import { FlagshipServerProvider } from '../src/server-provider.js';
@@ -151,6 +153,23 @@ describe('FlagshipClient.fetchDefinitions', () => {
 		expect(new Headers(init.headers).get('If-None-Match')).toBe('"abc"');
 	});
 
+	it('requests event stream advertisement when enabled', async () => {
+		const fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: new Headers({ etag: '"abc"' }),
+			json: async () => ({ flags: {} }),
+		});
+		const client = new FlagshipClient({ appId: 'app-1', accountId: 'acct-1', fetch });
+
+		await client.fetchDefinitionsResponse(undefined, undefined, undefined, true);
+
+		const call = fetch.mock.calls[0];
+		if (!call) throw new Error('expected a definitions request');
+		const init = call[1] as RequestInit;
+		expect(new Headers(init.headers).get('Flagship-Event-Stream')).toBe('sse');
+	});
+
 	it('rejects malformed definitions payload', async () => {
 		const fetch = vi.fn().mockResolvedValue({
 			ok: true,
@@ -212,12 +231,7 @@ describe('FlagshipServerProvider local evaluation', () => {
 			if (href.includes('/definitions')) {
 				handlers.onDefinitions?.({ ...init, url: href });
 				if (handlers.definitions) return handlers.definitions();
-				return {
-					ok: true,
-					status: 200,
-					headers: new Headers({ etag: '"v1"' }),
-					json: async () => definitions,
-				};
+				return Response.json(definitions, { headers: { etag: '"v1"' } });
 			}
 			throw new Error(`unexpected fetch: ${href}`);
 		});
@@ -505,6 +519,8 @@ describe('FlagshipServerProvider local evaluation', () => {
 				fetch,
 				refreshInterval: 1000,
 			});
+			const onChanged = vi.fn();
+			provider.events.addHandler(ProviderEvents.ConfigurationChanged, onChanged);
 			await provider.initialize();
 
 			await vi.advanceTimersByTimeAsync(1000);
@@ -516,6 +532,7 @@ describe('FlagshipServerProvider local evaluation', () => {
 			const after = await provider.resolveBooleanEvaluation('bool_flag', false, { plan: 'pro' }, noopLogger);
 			// rule now requires enterprise — pro no longer matches
 			expect(after).toMatchObject({ value: false, reason: 'DEFAULT' });
+			expect(onChanged).toHaveBeenCalledWith(expect.objectContaining({ flagsChanged: expect.arrayContaining(['bool_flag']) }));
 		});
 
 		it('keeps old snapshot when refresh fails', async () => {

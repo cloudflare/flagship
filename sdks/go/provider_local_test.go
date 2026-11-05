@@ -462,6 +462,20 @@ func TestLocalProviderRefresh(t *testing.T) {
 		if d.Value != false || d.Reason != openfeature.DefaultReason {
 			t.Fatalf("detail = %#v", d)
 		}
+		select {
+		case event := <-provider.EventChannel():
+			found := false
+			for _, key := range event.FlagChanges {
+				if key == "bool_flag" {
+					found = true
+				}
+			}
+			if event.EventType != openfeature.ProviderConfigChange || !found {
+				t.Fatalf("event = %#v", event)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("configuration change event was not emitted")
+		}
 	})
 
 	t.Run("keeps old snapshot when refresh fails", func(t *testing.T) {

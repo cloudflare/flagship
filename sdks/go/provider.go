@@ -1,9 +1,11 @@
 package flagship
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -15,6 +17,7 @@ import (
 var (
 	_ openfeature.FeatureProvider          = (*ServerProvider)(nil)
 	_ openfeature.ContextAwareStateHandler = (*ServerProvider)(nil)
+	_ openfeature.EventHandler             = (*ServerProvider)(nil)
 )
 
 // FlagshipServerProvider is an alias for ServerProvider kept for parity with
@@ -45,6 +48,8 @@ type ServerProvider struct {
 	refreshMu     sync.Mutex
 	refreshCancel context.CancelFunc
 	refreshWG     sync.WaitGroup
+	events        chan openfeature.Event
+	stale         atomic.Bool
 }
 
 const (
@@ -98,6 +103,7 @@ func NewProvider(options Options) (*ServerProvider, error) {
 		refreshInterval: refreshInterval,
 		logging:         options.Logging,
 		logger:          resolveLogger(options.Logger),
+		events:          make(chan openfeature.Event, 16),
 	}
 	provider.etag.Store("")
 	return provider, nil
@@ -116,6 +122,10 @@ func (p *ServerProvider) Metadata() openfeature.Metadata {
 // Hooks returns provider-level hooks.
 func (p *ServerProvider) Hooks() []openfeature.Hook {
 	return append([]openfeature.Hook(nil), p.hooks...)
+}
+
+func (p *ServerProvider) EventChannel() <-chan openfeature.Event {
+	return p.events
 }
 
 // Init initializes the provider without a cancellation-aware context.
@@ -143,6 +153,7 @@ func (p *ServerProvider) InitWithContext(ctx context.Context, _ openfeature.Eval
 	epoch := p.epoch.Add(1)
 	p.snapshot.Store(nil)
 	p.etag.Store("")
+	p.stale.Store(false)
 
 	if err := p.fetchAndApplySnapshot(ctx, true, epoch); err != nil {
 		return err
@@ -179,6 +190,7 @@ func (p *ServerProvider) ShutdownWithContext(ctx context.Context) error {
 		p.epoch.Add(1)
 		p.snapshot.Store(nil)
 		p.etag.Store("")
+		p.stale.Store(false)
 
 		done := make(chan struct{})
 		go func() {
@@ -230,6 +242,7 @@ func (p *ServerProvider) refreshLoop(ctx context.Context, epoch uint64) {
 
 func (p *ServerProvider) fetchAndApplySnapshot(ctx context.Context, initial bool, epoch uint64) error {
 	currentETag, _ := p.etag.Load().(string)
+	previous := p.snapshot.Load()
 	result, err := p.client.fetchDefinitions(ctx, currentETag)
 	// Stale session (closed or superseded by a newer initialize).
 	if p.epoch.Load() != epoch {
@@ -239,10 +252,16 @@ func (p *ServerProvider) fetchAndApplySnapshot(ctx context.Context, initial bool
 		if initial {
 			return err
 		}
+		if p.stale.CompareAndSwap(false, true) {
+			p.emit(openfeature.ProviderStale, openfeature.ProviderEventDetails{Message: err.Error()})
+		}
 		if p.logging {
 			p.logger.WarnContext(ctx, "Flagship definitions refresh failed; keeping last good snapshot", "error", err)
 		}
 		return nil
+	}
+	if p.stale.CompareAndSwap(true, false) {
+		p.emit(openfeature.ProviderReady, openfeature.ProviderEventDetails{})
 	}
 	if result.NotModified {
 		if p.logging {
@@ -265,7 +284,39 @@ func (p *ServerProvider) fetchAndApplySnapshot(ctx context.Context, initial bool
 	if p.logging {
 		p.logger.DebugContext(ctx, "Flagship definitions snapshot updated", "flags", len(result.Flags))
 	}
+	if !initial && result.ETag != currentETag {
+		p.emit(openfeature.ProviderConfigChange, openfeature.ProviderEventDetails{FlagChanges: changedDefinitionKeys(previous, snap)})
+	}
 	return nil
+}
+
+func (p *ServerProvider) emit(eventType openfeature.EventType, details openfeature.ProviderEventDetails) {
+	event := openfeature.Event{ProviderName: p.Metadata().Name, EventType: eventType, ProviderEventDetails: details}
+	select {
+	case p.events <- event:
+	default:
+	}
+}
+
+func changedDefinitionKeys(previous, next *definitionsSnapshot) []string {
+	if previous == nil {
+		return nil
+	}
+	keys := make(map[string]struct{}, len(previous.flags)+len(next.flags))
+	for key := range previous.flags {
+		keys[key] = struct{}{}
+	}
+	for key := range next.flags {
+		keys[key] = struct{}{}
+	}
+	changed := make([]string, 0, len(keys))
+	for key := range keys {
+		if !bytes.Equal(previous.flags[key], next.flags[key]) {
+			changed = append(changed, key)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 // BooleanEvaluation evaluates a boolean flag.

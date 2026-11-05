@@ -10,6 +10,7 @@ import httpx
 import pytest
 import respx
 from openfeature.evaluation_context import EvaluationContext
+from openfeature.event import ProviderEvent
 from openfeature.exception import (
     FlagNotFoundError,
     GeneralError,
@@ -352,6 +353,8 @@ def test_refresh_200_swaps_snapshot() -> None:
         ]
     )
     provider = _local_provider(refresh_interval=0.05)
+    events: list[tuple[ProviderEvent, list[str] | None]] = []
+    provider.attach(lambda _provider, event, details: events.append((event, details.flags_changed)))
     provider.initialize(EvaluationContext())
 
     # Before refresh: rule-based, plan=pro → on; no plan → off
@@ -370,6 +373,8 @@ def test_refresh_200_swaps_snapshot() -> None:
     assert after.reason == Reason.STATIC
     assert after.variant == "on"
     provider.shutdown()
+    changed = [keys for event, keys in events if event == ProviderEvent.PROVIDER_CONFIGURATION_CHANGED]
+    assert changed and changed[0] is not None and "bool_flag" in changed[0]
 
 
 @respx.mock

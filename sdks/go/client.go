@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,14 +16,21 @@ import (
 
 // FlagshipClient evaluates flags through the Flagship HTTP API.
 type FlagshipClient struct {
-	endpoint       string
-	httpClient     *http.Client
-	timeout        time.Duration
-	retries        int
-	retryDelay     time.Duration
-	authToken      string
-	headers        http.Header
-	headersFactory HeaderFactory
+	endpoint            string
+	definitionsEndpoint string
+	httpClient          *http.Client
+	timeout             time.Duration
+	retries             int
+	retryDelay          time.Duration
+	authToken           string
+	headers             http.Header
+	headersFactory      HeaderFactory
+}
+
+type evaluationRequest struct {
+	method string
+	url    string
+	body   []byte
 }
 
 // NewClient constructs a Flagship HTTP client.
@@ -71,14 +77,15 @@ func NewClient(options Options) (*FlagshipClient, error) {
 	}
 
 	return &FlagshipClient{
-		endpoint:       endpoint,
-		httpClient:     httpClient,
-		timeout:        timeout,
-		retries:        retries,
-		retryDelay:     retryDelay,
-		authToken:      options.AuthToken,
-		headers:        cloneHeader(options.Headers),
-		headersFactory: options.HeadersFactory,
+		endpoint:            endpoint,
+		definitionsEndpoint: tryResolveDefinitionsEndpoint(options),
+		httpClient:          httpClient,
+		timeout:             timeout,
+		retries:             retries,
+		retryDelay:          retryDelay,
+		authToken:           options.AuthToken,
+		headers:             cloneHeader(options.Headers),
+		headersFactory:      options.HeadersFactory,
 	}, nil
 }
 
@@ -112,75 +119,44 @@ func (c *FlagshipClient) Evaluate(ctx context.Context, flagKey string, evalCtx o
 // EvaluateFlat evaluates a flag using the flattened context passed to
 // OpenFeature providers.
 func (c *FlagshipClient) EvaluateFlat(ctx context.Context, flagKey string, flatCtx openfeature.FlattenedContext) (EvaluationResponse, error) {
-	u, err := c.buildURL(flagKey, flatCtx)
+	request, err := c.buildRequest(flagKey, flatCtx)
 	if err != nil {
 		return EvaluationResponse{}, err
 	}
-	return c.fetchWithRetry(ctx, u)
+	return c.fetchWithRetry(ctx, request)
 }
 
-func (c *FlagshipClient) buildURL(flagKey string, flatCtx openfeature.FlattenedContext) (string, error) {
-	u, err := url.Parse(c.endpoint)
+func (c *FlagshipClient) buildRequest(flagKey string, flatCtx openfeature.FlattenedContext) (evaluationRequest, error) {
+	normalized, err := normalizeContext(flatCtx)
 	if err != nil {
-		return "", newError(ErrorCodeGeneral, fmt.Sprintf("invalid endpoint URL: %s", c.endpoint), 0, err)
+		return evaluationRequest{}, err
+	}
+	if normalized.requiresPost {
+		body, err := json.Marshal(struct {
+			FlagKey string         `json:"flagKey"`
+			Context map[string]any `json:"context"`
+		}{FlagKey: flagKey, Context: normalized.values})
+		if err != nil {
+			return evaluationRequest{}, newError(ErrorCodeInvalidContext, fmt.Sprintf("failed to serialize evaluation context: %v", err), 0, err)
+		}
+		return evaluationRequest{method: http.MethodPost, url: c.endpoint, body: body}, nil
 	}
 
+	u, err := url.Parse(c.endpoint)
+	if err != nil {
+		return evaluationRequest{}, newError(ErrorCodeGeneral, fmt.Sprintf("invalid endpoint URL: %s", c.endpoint), 0, err)
+	}
 	params, err := contextToQueryParams(flatCtx)
 	if err != nil {
-		return "", err
+		return evaluationRequest{}, err
 	}
 	params.Set("flagKey", flagKey)
 	u.RawQuery = params.Encode()
-	return u.String(), nil
+	return evaluationRequest{method: http.MethodGet, url: u.String()}, nil
 }
 
-func (c *FlagshipClient) fetchWithRetry(ctx context.Context, requestURL string) (EvaluationResponse, error) {
-	var lastErr error
-	for attempt := 0; attempt <= c.retries; attempt++ {
-		result, err := c.fetch(ctx, requestURL)
-		if err == nil {
-			return result, nil
-		}
-		lastErr = err
-		if !isRetryable(err) || attempt == c.retries {
-			return EvaluationResponse{}, err
-		}
-		if err := sleepWithContext(ctx, c.retryDelay); err != nil {
-			return EvaluationResponse{}, err
-		}
-	}
-	return EvaluationResponse{}, lastErr
-}
-
-func (c *FlagshipClient) fetch(ctx context.Context, requestURL string) (EvaluationResponse, error) {
-	requestCtx := ctx
-	cancel := func() {}
-	if c.timeout > 0 {
-		requestCtx, cancel = context.WithTimeout(ctx, c.timeout)
-	}
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, requestURL, nil)
-	if err != nil {
-		return EvaluationResponse{}, newError(ErrorCodeGeneral, fmt.Sprintf("failed to build request: %v", err), 0, err)
-	}
-
-	headers, err := c.requestHeaders(ctx)
-	if err != nil {
-		return EvaluationResponse{}, err
-	}
-	req.Header = headers
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
-			return EvaluationResponse{}, newError(ErrorCodeTimeout, fmt.Sprintf("request timeout after %s", c.timeout), 0, err)
-		}
-		return EvaluationResponse{}, newError(ErrorCodeNetwork, fmt.Sprintf("network error: %v", err), 0, err)
-	}
-	defer resp.Body.Close()
-
-	return parseResponse(resp)
+func (c *FlagshipClient) fetchWithRetry(ctx context.Context, request evaluationRequest) (EvaluationResponse, error) {
+	return fetchWithRetry(ctx, c, request, "", parseResponse)
 }
 
 func (c *FlagshipClient) requestHeaders(ctx context.Context) (http.Header, error) {
@@ -265,11 +241,22 @@ func parseResponse(resp *http.Response) (EvaluationResponse, error) {
 		reason = EvaluationReason(reasonString)
 	}
 
+	var metadata map[string]any
+	if metadataRaw, ok := raw["metadata"]; ok {
+		metadataDecoder := json.NewDecoder(bytes.NewReader(metadataRaw))
+		metadataDecoder.UseNumber()
+		// Malformed metadata is dropped rather than failing the evaluation.
+		if err := metadataDecoder.Decode(&metadata); err != nil {
+			metadata = nil
+		}
+	}
+
 	return EvaluationResponse{
-		FlagKey: flagKey,
-		Value:   value,
-		Variant: variant,
-		Reason:  reason,
+		FlagKey:  flagKey,
+		Value:    value,
+		Variant:  variant,
+		Reason:   reason,
+		Metadata: metadata,
 	}, nil
 }
 

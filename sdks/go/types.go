@@ -15,12 +15,13 @@ import (
 const DefaultBaseURL = "https://api.cloudflare.com"
 
 const (
-	defaultTimeout    = 5 * time.Second
-	defaultRetries    = 1
-	defaultRetryDelay = time.Second
-	defaultCacheSize  = 1000
-	maxRetries        = 10
-	maxRetryDelay     = 30 * time.Second
+	defaultTimeout         = 5 * time.Second
+	defaultRetries         = 1
+	defaultRetryDelay      = time.Second
+	defaultCacheSize       = 1000
+	defaultRefreshInterval = 30 * time.Second
+	maxRetries             = 10
+	maxRetryDelay          = 30 * time.Second
 )
 
 // HeaderFactory returns request headers for a single Flagship API request.
@@ -59,12 +60,22 @@ type Options struct {
 	CacheTTL time.Duration
 	// CacheMaxSize limits cached entries. Defaults to 1000 when CacheTTL is set.
 	CacheMaxSize int
+
+	// LocalEvaluation downloads flag definitions once at initialize, evaluates
+	// flags in-process, and refreshes definitions in the background. Requires
+	// AccountID (used as the rollout hash seed) and a token with app read
+	// permission. Incompatible with CacheTTL.
+	LocalEvaluation bool
+	// RefreshInterval is the background definitions refresh period in local
+	// evaluation mode. Defaults to 30s. Must be greater than 0 when set.
+	RefreshInterval time.Duration
 }
 
 // EvaluationReason is the reason returned by the Flagship evaluation API.
 type EvaluationReason string
 
 const (
+	ReasonStatic         EvaluationReason = "STATIC"
 	ReasonTargetingMatch EvaluationReason = "TARGETING_MATCH"
 	ReasonDefault        EvaluationReason = "DEFAULT"
 	ReasonDisabled       EvaluationReason = "DISABLED"
@@ -77,19 +88,22 @@ type EvaluationResponse struct {
 	Value   any
 	Variant string
 	Reason  EvaluationReason
+	// Metadata is the flag metadata configured in Flagship. It is nil when the flag has none.
+	Metadata map[string]any
 }
 
 // ErrorCode identifies an error produced by the Flagship HTTP client.
 type ErrorCode string
 
 const (
-	ErrorCodeFlagNotFound   ErrorCode = "FLAG_NOT_FOUND"
-	ErrorCodeBadRequest     ErrorCode = "BAD_REQUEST"
-	ErrorCodeNetwork        ErrorCode = "NETWORK_ERROR"
-	ErrorCodeTimeout        ErrorCode = "TIMEOUT_ERROR"
-	ErrorCodeParse          ErrorCode = "PARSE_ERROR"
-	ErrorCodeInvalidContext ErrorCode = "INVALID_CONTEXT"
-	ErrorCodeGeneral        ErrorCode = "GENERAL"
+	ErrorCodeFlagNotFound     ErrorCode = "FLAG_NOT_FOUND"
+	ErrorCodeBadRequest       ErrorCode = "BAD_REQUEST"
+	ErrorCodeNetwork          ErrorCode = "NETWORK_ERROR"
+	ErrorCodeTimeout          ErrorCode = "TIMEOUT_ERROR"
+	ErrorCodeParse            ErrorCode = "PARSE_ERROR"
+	ErrorCodeInvalidContext   ErrorCode = "INVALID_CONTEXT"
+	ErrorCodeProviderNotReady ErrorCode = "PROVIDER_NOT_READY"
+	ErrorCodeGeneral          ErrorCode = "GENERAL"
 )
 
 // Error is returned by FlagshipClient for abnormal HTTP, network, parse, or

@@ -148,31 +148,41 @@ export interface FlagshipRequestOptions {
  */
 export interface FlagshipClientProviderOptions extends FlagshipProviderOptions {
 	/**
-	 * Flag keys to fetch during `initialize()` and on every `onContextChange()`.
-	 * Fetched flags are stored in an in-memory cache and resolved synchronously
-	 * by the OpenFeature web SDK. Any flag key not listed here will return
-	 * `ErrorCode.FLAG_NOT_FOUND` at resolution time.
-	 *
-	 * @example
-	 * prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads']
+	 * @deprecated Ignored. The provider evaluates every flag in a single request
+	 * during `initialize()` and on every `onContextChange()`.
 	 */
 	prefetchFlags?: string[];
+	/**
+	 * Milliseconds between background re-evaluations of every flag for the
+	 * current context. Emits `PROVIDER_CONFIGURATION_CHANGED` when results
+	 * change. Disabled by default.
+	 */
+	pollInterval?: number;
+}
+
+/**
+ * One entry of a bulk evaluation response. A failed flag carries `errorCode`
+ * and `errorDetails`; a disabled flag omits `value` and `variant`.
+ */
+export interface FlagshipBulkEvaluationResult {
+	key: string;
+	value?: unknown;
+	variant?: string;
+	reason?: string;
+	metadata?: Record<string, string | number | boolean>;
+	errorCode?: string;
+	errorDetails?: string;
 }
 
 /**
  * A single entry in the client provider's in-memory flag cache.
- * Fields mirror the data-plane's `EvaluateResult`.
  */
-export interface CachedFlag {
-	value: unknown;
-	reason: string;
-	variant: string;
-}
+export type CachedFlag = Omit<FlagshipBulkEvaluationResult, 'key'>;
 
 /**
  * Shape of a successful response from the Flagship evaluation API.
  * Mirrors the data-plane's `EvaluateResult` contract exactly — every field
- * is always present on a 200 response.
+ * except `metadata` is always present on a 200 response.
  */
 export interface FlagshipEvaluationResponse {
 	flagKey: string;
@@ -181,12 +191,15 @@ export interface FlagshipEvaluationResponse {
 	variant: string;
 	/**
 	 * Why this value was returned:
+	 * - `STATIC`          — the flag is enabled and has no rules; the default variation was served
 	 * - `TARGETING_MATCH` — a rule matched the evaluation context
 	 * - `SPLIT`           — a percentage rollout rule matched
 	 * - `DEFAULT`         — no rule matched; the default variation was served
 	 * - `DISABLED`        — the flag is disabled
 	 */
-	reason: 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT';
+	reason: 'STATIC' | 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT';
+	/** Flag metadata configured in Flagship. Omitted when the flag has none. */
+	metadata?: Record<string, string | number | boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,14 +283,42 @@ export interface FlagshipCacheOptions {
 }
 
 /**
+ * Local in-process evaluation options for `FlagshipServerProvider`.
+ *
+ * When enabled, the provider downloads flag definitions once at initialize,
+ * evaluates flags in-process, and refreshes definitions in the background
+ * (lazy stale-while-revalidate on evaluate).
+ *
+ * Requires a token with app **read** permission (not evaluate). Local mode is
+ * incompatible with `binding` and with `cacheTtl`.
+ */
+export interface FlagshipLocalEvaluationOptions {
+	/**
+	 * Enable local in-process evaluation.
+	 * @default false
+	 */
+	localEvaluation?: boolean;
+
+	/**
+	 * Minimum interval between background definition refreshes, in milliseconds.
+	 * Refresh is lazy (triggered on evaluate) rather than a background timer,
+	 * so it works in both Node and Cloudflare Workers.
+	 * @default 30_000
+	 */
+	refreshInterval?: number;
+}
+
+/**
  * Options accepted by `FlagshipServerProvider`.
  *
  * Provide **either** HTTP configuration (`appId`/`endpoint` + credentials) **or**
  * a wrangler `binding` — never both. The provider detects which mode to use
  * based on the presence of the `binding` field. Caching options apply to both
- * modes.
+ * modes. Local evaluation options apply only to HTTP mode.
  */
-export type FlagshipServerProviderOptions = (FlagshipProviderOptions | FlagshipBindingProviderOptions) & FlagshipCacheOptions;
+export type FlagshipServerProviderOptions = (FlagshipProviderOptions | FlagshipBindingProviderOptions) &
+	FlagshipCacheOptions &
+	FlagshipLocalEvaluationOptions;
 
 /**
  * Type guard: returns `true` when the options use binding mode.
@@ -326,6 +367,7 @@ export class FlagshipError extends Error {
 		public code: FlagshipErrorCode,
 		public cause?: unknown,
 		public readonly retryable: boolean = false,
+		public readonly errorCode?: string,
 	) {
 		super(message);
 		this.name = 'FlagshipError';

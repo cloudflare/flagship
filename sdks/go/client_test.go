@@ -1,12 +1,15 @@
 package flagship
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -94,6 +97,51 @@ func TestEvaluateSerializesContextIntoQuery(t *testing.T) {
 
 	if gotQuery.Get("flagKey") != "dark-mode" || gotQuery.Get("targetingKey") != "u1" || gotQuery.Get("plan") != "premium" {
 		t.Fatalf("query = %v", gotQuery)
+	}
+}
+
+func TestEvaluateSendsStructuredContextAsJSONPost(t *testing.T) {
+	var method string
+	var contentType string
+	var authorization string
+	var customHeader string
+	var body struct {
+		FlagKey string         `json:"flagKey"`
+		Context map[string]any `json:"context"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		contentType = r.Header.Get("Content-Type")
+		authorization = r.Header.Get("Authorization")
+		customHeader = r.Header.Get("X-Custom-Header")
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		writeEvaluationResponse(w, true, "on", "TARGETING_MATCH")
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Options{
+		Endpoint:  server.URL,
+		AuthToken: "secret",
+		Headers:   http.Header{"X-Custom-Header": []string{"custom"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.EvaluateFlat(context.Background(), "dark-mode", openfeature.FlattenedContext{
+		"targetingKey": "u1",
+		"profile":      map[string]any{"account": map[string]any{"plan": "enterprise"}},
+		"tags":         []any{"beta", 42, true, nil},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if method != http.MethodPost || contentType != "application/json" || authorization != "Bearer secret" || customHeader != "custom" || body.FlagKey != "dark-mode" {
+		t.Fatalf("method = %q, contentType = %q, authorization = %q, customHeader = %q, body = %#v", method, contentType, authorization, customHeader, body)
+	}
+	if !reflect.DeepEqual(body.Context["tags"], []any{"beta", float64(42), true, nil}) {
+		t.Fatalf("context = %#v", body.Context)
 	}
 }
 
@@ -187,7 +235,9 @@ func TestEvaluateInvalidContextReturnsBeforeFetch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := newTestClient(t, server.URL).EvaluateFlat(context.Background(), "k", openfeature.FlattenedContext{"obj": map[string]any{"x": 1}})
+	profile := map[string]any{}
+	profile["self"] = profile
+	_, err := newTestClient(t, server.URL).EvaluateFlat(context.Background(), "k", openfeature.FlattenedContext{"profile": profile})
 	requireFlagshipErrorCode(t, err, ErrorCodeInvalidContext)
 	if calls.Load() != 0 {
 		t.Fatalf("server calls = %d, want 0", calls.Load())
@@ -318,6 +368,35 @@ func TestRetriesOnTransientError(t *testing.T) {
 	}
 	if result.Value != true || calls.Load() != 2 {
 		t.Fatalf("result = %#v calls = %d", result, calls.Load())
+	}
+}
+
+func TestStructuredContextRetriesWithTheSameBody(t *testing.T) {
+	var bodies [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, body)
+		if len(bodies) == 1 {
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+		writeEvaluationResponse(w, true, "on", "DEFAULT")
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Options{Endpoint: server.URL, Retries: 1, RetryDelay: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.EvaluateFlat(context.Background(), "k", openfeature.FlattenedContext{"tags": []string{"beta"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || !bytes.Equal(bodies[0], bodies[1]) {
+		t.Fatalf("bodies = %q", bodies)
 	}
 }
 

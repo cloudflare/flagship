@@ -140,6 +140,19 @@ export function refreshNativeLockfiles(): void {
 				throw new Error(`Failed to refresh ${relative(ROOT, uvLockPath)}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
+
+		const cargoTomlPath = join(pkg.dir, 'Cargo.toml');
+		const cargoLockPath = join(pkg.dir, 'Cargo.lock');
+		if (existsSync(cargoTomlPath) && existsSync(cargoLockPath)) {
+			try {
+				// Updates only the workspace's own lock entries. Unlike `cargo check`, this compiles
+				// nothing, so dependency build scripts never run beside the release job's publish secrets.
+				execSync('cargo update --workspace', { cwd: pkg.dir, stdio: 'inherit' });
+				console.log(`Refreshed ${relative(ROOT, cargoLockPath)}.`);
+			} catch (error) {
+				throw new Error(`Failed to refresh ${relative(ROOT, cargoLockPath)}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 	}
 }
 

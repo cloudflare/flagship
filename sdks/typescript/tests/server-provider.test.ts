@@ -123,7 +123,30 @@ describe('FlagshipServerProvider', () => {
 			expect(result.variant).toBe('enabled-variant');
 		});
 
-		it('flagMetadata is always empty (API does not return metadata)', async () => {
+		it('passes through the STATIC reason for flags without rules', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({
+					flagKey: 'my-boolean-flag',
+					value: true,
+					reason: 'STATIC',
+					variant: 'on',
+				}),
+			});
+
+			const provider = new FlagshipServerProvider({
+				endpoint: 'https://api.example.com/evaluate',
+			});
+
+			const result = await provider.resolveBooleanEvaluation('my-boolean-flag', false, {}, noopLogger);
+
+			expect(result.value).toBe(true);
+			expect(result.reason).toBe('STATIC');
+			expect(result.variant).toBe('on');
+			expect(result.errorCode).toBeUndefined();
+		});
+
+		it('flagMetadata is empty when the API response has no metadata', async () => {
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
 				json: async () => ({
@@ -354,6 +377,47 @@ describe('FlagshipServerProvider', () => {
 	});
 
 	describe('error handling', () => {
+		it.each([
+			[
+				400,
+				'INVALID_CONTEXT',
+				ErrorCode.INVALID_CONTEXT,
+				{ success: false, error: 'bad context', errorMessage: 'bad context', errorCode: 'INVALID_CONTEXT' },
+			],
+			[500, 'PARSE_ERROR', ErrorCode.PARSE_ERROR, { success: false, errors: [{ message: 'bad config' }], errorCode: 'PARSE_ERROR' }],
+			[404, 'FLAG_NOT_FOUND', ErrorCode.FLAG_NOT_FOUND, { success: false, errorMessage: 'missing', errorCode: 'FLAG_NOT_FOUND' }],
+			[400, 'TYPE_MISMATCH', ErrorCode.TYPE_MISMATCH, { key: 'flag', errorDetails: 'wrong type', errorCode: 'TYPE_MISMATCH' }],
+		])('should map the %i body errorCode %s', async (status, _code, expected, body) => {
+			(global.fetch as any).mockResolvedValue(Response.json(body, { status }));
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const result = await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
+
+			expect(result.errorCode).toBe(expected);
+			expect(result.errorMessage).toContain(
+				String((body as any).errorMessage ?? (body as any).errorDetails ?? (body as any).error ?? (body as any).errors[0].message),
+			);
+		});
+
+		it('should fall back to GENERAL for an unknown body errorCode', async () => {
+			(global.fetch as any).mockResolvedValue(Response.json({ errorCode: 'SOMETHING_NEW' }, { status: 400 }));
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const result = await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
+
+			expect(result.errorCode).toBe(ErrorCode.GENERAL);
+		});
+
+		it('should fall back to the status code when the error body is not JSON', async () => {
+			(global.fetch as any).mockResolvedValue(new Response('oops', { status: 404, statusText: 'Not Found' }));
+
+			const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', retries: 0 });
+			const result = await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
+
+			expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
+			expect(result.errorMessage).toBe('HTTP 404: Not Found');
+		});
+
 		it('should handle FLAG_NOT_FOUND error (404)', { timeout: 10000 }, async () => {
 			// Must use a real Response so `instanceof Response` succeeds in handleError().
 			const mockResponse = new Response(null, { status: 404, statusText: 'Not Found' });
@@ -433,27 +497,25 @@ describe('FlagshipServerProvider', () => {
 			expect(result.errorMessage).toContain('timeout');
 		});
 
-		it('should return INVALID_CONTEXT when context contains complex objects', async () => {
+		it('should evaluate structured context with a JSON request body', async () => {
+			(global.fetch as any).mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ flagKey: 'my-flag', value: true, variant: 'on', reason: 'TARGETING_MATCH' }),
+			});
 			const provider = new FlagshipServerProvider({
 				endpoint: 'https://api.example.com/evaluate',
 			});
+			const context = {
+				targetingKey: 'user-123',
+				nested: { foo: 'bar' },
+			};
 
-			const result = await provider.resolveBooleanEvaluation(
-				'my-flag',
-				false,
-				{
-					targetingKey: 'user-123',
-					nested: { foo: 'bar' } as any,
-				},
-				noopLogger,
-			);
+			const result = await provider.resolveBooleanEvaluation('my-flag', false, context, noopLogger);
 
-			expect(result.value).toBe(false);
-			expect(result.errorCode).toBe(ErrorCode.INVALID_CONTEXT);
-			expect(result.errorMessage).toContain('nested');
-			expect(result.reason).toBe('ERROR');
-			// fetch should NOT have been called — error thrown before the request
-			expect(global.fetch).not.toHaveBeenCalled();
+			expect(result.value).toBe(true);
+			const [, init] = (global.fetch as any).mock.calls[0];
+			expect(init.method).toBe('POST');
+			expect(JSON.parse(init.body)).toEqual({ flagKey: 'my-flag', context });
 		});
 
 		it('should handle PARSE_ERROR', async () => {

@@ -175,6 +175,15 @@ func TestProviderObjectRejectsString(t *testing.T) {
 	requireResolutionErrorCode(t, d.ResolutionDetail(), openfeature.TypeMismatchCode)
 }
 
+func TestProviderStaticReasonPassesThrough(t *testing.T) {
+	provider, server := newProviderWithResponse(t, http.StatusOK, true, "on", "STATIC")
+	defer server.Close()
+	d := provider.BooleanEvaluation(context.Background(), "k", false, nil)
+	if d.Value != true || d.ResolutionDetail().ErrorCode != "" || d.Variant != "on" || d.Reason != openfeature.StaticReason {
+		t.Fatalf("detail = %#v", d)
+	}
+}
+
 func TestProviderDisabledReturnsDefaultWithoutError(t *testing.T) {
 	provider, server := newProviderWithResponse(t, http.StatusOK, true, "on", "DISABLED")
 	defer server.Close()
@@ -213,7 +222,9 @@ func TestProviderParseError(t *testing.T) {
 func TestProviderInvalidContext(t *testing.T) {
 	provider, server := newProviderWithResponse(t, http.StatusOK, true, "on", "DEFAULT")
 	defer server.Close()
-	d := provider.BooleanEvaluation(context.Background(), "k", false, openfeature.FlattenedContext{"obj": map[string]any{"x": 1}})
+	profile := map[string]any{}
+	profile["self"] = profile
+	d := provider.BooleanEvaluation(context.Background(), "k", false, openfeature.FlattenedContext{"profile": profile})
 	requireResolutionErrorCode(t, d.ResolutionDetail(), openfeature.InvalidContextCode)
 }
 

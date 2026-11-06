@@ -24,6 +24,7 @@ export type {
 	FlagshipBindingProviderOptions,
 	FlagshipServerProviderOptions,
 	FlagshipCacheOptions,
+	FlagshipLocalEvaluationOptions,
 } from './types.js';
 
 export { FlagshipError, FlagshipErrorCode, FLAGSHIP_DEFAULT_BASE_URL, isBindingOptions } from './types.js';

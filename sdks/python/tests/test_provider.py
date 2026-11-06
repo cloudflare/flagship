@@ -77,6 +77,16 @@ def test_successful_resolution(
     assert details.reason == Reason.TARGETING_MATCH
 
 
+@respx.mock
+def test_static_reason_passes_through(provider: FlagshipServerProvider) -> None:
+    respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=_resp(True, reason="STATIC"))
+    details = provider.resolve_boolean_details("k", False)
+    assert details.value is True
+    assert details.error_code is None
+    assert details.variant == "on"
+    assert details.reason == Reason.STATIC
+
+
 # --- type checking ----------------------------------------------------------
 
 
@@ -162,7 +172,9 @@ def test_parse_error(provider: FlagshipServerProvider) -> None:
 
 
 def test_invalid_context(provider: FlagshipServerProvider) -> None:
-    ctx = EvaluationContext(attributes={"obj": {"x": 1}})
+    profile: dict[str, object] = {}
+    profile["self"] = profile
+    ctx = EvaluationContext(attributes={"profile": profile})
     with pytest.raises(InvalidContextError):
         provider.resolve_boolean_details("k", False, ctx)
 

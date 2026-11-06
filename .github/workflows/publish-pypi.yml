@@ -18,22 +18,13 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           working-directory: sdks/python
-
-      - name: Bootstrap Python release baseline
-        run: |
-          if [ -z "$(git tag --list 'sdks/python/v*')" ]; then
-            BASE=$(git describe --first-parent --tags --match '@cloudflare/flagship@*' --exclude '*-*' --abbrev=0 "${GITHUB_SHA}^1")
-            TAG="sdks/python/v${BASE##*@}"
-            git tag "${TAG}" "${BASE}"
-            git push origin "${TAG}"
-          fi
 
       - name: Build
         working-directory: sdks/python

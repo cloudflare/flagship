@@ -1,9 +1,10 @@
 import type { EvaluationContext } from '@openfeature/core';
-import { buildEvaluationUrl } from './context.js';
+import { buildEvaluationUrl, normalizeEvaluationContext } from './context.js';
 import {
 	FlagshipError,
 	FlagshipErrorCode,
 	FLAGSHIP_DEFAULT_BASE_URL,
+	type FlagshipBulkEvaluationResult,
 	type FlagshipEvaluationResponse,
 	type FlagshipProviderOptions,
 	type FlagshipRequestOptions,
@@ -11,12 +12,20 @@ import {
 
 interface ResolvedOptions {
 	endpoint: string;
+	/** Definitions URL used by local evaluation. `undefined` when not derived. */
+	definitionsEndpoint: string | undefined;
+	bulkEndpoint: string | undefined;
 	fetchOptions: RequestInit;
 	signal: AbortSignal | undefined;
 	fetch: typeof globalThis.fetch | undefined;
 	timeout: number;
 	retries: number;
 	retryDelay: number;
+}
+
+interface EvaluationRequest {
+	url: string;
+	init: RequestInit;
 }
 
 /**
@@ -31,8 +40,11 @@ export class FlagshipClient {
 
 	constructor(options: FlagshipProviderOptions) {
 		const fetchOptions = buildFetchOptions(options);
+		const endpoint = resolveEndpoint(options);
 		this.options = {
-			endpoint: resolveEndpoint(options),
+			endpoint,
+			definitionsEndpoint: tryResolveDefinitionsEndpoint(options),
+			bulkEndpoint: resolveBulkEndpoint(endpoint),
 			fetchOptions,
 			signal: fetchOptions.signal ?? undefined,
 			fetch: options.fetch,
@@ -45,30 +57,81 @@ export class FlagshipClient {
 	/**
 	 * Evaluate a flag with the given context.
 	 *
-	 * Throws a `FlagshipError` with `FlagshipErrorCode.INVALID_CONTEXT` if the
-	 * evaluation context contains complex values (objects or arrays) that cannot
-	 * be serialized to query parameters.
+	 * Primitive-only context uses query parameters. Structured context uses a JSON
+	 * request body. Unsupported or cyclic values throw `FlagshipErrorCode.INVALID_CONTEXT`.
 	 *
 	 * `options.fetch` overrides the transport for this call, and
 	 * `options.signal` cancels the in-flight HTTP request — aborting rejects
 	 * with `FlagshipErrorCode.ABORTED` and is never retried.
 	 */
 	async evaluate(flagKey: string, context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipEvaluationResponse> {
-		const droppedKeys: string[] = [];
-		const url = buildEvaluationUrl(this.options.endpoint, flagKey, context, droppedKeys);
-
-		if (droppedKeys.length > 0) {
-			throw new FlagshipError(
-				`Evaluation context contains complex values that cannot be serialized for flag "${flagKey}". ` +
-					`Unsupported keys: ${droppedKeys.join(', ')}. Use primitive values (string, number, boolean) or Date objects.`,
-				FlagshipErrorCode.INVALID_CONTEXT,
-			);
-		}
-
+		const normalized = normalizeEvaluationContext(context);
+		const request = normalized.requiresPost
+			? buildPostRequest(this.options.endpoint, { flagKey, context: normalized.context }, this.options.fetchOptions)
+			: {
+					url: buildEvaluationUrl(this.options.endpoint, flagKey, normalized.context as EvaluationContext),
+					init: this.options.fetchOptions,
+				};
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
 
-		return this.fetchWithRetry(url, this.options.retries, transport, signals);
+		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseEvaluationResponse);
+	}
+
+	/**
+	 * Evaluate every flag in the app for one context with a single OFREP bulk request.
+	 *
+	 * Per-flag failures are returned as items with an `errorCode`; request-level
+	 * failures throw like `evaluate`.
+	 *
+	 * @internal
+	 */
+	async evaluateAll(context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipBulkEvaluationResult[]> {
+		const endpoint = this.options.bulkEndpoint;
+		if (!endpoint) {
+			throw new Error('Flagship: bulk evaluation requires an endpoint ending in /evaluate, or appId and accountId.');
+		}
+
+		const request = buildPostRequest(endpoint, { context: normalizeEvaluationContext(context).context }, this.options.fetchOptions);
+		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
+		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
+
+		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseBulkResponse);
+	}
+
+	/**
+	 * Fetch the app's flag definitions for local evaluation.
+	 *
+	 * Sends `If-None-Match` when `etag` is provided. A `304` response yields
+	 * `'not-modified'`; a `200` yields the parsed flags map and the new ETag.
+	 *
+	 * @internal
+	 */
+	async fetchDefinitions(
+		etag?: string,
+		options?: FlagshipRequestOptions,
+	): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
+		const endpoint = this.options.definitionsEndpoint;
+		if (!endpoint) {
+			// Configuration problem, not an evaluation failure — mirror the constructor's plain Errors.
+			throw new Error('Flagship: definitions endpoint is not configured. Provide appId+accountId, or an endpoint ending in /evaluate.');
+		}
+
+		const headers = new Headers(this.options.fetchOptions.headers);
+		if (etag) headers.set('If-None-Match', etag);
+
+		const request: EvaluationRequest = {
+			url: endpoint,
+			init: {
+				...this.options.fetchOptions,
+				method: 'GET',
+				headers,
+			},
+		};
+		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
+		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
+
+		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseDefinitionsResponse);
 	}
 
 	/**
@@ -76,14 +139,15 @@ export class FlagshipClient {
 	 * terminal responses (400, 401, 403, 404, …) and caller aborts are
 	 * propagated immediately.
 	 */
-	private async fetchWithRetry(
-		url: string,
+	private async fetchWithRetry<T>(
+		request: EvaluationRequest,
 		retriesLeft: number,
 		transport: typeof globalThis.fetch,
 		signals: AbortSignal[],
-	): Promise<FlagshipEvaluationResponse> {
+		parse: (response: Response) => Promise<T>,
+	): Promise<T> {
 		try {
-			return await this.fetchWithTimeout(url, this.options.timeout, transport, signals);
+			return await this.fetchWithTimeout(request, this.options.timeout, transport, signals, parse);
 		} catch (error) {
 			if (error instanceof FlagshipError && !error.retryable) {
 				throw error;
@@ -92,7 +156,7 @@ export class FlagshipClient {
 			if (retriesLeft > 0) {
 				discardResponse(error);
 				await waitForRetry(this.options.retryDelay, signals);
-				return this.fetchWithRetry(url, retriesLeft - 1, transport, signals);
+				return this.fetchWithRetry(request, retriesLeft - 1, transport, signals, parse);
 			}
 
 			throw error;
@@ -103,12 +167,13 @@ export class FlagshipClient {
 	 * Issues a single request against the resolved transport, aborting it when
 	 * the timeout elapses or when any caller-supplied signal fires.
 	 */
-	private async fetchWithTimeout(
-		url: string,
+	private async fetchWithTimeout<T>(
+		request: EvaluationRequest,
 		timeout: number,
 		transport: typeof globalThis.fetch,
 		signals: AbortSignal[],
-	): Promise<FlagshipEvaluationResponse> {
+		parse: (response: Response) => Promise<T>,
+	): Promise<T> {
 		const alreadyAborted = signals.find((signal) => signal.aborted);
 		if (alreadyAborted) {
 			throw abortedError(alreadyAborted.reason);
@@ -123,27 +188,12 @@ export class FlagshipClient {
 		const merged = mergeSignals([timeoutController.signal, ...signals]);
 
 		try {
-			const response = await transport(url, {
-				...this.options.fetchOptions,
+			const response = await transport(request.url, {
+				...request.init,
 				signal: merged.signal,
 			});
 
-			if (!response.ok) {
-				throw new FlagshipError(
-					`HTTP ${response.status}: ${response.statusText}`,
-					FlagshipErrorCode.NETWORK_ERROR,
-					response,
-					isRetryableStatus(response.status),
-				);
-			}
-
-			const data = await response.json();
-
-			if (!data || typeof data !== 'object' || !('flagKey' in data) || !('value' in data)) {
-				throw new FlagshipError('Invalid response format from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
-			}
-
-			return data as FlagshipEvaluationResponse;
+			return await parse(response);
 		} catch (error) {
 			if (error instanceof FlagshipError) {
 				throw error;
@@ -164,6 +214,105 @@ export class FlagshipClient {
 			merged.dispose();
 		}
 	}
+}
+
+async function parseEvaluationResponse(response: Response): Promise<FlagshipEvaluationResponse> {
+	if (!response.ok) throw await httpError(response);
+
+	const data = await response.json();
+
+	if (!data || typeof data !== 'object' || !('flagKey' in data) || !('value' in data)) {
+		throw new FlagshipError('Invalid response format from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
+	}
+
+	return data as FlagshipEvaluationResponse;
+}
+
+async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResult[]> {
+	if (!response.ok) throw await httpError(response);
+
+	const data = (await response.json()) as { flags?: unknown } | null;
+	if (!data || !Array.isArray(data.flags)) {
+		throw new FlagshipError('Invalid bulk evaluation response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
+	}
+
+	return data.flags as FlagshipBulkEvaluationResult[];
+}
+
+async function parseDefinitionsResponse(response: Response): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
+	if (response.status === 304) {
+		return 'not-modified';
+	}
+
+	if (!response.ok) throw await httpError(response);
+
+	const data: unknown = await response.json();
+	if (
+		!data ||
+		typeof data !== 'object' ||
+		!('flags' in data) ||
+		typeof (data as { flags: unknown }).flags !== 'object' ||
+		(data as { flags: unknown }).flags === null ||
+		Array.isArray((data as { flags: unknown }).flags)
+	) {
+		throw new FlagshipError('Invalid definitions response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
+	}
+
+	const etag = response.headers.get('etag') ?? '';
+	return { etag, flags: (data as { flags: Record<string, unknown> }).flags };
+}
+
+export function isAuthFailure(error: unknown): boolean {
+	const status = error instanceof FlagshipError ? (error.cause as { status?: unknown } | undefined)?.status : undefined;
+	return status === 401 || status === 403;
+}
+
+async function httpError(response: Response): Promise<FlagshipError> {
+	const { message, errorCode } = await readErrorBody(response);
+	return new FlagshipError(
+		`HTTP ${response.status}: ${message ?? response.statusText}`,
+		FlagshipErrorCode.NETWORK_ERROR,
+		response,
+		isRetryableStatus(response.status),
+		errorCode,
+	);
+}
+
+async function readErrorBody(response: Response): Promise<{ message?: string; errorCode?: string }> {
+	try {
+		const body = (await response.json()) as Record<string, unknown> | null;
+		if (!body || typeof body !== 'object') return {};
+		const errors = Array.isArray(body.errors) ? (body.errors[0] as { message?: unknown } | undefined) : undefined;
+		const message = [body.errorMessage, body.errorDetails, body.error, errors?.message].find((value) => typeof value === 'string');
+		return {
+			message: message as string | undefined,
+			errorCode: typeof body.errorCode === 'string' ? body.errorCode : undefined,
+		};
+	} catch {
+		return {};
+	}
+}
+
+function buildPostRequest(url: string, body: object, fetchOptions: RequestInit): EvaluationRequest {
+	const headers = new Headers(fetchOptions.headers);
+	if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+	return {
+		url,
+		init: {
+			...fetchOptions,
+			method: 'POST',
+			headers,
+			body: JSON.stringify(body),
+		},
+	};
+}
+
+function resolveBulkEndpoint(endpoint: string): string | undefined {
+	const url = new URL(endpoint);
+	const path = url.pathname.replace(/\/+$/, '');
+	if (!path.endsWith('/evaluate')) return undefined;
+	url.pathname = `${path.slice(0, -'/evaluate'.length)}/ofrep/v1/evaluate/flags`;
+	return url.toString();
 }
 
 function abortedError(cause: unknown): FlagshipError {
@@ -309,5 +458,66 @@ function resolveEndpoint(options: FlagshipProviderOptions): string {
 		return new URL(resolved).toString();
 	} catch {
 		throw new Error(`Flagship: resolved endpoint is not a valid URL: ${resolved}`);
+	}
+}
+
+/**
+ * Derive the definitions URL from provider options.
+ * - With `appId`: `…/apps/{appId}/definitions`
+ * - With `endpoint`: replace a trailing `/evaluate` with `/definitions`
+ *
+ * Returns `undefined` when the endpoint cannot be derived (caller decides whether that's fatal).
+ */
+function tryResolveDefinitionsEndpoint(options: FlagshipProviderOptions): string | undefined {
+	try {
+		return resolveDefinitionsEndpoint(options);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * @internal Exported for tests and the server provider constructor validation.
+ */
+export function resolveDefinitionsEndpoint(options: FlagshipProviderOptions): string {
+	const { appId, endpoint, baseUrl, accountId } = options;
+
+	if (appId && endpoint) {
+		throw new Error('Flagship: provide either "appId" or "endpoint", not both');
+	}
+
+	if (endpoint) {
+		let url: URL;
+		try {
+			url = new URL(endpoint);
+		} catch {
+			throw new Error(`Flagship: invalid endpoint URL: ${endpoint}`);
+		}
+		// Strip trailing slashes from the path, then require it ends with /evaluate.
+		const path = url.pathname.replace(/\/+$/, '');
+		if (!path.endsWith('/evaluate')) {
+			throw new Error(
+				'Flagship: when localEvaluation is enabled with "endpoint", the URL path must end in "/evaluate" so the definitions URL can be derived',
+			);
+		}
+		url.pathname = `${path.slice(0, -'/evaluate'.length)}/definitions`;
+		return url.toString();
+	}
+
+	if (!appId) {
+		throw new Error('Flagship: either "appId" or "endpoint" is required');
+	}
+
+	if (!accountId) {
+		throw new Error('Flagship: "accountId" is required when using "appId"');
+	}
+
+	const base = (baseUrl || FLAGSHIP_DEFAULT_BASE_URL).replace(/\/+$/, '');
+	const resolved = `${base}/client/v4/accounts/${encodeURIComponent(accountId)}/flagship/apps/${encodeURIComponent(appId)}/definitions`;
+
+	try {
+		return new URL(resolved).toString();
+	} catch {
+		throw new Error(`Flagship: resolved definitions endpoint is not a valid URL: ${resolved}`);
 	}
 }

@@ -1,5 +1,96 @@
 # @cloudflare/flagship
 
+## 0.7.0
+
+### Minor Changes
+
+- [#50](https://github.com/cloudflare/flagship/pull/50) [`f4ef40e`](https://github.com/cloudflare/flagship/commit/f4ef40e52d52ad1739f8ad6070bb2bbcc6081a9e) Thanks [@akshitsinha](https://github.com/akshitsinha)! - `FlagshipClientProvider` now evaluates every flag in a single OFREP bulk request on `initialize()` and on every context change, so `prefetchFlags` is no longer needed and is ignored. Cached results keep their evaluation reason instead of `CACHED`, and per-flag failures surface their OpenFeature error code. The new `pollInterval` option re-evaluates flags in the background and emits `PROVIDER_CONFIGURATION_CHANGED` when results change.
+
+- [#56](https://github.com/cloudflare/flagship/pull/56) [`211f788`](https://github.com/cloudflare/flagship/commit/211f7888c28659ebaa2cb4fcb609c4a51b4aeddf) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Expose flag metadata configured in Flagship as OpenFeature `flagMetadata` in the server providers. Previously `flagMetadata` was always empty.
+
+- [#49](https://github.com/cloudflare/flagship/pull/49) [`0d46808`](https://github.com/cloudflare/flagship/commit/0d46808667b5977135875e8e0113d48654319a46) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Report provider state accurately. Local-evaluation server providers emit `PROVIDER_STALE` when a definitions refresh fails and `PROVIDER_READY` when it recovers, and fail initialization with `PROVIDER_FATAL` on a 401 or 403. The client provider now rejects `initialize()` and `onContextChange()` when every flag fetch fails, instead of reporting `READY`, and `onClose()` now discards a load that is still in flight.
+
+- [#54](https://github.com/cloudflare/flagship/pull/54) [`6c35867`](https://github.com/cloudflare/flagship/commit/6c35867a2366e08f336c16c47be74fc99501d469) Thanks [@mattrighetti](https://github.com/mattrighetti)! - Add the Rust SDK (`cloudflare-flagship` on crates.io), an async OpenFeature provider and direct client for Flagship. It supports HTTP evaluation only; Cloudflare Workers should keep using the TypeScript SDK and its native binding.
+  
+  - **Remote evaluation:** typed boolean, string, integer, float and structured values, targeting context, evaluation details, retries for network errors, timeouts, 5xx, 408, 425 and 429 responses, request timeouts and an optional context-keyed response cache.
+  - **Local evaluation:** downloads flag definitions at startup and refreshes them in the background. A failed refresh keeps the last good snapshot and reports the provider as `STALE`, with the cause available from `last_refresh_error()`. Requires `app_id`, `account_id` and a token with app **read** permission, and is incompatible with the response cache.
+  - **OpenFeature 0.3:** `FlagshipServerProvider` for the server API, plus `FlagshipClient` for direct use. Typed resolutions fail with a type mismatch when the served value doesn't match the requested Rust type.
+  - **Flag metadata:** returned as OpenFeature `flag_metadata` in remote and local modes, including for disabled flags and cache hits. Only string, boolean and numeric entries are kept.
+  - **Hooks:** `LoggingHook` and `TelemetryHook`.
+  - **TLS:** `rustls` (default), `native-tls`, or `rustls-no-provider` for applications that install their own crypto provider.
+  
+  Requires Rust 1.88 or later.
+
+### Patch Changes
+
+- [#48](https://github.com/cloudflare/flagship/pull/48) [`c6c6864`](https://github.com/cloudflare/flagship/commit/c6c6864979962f3977cf18f9716aef4036f8d49a) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Map the OpenFeature `errorCode` from Flagship HTTP error responses, so `INVALID_CONTEXT`, `PARSE_ERROR` and `TYPE_MISMATCH` are no longer reported as `GENERAL`.
+
+## 0.6.0
+
+### Minor Changes
+
+- [#37](https://github.com/cloudflare/flagship/pull/37) [`cd59b99`](https://github.com/cloudflare/flagship/commit/cd59b99bdc9f873481498b3d52917bfd1ec72fa5) Thanks [@karishnu](https://github.com/karishnu)! - Support nested objects, arrays, null, and recursively serialized dates in binding and HTTP evaluation context.
+  
+  Context values other than strings, numbers, booleans, `null`, dates, arrays and plain objects now resolve with `INVALID_CONTEXT` instead of being silently dropped.
+
+- [#40](https://github.com/cloudflare/flagship/pull/40) [`fcc1094`](https://github.com/cloudflare/flagship/commit/fcc10940441a8420aaf63828e59f2aa426480d26) Thanks [@karishnu](https://github.com/karishnu)! - Support nested objects, arrays, null, and recursively serialized times in HTTP evaluation context.
+
+- [#45](https://github.com/cloudflare/flagship/pull/45) [`7d3af0b`](https://github.com/cloudflare/flagship/commit/7d3af0bebfddbaffa1dc4433c67f4b20a0a9ab94) Thanks [@vaibhavshn](https://github.com/vaibhavshn)! - Add local in-process evaluation for `ServerProvider`.
+  
+  When `LocalEvaluation: true`, the provider downloads flag definitions at initialize, evaluates flags without a network call per evaluation, and refreshes definitions in the background. Requires `AccountID` and a token with app **read** permission. Incompatible with `CacheTTL`.
+
+- [#44](https://github.com/cloudflare/flagship/pull/44) [`7d2d2dc`](https://github.com/cloudflare/flagship/commit/7d2d2dc8ed6901e7c68642e745ba560cce968368) Thanks [@vaibhavshn](https://github.com/vaibhavshn)! - Add local in-process evaluation for `FlagshipServerProvider`.
+  
+  When `local_evaluation=True`, the provider downloads flag definitions at initialize, evaluates flags without a network call per evaluation, and refreshes definitions in the background on a daemon thread. Requires `account_id` and a token with app **read** permission. Incompatible with `cache_ttl`.
+
+- [#43](https://github.com/cloudflare/flagship/pull/43) [`8a873d9`](https://github.com/cloudflare/flagship/commit/8a873d938f1486d8a201b23bccc6ff834e20d308) Thanks [@vaibhavshn](https://github.com/vaibhavshn)! - Add local in-process evaluation for `FlagshipServerProvider`.
+  
+  When `localEvaluation: true`, the provider downloads flag definitions at initialize, evaluates flags without a network call per evaluation, and refreshes definitions lazily (stale-while-revalidate). Requires `accountId` and a token with app **read** permission. Incompatible with binding mode and `cacheTtl`.
+  
+  Also maps reason `STATIC` (flag has no rules) on evaluation responses.
+
+- [#39](https://github.com/cloudflare/flagship/pull/39) [`a942982`](https://github.com/cloudflare/flagship/commit/a942982d2d761c0ff1c3b85b4230f06d1ae29352) Thanks [@karishnu](https://github.com/karishnu)! - Support nested objects, arrays, null, and recursively serialized datetimes in HTTP evaluation context.
+
+### Patch Changes
+
+- [#42](https://github.com/cloudflare/flagship/pull/42) [`84fd1c4`](https://github.com/cloudflare/flagship/commit/84fd1c45920efdbbf3d631a2e253211734b19dce) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Add the `STATIC` evaluation reason to the SDK types and docs. Flagship now reports `STATIC` instead of `DEFAULT` for an enabled flag with no targeting rules. The SDKs already passed unknown reasons through unchanged, so runtime behaviour is the same.
+  
+  - TypeScript: `FlagshipEvaluationResponse['reason']` includes `'STATIC'`.
+  - Python: `EvaluationReason` includes `"STATIC"`; it resolves to `Reason.STATIC`.
+  - Go: new `ReasonStatic` constant, mapped to `openfeature.StaticReason`.
+  
+  Code that checks `reason === 'DEFAULT'` to detect rule-less flags should also handle `STATIC`.
+
+- [`86a4dda`](https://github.com/cloudflare/flagship/commit/86a4dda72ff80e248ef1292328c01981fca568e2) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Upgrade SDK dependencies and tooling across TypeScript, Python, and Go. No public API or runtime behaviour changes.
+  
+  TypeScript:
+  
+  - `lru-cache` 11.5.2 → 11.5.3 (runtime dependency).
+  - `typescript` 5.9.3 → 7.0.2, `tsdown` 0.22.14 → 0.23.0, `vitest` and `@vitest/coverage-v8` 4.1.10 → 5.0.2, `@cloudflare/workers-types` 4 → 5, `tsx` 4.23.8 → 4.23.15, `@types/node` 24.13.3 → 24.19.0 (Node stays on 24).
+  - Repo tooling: `oxlint` 1.77 → 1.85, `oxfmt` 0.62 → 0.70, `lint-staged` 17.3 → 17.6, `pkg-pr-new` 0.0.87 → 0.0.88, `@decimalturn/toml-patch` 2.1 → 3.3, `@changesets/cli` 2.31 → 3.0, `@changesets/read` 0.6 → 1.0, `@changesets/types` 6.1 → 7.0, `@changesets/changelog-github` 0.7 → 1.0.
+  - pnpm 11 → 12, with the lockfile regenerated.
+  - Declaration output changes shape only: classes are now exported inline. The exported names and types are unchanged for both ESM and CJS consumers.
+  
+  Python:
+  
+  - The lockfile moves to `cachetools` 7.2.0, `pytest-mock` 3.16.0, `ruff` 0.16.9, and `ty` 0.0.84. The published dependency ranges are unchanged.
+  - Build backend `uv_build` moves to `>=0.12.19,<0.13.0`.
+  - Ruff no longer formats Markdown code blocks, so README examples keep their hand-aligned layout.
+  
+  Go:
+  
+  - `github.com/open-feature/go-sdk` v1.17.2 → v1.18.0. The minimum Go version stays at 1.25.
+  - `go-logr/logr` 1.4.3 → 1.4.4. It is no longer a direct requirement.
+  
+  CI:
+  
+  - `actions/checkout` v7, `actions/setup-node` v7, `actions/setup-go` v7, `actions/cache` v6.
+  - `astral-sh/setup-uv` v10.2.0, pinned by SHA.
+  - `pnpm/action-setup` v6.1.0, the first release with pnpm 12 support.
+  - `changesets/action` v1.9.0 → v2.1.2, required by Changesets CLI 3. The release workflow uses the renamed inputs and outputs and keeps pushing through the Git CLI. The release script now calls `changeset git-tag`, the new name of `changeset tag`.
+
+- [#38](https://github.com/cloudflare/flagship/pull/38) [`19e8220`](https://github.com/cloudflare/flagship/commit/19e8220577dd9c961a94fca179e19aa76820fbe5) Thanks [@karishnu](https://github.com/karishnu)! - Preserve provider readiness, fatal, and missing targeting-key error codes returned by the Workers binding.
+
 ## 0.5.0
 
 ### Minor Changes

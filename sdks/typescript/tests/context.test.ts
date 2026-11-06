@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ContextTransformer } from '../src/context.js';
+import { ContextTransformer, normalizeEvaluationContext } from '../src/context.js';
+import { FlagshipErrorCode } from '../src/types.js';
 
 describe('ContextTransformer', () => {
 	describe('toQueryParams', () => {
@@ -272,5 +273,58 @@ describe('ContextTransformer', () => {
 			const result = ContextTransformer.toQueryParams({ targetingKey: 'user-42' });
 			expect(result.targetingKey).toBe('user-42');
 		});
+	});
+});
+
+describe('normalizeEvaluationContext', () => {
+	it('preserves nested JSON values and recursively serializes dates', () => {
+		const result = normalizeEvaluationContext({
+			targetingKey: 'user-42',
+			profile: { account: { plan: 'enterprise', createdAt: new Date('2024-01-15T10:30:00Z') } },
+			tags: ['beta', 42, true, null],
+			nullable: null,
+		});
+
+		expect(result).toEqual({
+			context: {
+				targetingKey: 'user-42',
+				profile: { account: { plan: 'enterprise', createdAt: '2024-01-15T10:30:00.000Z' } },
+				tags: ['beta', 42, true, null],
+				nullable: null,
+			},
+			requiresPost: true,
+		});
+	});
+
+	it('keeps primitive-only context on the query transport', () => {
+		expect(normalizeEvaluationContext({ targetingKey: 'user-42', age: 30, active: false })).toEqual({
+			context: { targetingKey: 'user-42', age: 30, active: false },
+			requiresPost: false,
+		});
+	});
+
+	it.each([
+		['non-finite number', { score: Number.NaN }],
+		['function', { callback: (() => true) as any }],
+		['class instance', { value: new URL('https://example.com') as any }],
+	])('rejects %s values', (_name, context) => {
+		expect(() => normalizeEvaluationContext(context)).toThrow(expect.objectContaining({ code: FlagshipErrorCode.INVALID_CONTEXT }));
+	});
+
+	it('keeps __proto__ keys as own properties', () => {
+		const profile = JSON.parse('{"__proto__":{"admin":true},"plan":"free"}');
+		const { context } = normalizeEvaluationContext({ profile });
+
+		expect(Object.keys(context.profile as object)).toEqual(['__proto__', 'plan']);
+		expect(JSON.stringify(context)).toBe('{"profile":{"__proto__":{"admin":true},"plan":"free"}}');
+	});
+
+	it('rejects cyclic values', () => {
+		const profile: Record<string, unknown> = {};
+		profile.self = profile;
+
+		expect(() => normalizeEvaluationContext({ profile } as any)).toThrow(
+			expect.objectContaining({ code: FlagshipErrorCode.INVALID_CONTEXT }),
+		);
 	});
 });

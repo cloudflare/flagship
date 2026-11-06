@@ -75,6 +75,26 @@ func TestProviderCacheKeyIncludesContext(t *testing.T) {
 	}
 }
 
+func TestProviderCacheKeyCanonicalizesNestedObjects(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeEvaluationResponse(w, true, "on", "TARGETING_MATCH")
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(t, server.URL, Options{CacheTTL: time.Minute})
+	first := openfeature.FlattenedContext{"profile": map[string]any{"plan": "enterprise", "region": "us"}}
+	second := openfeature.FlattenedContext{"profile": map[string]any{"region": "us", "plan": "enterprise"}}
+
+	_ = provider.BooleanEvaluation(context.Background(), "k", false, first)
+	result := provider.BooleanEvaluation(context.Background(), "k", false, second)
+
+	if result.Reason != openfeature.CachedReason || calls.Load() != 1 {
+		t.Fatalf("result = %#v, calls = %d", result, calls.Load())
+	}
+}
+
 func TestProviderCacheKeyIncludesType(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

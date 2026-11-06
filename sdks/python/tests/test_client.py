@@ -1,3 +1,4 @@
+import json
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -146,11 +147,28 @@ def test_evaluate_timeout_raises_general() -> None:
 
 
 @respx.mock
+def test_evaluate_sends_structured_context_as_json_post() -> None:
+    route = respx.post(url__regex=ENDPOINT_REGEX).mock(return_value=_ok())
+    context = {
+        "profile": {"account": {"plan": "enterprise"}},
+        "tags": ["beta", 42, True, None],
+    }
+
+    _client().evaluate("k", EvaluationContext(targeting_key="u1", attributes=context))
+
+    assert json.loads(route.calls[0].request.content) == {
+        "flagKey": "k",
+        "context": {"targetingKey": "u1", **context},
+    }
+
+
+@respx.mock
 def test_evaluate_invalid_context_raises_before_fetch() -> None:
-    route = respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=_ok())
-    ctx = EvaluationContext(attributes={"obj": {"x": 1}})
+    route = respx.post(url__regex=ENDPOINT_REGEX).mock(return_value=_ok())
+    profile: dict[str, object] = {}
+    profile["self"] = profile
     with pytest.raises(InvalidContextError):
-        _client().evaluate("k", ctx)
+        _client().evaluate("k", EvaluationContext(attributes={"profile": profile}))
     assert route.call_count == 0
 
 
@@ -212,6 +230,20 @@ async def test_async_evaluate_returns_response() -> None:
 
 
 @respx.mock
+async def test_async_evaluate_sends_structured_context_as_json_post() -> None:
+    route = respx.post(url__regex=ENDPOINT_REGEX).mock(return_value=_ok(True))
+    c = _client()
+
+    await c.evaluate_async("k", EvaluationContext(attributes={"tags": ["beta", "internal"]}))
+
+    assert json.loads(route.calls[0].request.content) == {
+        "flagKey": "k",
+        "context": {"tags": ["beta", "internal"]},
+    }
+    await c.aclose()
+
+
+@respx.mock
 async def test_async_evaluate_raises_flag_not_found() -> None:
     respx.get(url__regex=ENDPOINT_REGEX).mock(return_value=httpx.Response(404))
     c = _client()
@@ -230,6 +262,17 @@ def test_retries_on_transient_error(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _client(retries=1, retry_delay=0).evaluate("k")
     assert result.value is True
     assert route.call_count == 2
+
+
+@respx.mock
+def test_structured_context_retries_with_the_same_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    route = respx.post(url__regex=ENDPOINT_REGEX).mock(side_effect=[httpx.Response(500), _ok()])
+
+    _client(retries=1, retry_delay=0).evaluate("k", EvaluationContext(attributes={"tags": ["beta"]}))
+
+    assert route.call_count == 2
+    assert route.calls[0].request.content == route.calls[1].request.content
 
 
 @respx.mock

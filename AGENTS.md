@@ -4,7 +4,7 @@
 
 Cloudflare Flagship SDKs — OpenFeature-compatible SDKs for Cloudflare's Flagship feature flag platform.
 
-This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The TypeScript SDK is the recommended SDK, especially for Cloudflare Workers because it supports the native Flagship Workers binding. The Python and Go SDKs support HTTP evaluation only.
+This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The TypeScript SDK is the recommended SDK, especially for Cloudflare Workers because it supports the native Flagship Workers binding. The Python, Go, and Rust SDKs support HTTP evaluation only.
 
 ## Repository Structure
 
@@ -37,6 +37,12 @@ sdks/
     examples/        # OpenFeature usage examples
     go.mod           # Go module metadata
 
+  rust/              # cloudflare-flagship (crates.io) — OpenFeature provider SDK (HTTP only)
+    src/             # Client, provider, context, cache, local evaluator, hooks, with inline unit tests
+    examples/        # Remote and local OpenFeature examples
+    Cargo.toml       # Crate metadata, features, and MSRV
+    Cargo.lock       # Rust dependency lockfile
+
 .changeset/          # Changeset config and pending changesets
 .github/             # CI workflows (pull-request, release, publish-pypi, bonk, semgrep), issue templates
 ```
@@ -47,7 +53,7 @@ sdks/
 pnpm install        # install all workspace dependencies
 ```
 
-Requires Node 22+ and pnpm 10+.
+Requires Node 22+ and pnpm 12+.
 
 ## Commands
 
@@ -62,7 +68,7 @@ Run from the repo root:
 | `pnpm run format`    | Format all files with oxfmt                        |
 | `pnpm run typecheck` | TypeScript type checking across packages           |
 
-Root pnpm commands cover the repo-level TypeScript/JavaScript workspace. Python checks are run separately from `sdks/python/`.
+Root pnpm commands cover the repo-level TypeScript/JavaScript workspace. Python, Go, and Rust checks are run separately from their SDK directories.
 
 Package-level (run from `sdks/typescript/`):
 
@@ -90,6 +96,15 @@ Go SDK (run from `sdks/go/`):
 | `gofmt -w .`    | Format Go files   |
 | `go test ./...` | Run Go tests      |
 | `go vet ./...`  | Run Go vet checks |
+
+Rust SDK (run from `sdks/rust/`):
+
+| Command                                                             | What it does                 |
+| ------------------------------------------------------------------- | ---------------------------- |
+| `cargo fmt --check`                                                 | Check Rust formatting        |
+| `cargo clippy --locked --all-targets --all-features -- -D warnings` | Run Clippy                   |
+| `cargo test --locked --all-features`                                | Run Rust tests               |
+| `cargo publish --dry-run --locked`                                  | Package and verify the crate |
 
 ## SDK Architecture
 
@@ -130,6 +145,15 @@ The Go SDK is published through Go modules at `github.com/cloudflare/flagship/sd
 - Built-in `LoggingHook` and `TelemetryHook` mirror the other SDK hook conveniences.
 - Native Cloudflare Workers binding mode is not available in Go.
 
+### Rust
+
+The Rust SDK is published to crates.io as `cloudflare-flagship` and supports HTTP evaluation only.
+
+- `FlagshipClient` handles endpoint construction, auth headers, retries, timeouts, and response parsing.
+- `FlagshipServerProvider` implements the `open-feature` 0.3 `FeatureProvider` trait, with remote, cached, and local evaluation.
+- `open-feature` 0.3 has no provider initialization, shutdown, or event callbacks and never passes a default value to the provider. Local providers are started and stopped explicitly, and disabled flags resolve to the served value.
+- Native Cloudflare Workers binding mode is not available in Rust.
+
 ## Code Standards
 
 ### TypeScript
@@ -152,6 +176,8 @@ Config in `.oxfmtrc.json`: tabs, single quotes, semicolons, 140 print width.
 Python files under `sdks/python/**` are excluded from oxfmt and formatted with Ruff.
 
 Go files under `sdks/go/**` are formatted with `gofmt`.
+
+Rust files under `sdks/rust/**` are formatted with `cargo fmt` and linted with Clippy (`pedantic`, warnings denied in CI).
 
 ### Python
 
@@ -182,6 +208,13 @@ cd sdks/go
 go test ./...
 ```
 
+Rust tests run with Cargo. Unit tests live beside the code, and local evaluation tests run the shared `spec/local-evaluation/cases.json` cases from a copy in `sdks/rust/src/local/`:
+
+```bash
+cd sdks/rust
+cargo test --locked --all-features
+```
+
 ## Contributing
 
 ### Changesets
@@ -203,14 +236,16 @@ The release pipeline runs `.github/changeset-version.ts`, which:
    - `pyproject.toml` — updates `[project].version` (PEP 621, used by uv/hatch/flit/pdm and Poetry 2.0+) and/or `[tool.poetry].version` (legacy Poetry 1.x), whichever fields are present. Fails if neither exists.
    - `Cargo.toml` — updates `[package].version` only. Dependency `version` fields are left untouched.
    - `go.mod` — no file sync. Go modules are versioned exclusively via git tags.
-5. Deletes duplicate changelogs generated for private SDK packages.
-6. Re-runs `pnpm install` to refresh the lockfile.
+5. Refreshes native lockfiles: `uv lock` for Python and `cargo update --workspace` for Rust, which compiles nothing.
+6. Replaces each private SDK's `CHANGELOG.md` with a version-only stub, so the release PR has no duplicate per-language sections.
+7. Re-runs `pnpm install` to refresh the lockfile.
 
 After merge the same workflow compares each SDK directory against the parent of the release commit, starting at that SDK's previous publication tag. This keeps failed native publishes eligible for the next release. Detection reports nothing unless the pushed commit merged the release PR — recognised by the `chore(release): version SDK packages` subject on the commit or, for merge commits, its second parent. Ordinary pushes to `main` also have an empty changeset queue, so without that gate they would publish an unbumped version and stamp an SDK tag on a non-release commit, poisoning the baseline for later changes. Within a release, detection skips those same release commits and ignores documentation, examples, licenses, tests, lockfiles, and generated `CHANGELOG.md` files, so only source or package/build configuration changes trigger publication. It then:
 
 - Publishes `@cloudflare/flagship` to npm only when `sdks/typescript/` changed.
 - Publishes to PyPI and creates `sdks/python/v*` only when publish-relevant files in `sdks/python/` changed, using trusted publishing (OIDC, no PyPI token).
 - Creates `sdks/go/v*` only when publish-relevant files in `sdks/go/` changed.
+- Publishes `cloudflare-flagship` to crates.io and creates `sdks/rust/v*` only when publish-relevant files in `sdks/rust/` changed, using trusted publishing (OIDC, no crates.io token) in the `crates-io` environment. A version already on crates.io is not republished, so a re-run only tags it.
 - Creates the canonical `@cloudflare/flagship@*` tag for every release, even when npm is skipped, so versions and future change detection retain one shared baseline.
 
 Every releasable SDK must have a `package.json` so Changesets can discover and version it, even if the actual package is published to PyPI, crates.io, Go modules, or another registry. Non-npm SDK packages should use `private: true` and keep their native manifest beside it:
@@ -220,6 +255,13 @@ Every releasable SDK must have a `package.json` so Changesets can discover and v
 | Python   | `pyproject.toml` | `[project].version` and/or `[tool.poetry].version`, whichever are present |
 | Rust     | `Cargo.toml`     | `[package].version` only — dependency versions are not touched            |
 | Go       | `go.mod`         | No file sync — version is the git tag only                                |
+
+crates.io can only configure trusted publishing for a crate that already exists. Before the first Rust release, `publish-rust` fails with instructions instead of publishing. To bootstrap:
+
+1. Check out the release commit and run `cargo publish --locked` from `sdks/rust/` with a scoped crates.io token.
+2. Run `cargo owner --add github:cloudflare:rust-crate-owners cloudflare-flagship`.
+3. On crates.io, add a trusted publisher for repository `cloudflare/flagship`, workflow `release.yml`, and environment `crates-io`.
+4. Re-run the failed `publish-rust` job. It skips the existing version and pushes `sdks/rust/v*`.
 
 PR CI runs `pnpm run changeset:validate` (the `Changesets` job) so malformed, non-SDK, or `none`-bumped SDK changesets fail before merge.
 
@@ -232,6 +274,8 @@ Changesets should remain the only release intent file. Do not add release-please
 - **Repo-wide:** changeset validation.
 - **TypeScript:** format, lint, typecheck, test, build, publish preview (`pkg-pr-new`).
 - **Python:** format, lint, typecheck, test, build.
+- **Go:** format, vet, test.
+- **Rust:** format, Clippy, tests across TLS feature sets, docs, and a publish dry run on stable, plus check and test on the 1.88 MSRV.
 
 A `CI Success` aggregator job depends on all of the above and is the single required status check for branch protection on `main`.
 
@@ -247,6 +291,7 @@ Publishing is split across two workflows; `pull-request.yml` is the source of tr
 - Run `pnpm run check` before considering work done
 - For Python SDK changes, also run `uv run ruff format --check .`, `uv run ruff check .`, `uv run --group dev ty check`, and `uv run --group dev pytest` from `sdks/python/`
 - For Go SDK changes, also run `gofmt`, `go vet ./...`, and `go test ./...` from `sdks/go/`
+- For Rust SDK changes, also run `cargo fmt --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-features` from `sdks/rust/`
 - Keep OpenFeature peer dependencies optional
 - Use `import type` for type-only imports
 

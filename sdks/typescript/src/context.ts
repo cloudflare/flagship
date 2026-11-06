@@ -1,4 +1,85 @@
 import type { EvaluationContext } from '@openfeature/server-sdk';
+import { FlagshipError, FlagshipErrorCode } from './types.js';
+
+export type NormalizedContextValue =
+	| string
+	| number
+	| boolean
+	| null
+	| NormalizedContextValue[]
+	| { [key: string]: NormalizedContextValue };
+
+export interface NormalizedEvaluationContext {
+	context: Record<string, NormalizedContextValue>;
+	requiresPost: boolean;
+}
+
+export function normalizeEvaluationContext(context: EvaluationContext): NormalizedEvaluationContext {
+	const normalized: Record<string, NormalizedContextValue> = {};
+	let requiresPost = false;
+	const ancestors = new WeakSet<object>();
+
+	for (const [key, value] of Object.entries(context)) {
+		if (value === undefined) continue;
+		const result = normalizeContextValue(value, key, ancestors);
+		setOwn(normalized, key, result.value);
+		requiresPost ||= result.structured;
+	}
+
+	return { context: normalized, requiresPost };
+}
+
+function normalizeContextValue(
+	value: unknown,
+	path: string,
+	ancestors: WeakSet<object>,
+): { value: NormalizedContextValue; structured: boolean } {
+	if (value === null) return { value: null, structured: true };
+	if (typeof value === 'string' || typeof value === 'boolean') return { value, structured: false };
+	if (typeof value === 'number') {
+		if (Number.isFinite(value)) return { value, structured: false };
+		throw invalidContext(path, 'numbers must be finite');
+	}
+	if (value instanceof Date) {
+		if (Number.isNaN(value.getTime())) throw invalidContext(path, 'date is invalid');
+		return { value: value.toISOString(), structured: false };
+	}
+	if (typeof value !== 'object') throw invalidContext(path, `unsupported value type '${typeof value}'`);
+	if (ancestors.has(value)) throw invalidContext(path, 'cyclic values are not supported');
+
+	ancestors.add(value);
+	try {
+		if (Array.isArray(value)) {
+			return {
+				value: value.map((item, index) => {
+					if (item === undefined) throw invalidContext(`${path}[${index}]`, 'undefined is not supported inside arrays');
+					return normalizeContextValue(item, `${path}[${index}]`, ancestors).value;
+				}),
+				structured: true,
+			};
+		}
+
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) throw invalidContext(path, 'only plain objects are supported');
+
+		const object: Record<string, NormalizedContextValue> = {};
+		for (const [key, item] of Object.entries(value)) {
+			if (item === undefined) throw invalidContext(`${path}.${key}`, 'undefined is not supported inside objects');
+			setOwn(object, key, normalizeContextValue(item, `${path}.${key}`, ancestors).value);
+		}
+		return { value: object, structured: true };
+	} finally {
+		ancestors.delete(value);
+	}
+}
+
+function setOwn(target: Record<string, NormalizedContextValue>, key: string, value: NormalizedContextValue): void {
+	Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+function invalidContext(path: string, detail: string): FlagshipError {
+	return new FlagshipError(`Evaluation context key "${path}" is invalid: ${detail}`, FlagshipErrorCode.INVALID_CONTEXT);
+}
 
 /**
  * Utility for transforming OpenFeature evaluation context

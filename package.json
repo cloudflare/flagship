@@ -26,21 +26,21 @@
 		"release:test": "tsx --test .github/release-sdks.test.ts .github/publish-nuget.test.ts"
 	},
 	"devDependencies": {
-		"@changesets/changelog-github": "^0.7.0",
-		"@changesets/cli": "^2.31.1",
-		"@changesets/read": "^0.6.7",
-		"@changesets/types": "^6.1.0",
-		"@decimalturn/toml-patch": "^2.1.0",
+		"@changesets/changelog-github": "^1.0.1",
+		"@changesets/cli": "^3.0.3",
+		"@changesets/read": "^1.0.1",
+		"@changesets/types": "^7.0.0",
+		"@decimalturn/toml-patch": "^3.3.1",
 		"@manypkg/get-packages": "^3.1.0",
-		"@types/node": "^24.13.3",
+		"@types/node": "^24.19.2",
 		"husky": "^9.1.7",
-		"lint-staged": "^17.3.0",
-		"oxfmt": "^0.62.0",
-		"oxlint": "^1.77.0",
-		"pkg-pr-new": "^0.0.87",
+		"lint-staged": "^17.6.0",
+		"oxfmt": "^0.74.0",
+		"oxlint": "^1.89.0",
+		"pkg-pr-new": "^0.0.92",
 		"sherif": "^1.13.0",
-		"tsx": "^4.23.8",
-		"typescript": "^5.9.3"
+		"tsx": "^4.23.15",
+		"typescript": "^7.0.2"
 	},
 	"overrides": {},
 	"lint-staged": {

@@ -18,12 +18,13 @@ npm install @cloudflare/flagship @openfeature/web-sdk
 
 ## Server-side usage
 
-`FlagshipServerProvider` supports two modes of operation:
+`FlagshipServerProvider` supports three modes of operation:
 
 - **Binding mode** (recommended for Cloudflare Workers) — evaluates flags via a wrangler binding (`env.FLAGS`). No HTTP overhead, no auth tokens.
 - **HTTP mode** — evaluates flags via HTTP requests to the Flagship API. Works in any server environment.
+- **Local evaluation mode** — downloads flag definitions once, evaluates in-process, and refreshes definitions lazily. Requires `localEvaluation: true` plus HTTP config.
 
-The constructor accepts a discriminated union: provide **either** a `binding` **or** HTTP config (`appId`/`endpoint`, `accountId`, etc.) — never both. Providing both throws immediately.
+The constructor accepts a discriminated union: provide **either** a `binding` **or** HTTP config (`appId`/`endpoint`, `accountId`, etc.) — never both. Providing both throws immediately. Local evaluation is HTTP-only and incompatible with `binding` and `cacheTtl`.
 
 ### Quick start — Cloudflare Workers
 
@@ -105,7 +106,7 @@ Use the `*Details` methods when you need the full resolution result — reason, 
 const details = await client.getBooleanDetails('my-flag', false, context);
 
 console.log(details.value); // resolved value (or default on error)
-console.log(details.reason); // 'TARGETING_MATCH' | 'SPLIT' | 'DEFAULT' | 'DISABLED' | 'ERROR'
+console.log(details.reason); // 'STATIC' | 'TARGETING_MATCH' | 'SPLIT' | 'DEFAULT' | 'DISABLED' | 'ERROR'
 console.log(details.variant); // variation key, e.g. 'on', 'off', 'v2'
 console.log(details.errorCode); // set on error, e.g. 'FLAG_NOT_FOUND', 'TYPE_MISMATCH'
 console.log(details.errorMessage); // human-readable description of the error
@@ -161,8 +162,14 @@ new FlagshipServerProvider({
   // fetch: env.FLAGS_SERVICE.fetch.bind(env.FLAGS_SERVICE),
 
   // Caching — opt-in, off by default. See "Caching" below.
+  // Incompatible with localEvaluation.
   cacheTtl: 30000, // ms; enables the cache when > 0
   cacheMaxSize: 1000, // max cached entries (default: 1000)
+
+  // Local evaluation — download definitions once and evaluate in-process.
+  // Requires a token with app **read** permission. See "Local evaluation" below.
+  // localEvaluation: true,
+  // refreshInterval: 30000, // ms between lazy background refreshes (default 30000)
 });
 ```
 
@@ -207,6 +214,47 @@ new FlagshipServerProvider({
 | Any error (not found, timeout, etc.)          | `ERROR`                            | no                |
 
 Each entry is keyed by flag key, expected type, and the **full evaluation context**, so distinct contexts never share a cached value. Because freshness is TTL-based, a flag change in Flagship takes effect once the entry expires (up to `cacheTtl` later). The cache is per-provider-instance and is cleared on `onClose()`.
+
+### Local evaluation
+
+When `localEvaluation: true`, the provider fetches flag definitions during `initialize()` (blocking), evaluates flags in-process, and refreshes definitions lazily on evaluate once `refreshInterval` has elapsed. Refresh uses `If-None-Match` / `304`. Failures keep the last good snapshot and emit `PROVIDER_STALE`; the next successful refresh emits `PROVIDER_READY`. An initial fetch that fails rejects `initialize()`, with `PROVIDER_FATAL` on a 401 or 403.
+
+```typescript
+new FlagshipServerProvider({
+  appId: 'your-app-id',
+  accountId: 'your-account-id', // required — rollout hash seed
+  authToken: 'your-read-token', // app **read** permission
+  localEvaluation: true,
+  refreshInterval: 30_000, // default 30_000
+});
+```
+
+| Option            | Type      | Default  | Description                                                            |
+| ----------------- | --------- | -------- | ---------------------------------------------------------------------- |
+| `localEvaluation` | `boolean` | `false`  | Enable in-process evaluation from downloaded definitions.              |
+| `refreshInterval` | `number`  | `30_000` | Minimum ms between background definition refreshes (lazy on evaluate). |
+
+| Constraint                           | Behaviour                                                  |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `localEvaluation` + `binding`        | Throws at construction                                     |
+| `localEvaluation` + `cacheTtl`       | Throws at construction                                     |
+| Missing `accountId`                  | Throws at construction                                     |
+| `endpoint` not ending in `/evaluate` | Throws at construction (definitions URL cannot be derived) |
+
+Error mapping in local mode:
+
+| Condition                                   | OpenFeature error    |
+| ------------------------------------------- | -------------------- |
+| Flag key not in snapshot                    | `FLAG_NOT_FOUND`     |
+| Missing / invalid variation on the flag     | `PARSE_ERROR`        |
+| No snapshot yet (before init / after close) | `PROVIDER_NOT_READY` |
+| Wrong type vs requested OpenFeature type    | `TYPE_MISMATCH`      |
+
+Notes:
+
+- Local evaluations do **not** appear in server-side analytics.
+- Context is normalized with the same rules as HTTP mode (dates → ISO strings). Server request-size limits are **not** re-applied locally — a known difference from the network path.
+- Reason `STATIC` is returned when a flag has no rules (also surfaced in HTTP mode when the API returns it).
 
 ### Cloudflare Workers example (binding)
 
@@ -266,7 +314,7 @@ export default {
 
 ## Client-side usage
 
-The `FlagshipClientProvider` is designed for browsers and other static-context environments. The OpenFeature web SDK requires synchronous flag resolution, so this provider pre-fetches a configured set of flags whenever the evaluation context changes and serves them from an in-memory cache.
+The `FlagshipClientProvider` is designed for browsers and other static-context environments. The OpenFeature web SDK requires synchronous flag resolution, so this provider evaluates every flag for the current context in one [OFREP](https://github.com/open-feature/protocol) bulk request whenever the context changes and serves the results from an in-memory cache.
 
 ### Basic usage
 
@@ -279,13 +327,11 @@ await OpenFeature.setProviderAndWait(
     appId: 'your-app-id',
     accountId: 'your-account-id',
     authToken: 'your-token',
-    prefetchFlags: ['dark-mode', 'welcome-message', 'max-uploads'],
     logging: true, // log fetch errors and cache misses to the console
   }),
 );
 
-// Setting context triggers a pre-fetch of all configured flags.
-// Flags are fetched for the new context before the promise resolves.
+// Setting context evaluates all flags for the new context before the promise resolves.
 await OpenFeature.setContext({
   targetingKey: 'user-123',
   plan: 'premium',
@@ -301,41 +347,54 @@ const uploads = client.getNumberValue('max-uploads', 5);
 
 ### Cache behavior
 
-| Situation                                    | `reason` | `errorCode`      | Value returned |
-| -------------------------------------------- | -------- | ---------------- | -------------- |
-| Flag was pre-fetched and cached              | `CACHED` | —                | Cached value   |
-| Flag not in `prefetchFlags`, or fetch failed | `ERROR`  | `FLAG_NOT_FOUND` | Default value  |
-| Cached value's type doesn't match the call   | `ERROR`  | `TYPE_MISMATCH`  | Default value  |
+| Situation                                  | `reason`              | `errorCode`             | Value returned  |
+| ------------------------------------------ | --------------------- | ----------------------- | --------------- |
+| Flag evaluated successfully                | The evaluation reason | —                       | Evaluated value |
+| Flag is disabled                           | `DISABLED`            | —                       | Default value   |
+| Flag failed to evaluate on the server      | `ERROR`               | The server's error code | Default value   |
+| Flag missing from the response             | `ERROR`               | `FLAG_NOT_FOUND`        | Default value   |
+| Cached value's type doesn't match the call | `ERROR`               | `TYPE_MISMATCH`         | Default value   |
 
-When the context changes, the entire cache is **cleared before re-fetching** all `prefetchFlags`. A failed re-fetch returns `FLAG_NOT_FOUND` rather than serving stale values from the previous context.
+When the context changes, the entire cache is **cleared before re-evaluating**. A failed request returns `FLAG_NOT_FOUND` rather than serving stale values from the previous context, and reports `PROVIDER_ERROR` (`PROVIDER_FATAL` on a 401 or 403).
+
+The bulk request requires an endpoint ending in `/evaluate`, or `appId` and `accountId`.
+
+### Polling for changes
+
+Set `pollInterval` (milliseconds) to re-evaluate every flag for the current context in the background. When any result differs, the provider replaces the cache and emits `PROVIDER_CONFIGURATION_CHANGED` with the changed keys in `flagsChanged`. A failed refresh keeps serving the cached values, emits `PROVIDER_STALE` once, and is retried on the next interval; the next successful refresh emits `PROVIDER_READY`. Polling is off by default and stops when the provider is closed.
+
+```typescript
+new FlagshipClientProvider({ ..., pollInterval: 30_000 });
+```
 
 ### Configuration options
 
-| Option          | Type          | Default                      | Description                                           |
-| --------------- | ------------- | ---------------------------- | ----------------------------------------------------- |
-| `appId`         | `string`      | —                            | Flagship app ID (mutually exclusive with `endpoint`)  |
-| `accountId`     | `string`      | —                            | Account ID (required with `appId`)                    |
-| `baseUrl`       | `string`      | `https://api.cloudflare.com` | Base URL override (only used with `appId`)            |
-| `endpoint`      | `string`      | —                            | Full evaluation URL (mutually exclusive with `appId`) |
-| `authToken`     | `string`      | —                            | Bearer token — adds `Authorization: Bearer` header    |
-| `logging`       | `boolean`     | `false`                      | Log fetch errors and cache misses to the console      |
-| `prefetchFlags` | `string[]`    | `[]`                         | Flag keys to fetch on init and every context change   |
-| `timeout`       | `number`      | `5000`                       | Request timeout in ms                                 |
-| `retries`       | `number`      | `1`                          | Retry attempts (max 10)                               |
-| `retryDelay`    | `number`      | `1000`                       | Delay between retries in ms (max 30 000)              |
-| `fetchOptions`  | `RequestInit` | `{}`                         | Custom fetch options (headers, credentials, etc.)     |
+| Option         | Type          | Default                      | Description                                           |
+| -------------- | ------------- | ---------------------------- | ----------------------------------------------------- |
+| `appId`        | `string`      | —                            | Flagship app ID (mutually exclusive with `endpoint`)  |
+| `accountId`    | `string`      | —                            | Account ID (required with `appId`)                    |
+| `baseUrl`      | `string`      | `https://api.cloudflare.com` | Base URL override (only used with `appId`)            |
+| `endpoint`     | `string`      | —                            | Full evaluation URL (mutually exclusive with `appId`) |
+| `authToken`    | `string`      | —                            | Bearer token — adds `Authorization: Bearer` header    |
+| `logging`      | `boolean`     | `false`                      | Log fetch errors and cache misses to the console      |
+| `timeout`      | `number`      | `5000`                       | Request timeout in ms                                 |
+| `retries`      | `number`      | `1`                          | Retry attempts (max 10)                               |
+| `retryDelay`   | `number`      | `1000`                       | Delay between retries in ms (max 30 000)              |
+| `fetchOptions` | `RequestInit` | `{}`                         | Custom fetch options (headers, credentials, etc.)     |
+| `pollInterval` | `number`      | disabled                     | Background flag refresh interval in ms                |
 
 ## Evaluation context
 
-Context attributes are serialized as URL query parameters and sent with each evaluation request. The following value types are supported:
+Primitive-only context is serialized as URL query parameters. Context containing objects, arrays, or `null` is sent as a JSON request body, which adds a CORS preflight request in browsers.
 
-| Type                          | Serialization                                                                                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `string`, `number`, `boolean` | Passed directly as a string                                                                                                                                    |
-| `Date`                        | Converted to ISO 8601                                                                                                                                          |
-| Objects, arrays               | **Not supported** — the provider throws `INVALID_CONTEXT`. Keys with complex values are dropped with a console warning if using `ContextTransformer` directly. |
+| Type                          | Serialization                                                |
+| ----------------------------- | ------------------------------------------------------------ |
+| `string`, `number`, `boolean` | Preserved; primitive-only context uses GET query parameters  |
+| `Date`                        | Recursively converted to ISO 8601 strings                    |
+| Objects, arrays, `null`       | Preserved recursively; evaluations use POST with a JSON body |
+| Other values, cyclic values   | Rejected before transport with `INVALID_CONTEXT`             |
 
-`targetingKey` is the standard OpenFeature field for identifying the evaluation subject (user ID, session ID, etc.) and is treated like any other attribute.
+`targetingKey` is the standard field for identifying the evaluation subject (user ID, session ID, etc.) and is treated like any other attribute.
 
 ## Authentication
 
@@ -356,7 +415,7 @@ new FlagshipServerProvider({ ..., logging: true });
 new FlagshipClientProvider({ ..., logging: true });
 ```
 
-When enabled, the server provider logs via the OpenFeature-injected `Logger` (debug on evaluation, warn on type mismatch, error on failures). The client provider logs `console.warn` for any flag that fails to fetch and for any cache miss at resolution time.
+When enabled, the server provider logs via the OpenFeature-injected `Logger` (debug on evaluation, warn on type mismatch, error on failures). The client provider logs `console.warn` when the bulk request fails and for any cache miss at resolution time.
 
 > Note: `logging` only controls Flagship SDK logs. OpenFeature's own framework-level logs are controlled separately via `OpenFeature.setLogger(myLogger)`.
 
@@ -409,13 +468,13 @@ if (details.errorCode) {
 
 ### Error codes
 
-| Code              | Cause                                                                           |
-| ----------------- | ------------------------------------------------------------------------------- |
-| `FLAG_NOT_FOUND`  | Flag key does not exist (HTTP 404), or not in `prefetchFlags` (client provider) |
-| `TYPE_MISMATCH`   | The flag's resolved value type does not match the requested type                |
-| `INVALID_CONTEXT` | The evaluation context contains objects or arrays                               |
-| `PARSE_ERROR`     | The API response was not a valid evaluation response                            |
-| `GENERAL`         | Network error, timeout, caller abort, or any other transient failure            |
+| Code              | Cause                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| `FLAG_NOT_FOUND`  | Flag key does not exist (HTTP 404), or missing from the bulk response (client provider) |
+| `TYPE_MISMATCH`   | The flag's resolved value type does not match the requested type                        |
+| `INVALID_CONTEXT` | The evaluation context contains objects or arrays                                       |
+| `PARSE_ERROR`     | The API response was not a valid evaluation response                                    |
+| `GENERAL`         | Network error, timeout, caller abort, or any other transient failure                    |
 
 ## Hooks
 
@@ -485,7 +544,7 @@ await OpenFeature.setProviderAndWait(provider);
 
 **Server provider (binding mode):** Initialization does not call binding methods. Binding evaluation requests happen only when resolving flags.
 
-**Client provider:** During initialization, the provider fetches all `prefetchFlags` using `Promise.allSettled`. Even if some or all fetches fail, the provider transitions to `READY` status. Failed flags return `FLAG_NOT_FOUND` when resolved.
+**Client provider:** During initialization, the provider evaluates every flag in one bulk request. If the request fails, `initialize()` rejects and the provider reports `PROVIDER_ERROR` (`PROVIDER_FATAL` on a 401 or 403). `onContextChange` behaves the same way.
 
 To shut down providers and release resources:
 
@@ -501,7 +560,7 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
 **`@cloudflare/flagship`** (core — no OpenFeature dependency):
 
 - `FlagshipClient` — HTTP client with retry, timeout, AbortController
-- `ContextTransformer` — converts evaluation context to query parameters
+- `ContextTransformer` — normalizes context and selects query or JSON transport
 - `FlagshipError` — error class with `code`, `cause`, and `retryable` properties
 - `FlagshipErrorCode` — enum: `NETWORK_ERROR`, `TIMEOUT_ERROR`, `ABORTED`, `PARSE_ERROR`, `INVALID_CONTEXT`
 - `isBindingOptions()` — type guard for binding options
@@ -526,15 +585,15 @@ Each sub-path re-exports core utilities alongside its provider-specific classes.
   FlagshipServerProvider             — OpenFeature Provider interface (server)
     ├─ TTL + LRU cache (opt-in)      — keyed by flag key, type, and context
     ├─ Binding mode (Workers)        — delegates to env.FLAGS via RPC
-    │   EvaluationContext → Record<string, string|number|boolean>
+    │   EvaluationContext → recursive JSON values over RPC
     └─ HTTP mode (Node.js, etc.)     — delegates to FlagshipClient
         FlagshipClient               — HTTP client with retry + timeout
-          ContextTransformer         — EvaluationContext → query parameters
+          ContextTransformer         — primitive context → GET; structured context → JSON POST
     LoggingHook / TelemetryHook      — OpenFeature hooks
 
 @cloudflare/flagship/web
   FlagshipClientProvider             — OpenFeature Provider interface (client)
-    FlagshipClient                   — HTTP client (same as server)
-      ContextTransformer             — EvaluationContext → query parameters
+    FlagshipClient                   — HTTP client (same as server), bulk OFREP evaluation
+      ContextTransformer             — primitive context → GET; structured context → JSON POST
     In-memory cache                  — synchronous resolution layer
 ```

@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const SDKS = ['typescript', 'python', 'go', 'rust'] as const;
+const SDKS = ['typescript', 'python', 'go', 'rust', 'dotnet'] as const;
 const RELEASE_COMMIT_SUBJECT = 'chore(release): version SDK packages';
 const RELEASE_COMMIT_PATTERN = `^${RELEASE_COMMIT_SUBJECT}`;
 // Python 0.4.0 was published to PyPI from this canonical release. Until the
@@ -13,7 +13,7 @@ const PYTHON_INITIAL_BASELINE = '@cloudflare/flagship@0.4.0';
 const RUST_INITIAL_BASELINE = '@cloudflare/flagship@0.6.0';
 type Sdk = (typeof SDKS)[number];
 export type SdkChanges = Record<Sdk, boolean>;
-const NO_CHANGES: SdkChanges = { typescript: false, python: false, go: false, rust: false };
+const NO_CHANGES: SdkChanges = { typescript: false, python: false, go: false, rust: false, dotnet: false };
 
 export function classifySdkChanges(paths: string[]): SdkChanges {
 	const relative = (sdk: Sdk): string[] =>
@@ -21,12 +21,17 @@ export function classifySdkChanges(paths: string[]): SdkChanges {
 	const typescript = relative('typescript');
 	const python = relative('python');
 	const go = relative('go');
+	const dotnet = relative('dotnet');
 	const rust = relative('rust');
 
 	return {
 		typescript: typescript.some((path) => path.startsWith('src/') || ['package.json', 'tsconfig.json', 'tsdown.config.ts'].includes(path)),
 		python: python.some((path) => path.startsWith('src/') || path === 'pyproject.toml'),
 		go: go.some((path) => (!path.includes('/') && path.endsWith('.go') && !path.endsWith('_test.go')) || path === 'go.mod'),
+		dotnet: dotnet.some(
+			(path) =>
+				path.startsWith('src/') || ['Directory.Build.props', 'Directory.Build.targets', 'global.json', 'NuGet.Config'].includes(path),
+		),
 		rust: rust.some((path) => path.startsWith('src/') || path === 'Cargo.toml'),
 	};
 }
@@ -36,15 +41,24 @@ export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): S
 
 	const releaseParent = `${releaseCommit}^1`;
 	const canonicalTag = describeTag(cwd, '@cloudflare/flagship@*', releaseParent);
-	const baselines: Record<Sdk, string> = {
+	const baselines: Record<Sdk, string | undefined> = {
 		typescript: canonicalTag,
 		python: findSdkTag(cwd, 'sdks/python/v*', releaseParent) ?? describeTag(cwd, PYTHON_INITIAL_BASELINE, releaseParent),
 		go: findSdkTag(cwd, 'sdks/go/v*', releaseParent) ?? canonicalTag,
+		// No successful NuGet publication yet: retain eligibility even if releases
+		// advanced while NUGET_API_KEY was absent. Do not use the canonical tag.
+		dotnet: findSdkTag(cwd, 'sdks/dotnet/v*', releaseParent),
 		rust: findSdkTag(cwd, 'sdks/rust/v*', releaseParent) ?? findSdkTag(cwd, RUST_INITIAL_BASELINE, releaseParent) ?? canonicalTag,
 	};
 
 	return Object.fromEntries(
-		SDKS.map((sdk) => [sdk, classifySdkChanges(changedPaths(cwd, baselines[sdk], releaseParent))[sdk]]),
+		SDKS.map((sdk) => {
+			const baseline = baselines[sdk];
+			const paths = baseline
+				? changedPaths(cwd, baseline, releaseParent)
+				: git(cwd, 'ls-tree', '-r', '--name-only', releaseParent, '--', `sdks/${sdk}/`).split('\n');
+			return [sdk, classifySdkChanges(paths)[sdk]];
+		}),
 	) as SdkChanges;
 }
 
@@ -56,7 +70,7 @@ export function publishCommands(changes: SdkChanges): ChangesetCommand[] {
 			['changeset', 'publish'],
 			['changeset', 'git-tag'],
 		];
-	if (changes.python || changes.go || changes.rust) return [['changeset', 'git-tag']];
+	if (changes.python || changes.go || changes.rust || changes.dotnet) return [['changeset', 'git-tag']];
 	return [];
 }
 

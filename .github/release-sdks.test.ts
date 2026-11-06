@@ -12,6 +12,7 @@ test('classifies changes by SDK directory', () => {
 		python: false,
 		go: true,
 		rust: true,
+		dotnet: false,
 	});
 });
 
@@ -23,7 +24,7 @@ test('ignores test-only changes', () => {
 			'sdks/go/client_test.go',
 			'sdks/rust/tests/client.rs',
 		]),
-		{ typescript: false, python: false, go: false, rust: false },
+		{ typescript: false, python: false, go: false, rust: false, dotnet: false },
 	);
 });
 
@@ -41,6 +42,7 @@ test('ignores examples, documentation, and licenses', () => {
 			python: false,
 			go: false,
 			rust: false,
+			dotnet: false,
 		},
 	);
 });
@@ -53,6 +55,7 @@ test('excludes generated changelogs', () => {
 			python: false,
 			go: false,
 			rust: false,
+			dotnet: false,
 		},
 	);
 });
@@ -65,6 +68,7 @@ test('includes package and build configuration changes but excludes lockfiles', 
 			python: true,
 			go: true,
 			rust: true,
+			dotnet: false,
 		},
 	);
 	assert.deepEqual(classifySdkChanges(['sdks/python/uv.lock', 'sdks/go/go.sum', 'sdks/rust/Cargo.lock', 'sdks/rust/package.json']), {
@@ -72,18 +76,19 @@ test('includes package and build configuration changes but excludes lockfiles', 
 		python: false,
 		go: false,
 		rust: false,
+		dotnet: false,
 	});
 });
 
 test('publishes npm only for TypeScript changes', () => {
-	assert.deepEqual(publishCommands({ typescript: true, python: false, go: false, rust: false }), [
+	assert.deepEqual(publishCommands({ typescript: true, python: false, go: false, rust: false, dotnet: false }), [
 		['changeset', 'publish'],
 		['changeset', 'git-tag'],
 	]);
-	assert.deepEqual(publishCommands({ typescript: false, python: true, go: false, rust: false }), [['changeset', 'git-tag']]);
-	assert.deepEqual(publishCommands({ typescript: false, python: false, go: true, rust: false }), [['changeset', 'git-tag']]);
-	assert.deepEqual(publishCommands({ typescript: false, python: false, go: false, rust: true }), [['changeset', 'git-tag']]);
-	assert.deepEqual(publishCommands({ typescript: false, python: false, go: false, rust: false }), []);
+	assert.deepEqual(publishCommands({ typescript: false, python: true, go: false, rust: false, dotnet: false }), [['changeset', 'git-tag']]);
+	assert.deepEqual(publishCommands({ typescript: false, python: false, go: true, rust: false, dotnet: false }), [['changeset', 'git-tag']]);
+	assert.deepEqual(publishCommands({ typescript: false, python: false, go: false, rust: true, dotnet: false }), [['changeset', 'git-tag']]);
+	assert.deepEqual(publishCommands({ typescript: false, python: false, go: false, rust: false, dotnet: false }), []);
 });
 
 test('ignores mechanical SDK version changes in the release commit', () => {
@@ -92,7 +97,7 @@ test('ignores mechanical SDK version changes in the release commit', () => {
 	commit(repo, 'change python');
 	releaseCommit(repo, '0.2.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false, rust: false, dotnet: false });
 });
 
 test('reports no SDK changes after the release is tagged', () => {
@@ -105,7 +110,7 @@ test('reports no SDK changes after the release is tagged', () => {
 	commit(repo, 'update docs');
 	releaseCommit(repo, '0.3.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false, dotnet: false });
 });
 
 test('reports no changes when the head commit is not a release commit', () => {
@@ -117,7 +122,7 @@ test('reports no changes when the head commit is not a release commit', () => {
 	write(repo, 'README.md', 'unrelated\n');
 	commit(repo, 'docs: unrelated follow-up');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false, dotnet: false });
 });
 
 test('does not publish native SDKs for documentation changes', () => {
@@ -131,7 +136,7 @@ test('does not publish native SDKs for documentation changes', () => {
 	commit(repo, 'feat: change typescript');
 	releaseCommit(repo, '0.2.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: true, python: false, go: false, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: true, python: false, go: false, rust: false, dotnet: false });
 });
 
 test('uses the first parent of a merged release PR', () => {
@@ -144,7 +149,7 @@ test('uses the first parent of a merged release PR', () => {
 	git(repo, 'checkout', mainBranch);
 	git(repo, 'merge', '--no-ff', 'release', '-m', 'merge release PR');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: true, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: true, rust: false, dotnet: false });
 });
 
 test('fails safely when the canonical baseline tag is missing', () => {
@@ -168,7 +173,7 @@ test('retains unpublished SDK changes across canonical releases', () => {
 	commit(repo, 'prepare next release');
 	releaseCommit(repo, '0.3.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: true, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: true, rust: false, dotnet: false });
 });
 
 test('retains Python changes after an unsuccessful first publish without a Python tag', () => {
@@ -183,7 +188,7 @@ test('retains Python changes after an unsuccessful first publish without a Pytho
 	commit(repo, 'prepare next release');
 	releaseCommit(repo, '0.6.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false, rust: false, dotnet: false });
 });
 
 test('retains Rust changes after an unsuccessful first publish without a Rust tag', () => {
@@ -195,7 +200,7 @@ test('retains Rust changes after an unsuccessful first publish without a Rust ta
 	commit(repo, 'add rust sdk');
 	releaseCommit(repo, '0.7.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: true });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: true, dotnet: false });
 
 	// The 0.7.0 crates.io publish failed, so no Rust tag exists; a docs-only release still publishes Rust.
 	git(repo, 'tag', '@cloudflare/flagship@0.7.0');
@@ -203,7 +208,7 @@ test('retains Rust changes after an unsuccessful first publish without a Rust ta
 	commit(repo, 'prepare next release');
 	releaseCommit(repo, '0.8.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: true });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: true, dotnet: false });
 
 	git(repo, 'tag', '@cloudflare/flagship@0.8.0');
 	git(repo, 'tag', 'sdks/rust/v0.8.0');
@@ -211,7 +216,7 @@ test('retains Rust changes after an unsuccessful first publish without a Rust ta
 	commit(repo, 'prepare release after rust publish');
 	releaseCommit(repo, '0.9.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false, dotnet: false });
 });
 
 test('ignores release commits inside a stale SDK baseline window', () => {
@@ -225,7 +230,7 @@ test('ignores release commits inside a stale SDK baseline window', () => {
 	commit(repo, 'change typescript again');
 	releaseCommit(repo, '0.3.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: true, python: false, go: false, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: true, python: false, go: false, rust: false, dotnet: false });
 });
 
 test('ignores an SDK tag that is not reachable from the release parent', () => {
@@ -236,7 +241,81 @@ test('ignores an SDK tag that is not reachable from the release parent', () => {
 	git(repo, 'tag', '@cloudflare/flagship@0.2.0');
 	git(repo, 'tag', 'sdks/python/v0.2.0');
 
-	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false, rust: false });
+	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false, rust: false, dotnet: false });
+});
+
+test('classifies .NET source and build changes without publishing tests or docs', () => {
+	for (const path of [
+		'src/Cloudflare.Flagship/FlagshipClient.cs',
+		'src/Cloudflare.Flagship.OpenFeature/Cloudflare.Flagship.OpenFeature.csproj',
+		'Directory.Build.props',
+		'Directory.Build.targets',
+		'global.json',
+		'NuGet.Config',
+	]) {
+		assert.equal(classifySdkChanges([`sdks/dotnet/${path}`]).dotnet, true, path);
+	}
+	for (const path of [
+		'tests/Cloudflare.Flagship.Tests/ClientTests.cs',
+		'examples/ConsoleExample/Program.cs',
+		'README.md',
+		'PUBLISHING.md',
+		'CHANGELOG.md',
+		'LICENSE',
+		'package.json',
+		'Flagship.sln',
+		'packages.lock.json',
+	]) {
+		assert.equal(classifySdkChanges([`sdks/dotnet/${path}`]).dotnet, false, path);
+	}
+	assert.deepEqual(publishCommands({ typescript: false, python: false, go: false, rust: false, dotnet: true }), [['changeset', 'git-tag']]);
+});
+
+test('keeps the first NuGet publication eligible across releases without credentials', () => {
+	const repo = createRepository();
+	write(repo, 'sdks/dotnet/src/Cloudflare.Flagship/Client.cs', 'initial\n');
+	write(repo, 'sdks/dotnet/package.json', '{"version":"0.1.0"}\n');
+	commit(repo, 'add dotnet SDK');
+
+	assert.equal(detectSdkChanges('HEAD', repo).dotnet, false);
+	releaseCommit(repo, '0.2.0');
+	assert.equal(detectSdkChanges('HEAD', repo).dotnet, true);
+	git(repo, 'tag', '@cloudflare/flagship@0.2.0');
+
+	write(repo, 'README.md', 'next release\n');
+	commit(repo, 'update docs');
+	releaseCommit(repo, '0.3.0');
+	assert.equal(detectSdkChanges('HEAD', repo).dotnet, true);
+});
+
+test('only successful NuGet publication advances the .NET baseline', () => {
+	const repo = createRepository();
+	write(repo, 'sdks/dotnet/src/Cloudflare.Flagship/Client.cs', 'initial\n');
+	commit(repo, 'add dotnet SDK');
+	releaseCommit(repo, '0.2.0');
+	git(repo, 'tag', '@cloudflare/flagship@0.2.0');
+	git(repo, 'tag', 'sdks/dotnet/v0.2.0');
+
+	// Re-running the same release remains safe and eligible for --skip-duplicate.
+	assert.equal(detectSdkChanges('HEAD', repo).dotnet, true);
+	write(repo, 'sdks/dotnet/README.md', 'docs\n');
+	write(repo, 'sdks/dotnet/tests/ClientTests.cs', 'tests\n');
+	commit(repo, 'update dotnet docs and tests');
+	releaseCommit(repo, '0.3.0');
+	assert.equal(detectSdkChanges('HEAD', repo).dotnet, false);
+	git(repo, 'tag', '@cloudflare/flagship@0.3.0');
+
+	write(repo, 'sdks/dotnet/src/Cloudflare.Flagship/Client.cs', 'changed\n');
+	commit(repo, 'change dotnet');
+	releaseCommit(repo, '0.4.0');
+	assert.equal(detectSdkChanges('HEAD', repo).dotnet, true);
+	git(repo, 'tag', '@cloudflare/flagship@0.4.0');
+
+	// A failed or skipped push must survive a later canonical release.
+	write(repo, 'README.md', 'later release\n');
+	commit(repo, 'update docs');
+	releaseCommit(repo, '0.5.0');
+	assert.equal(detectSdkChanges('HEAD', repo).dotnet, true);
 });
 
 function createRepository(): string {
@@ -260,7 +339,7 @@ function createRepository(): string {
 
 /** Mirrors what `.github/changeset-version.ts` writes, including the release commit message. */
 function releaseCommit(repo: string, version: string): void {
-	for (const sdk of ['typescript', 'python', 'go', 'rust']) {
+	for (const sdk of ['typescript', 'python', 'go', 'rust', 'dotnet']) {
 		write(repo, `sdks/${sdk}/package.json`, `{"version":"${version}"}\n`);
 		write(repo, `sdks/${sdk}/CHANGELOG.md`, `## ${version}\n`);
 	}

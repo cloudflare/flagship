@@ -38,6 +38,7 @@ jobs:
       has_changesets: ${{ steps.changesets.outputs.has-changesets }}
       python_changed: ${{ steps.sdk-changes.outputs.python }}
       go_changed: ${{ steps.sdk-changes.outputs.go }}
+      dotnet_changed: ${{ steps.sdk-changes.outputs.dotnet }}
       rust_changed: ${{ steps.sdk-changes.outputs.rust }}
     permissions:
       id-token: write
@@ -94,12 +95,13 @@ jobs:
           TYPESCRIPT_SDK_CHANGED: ${{ steps.sdk-changes.outputs.typescript }}
           PYTHON_SDK_CHANGED: ${{ steps.sdk-changes.outputs.python }}
           GO_SDK_CHANGED: ${{ steps.sdk-changes.outputs.go }}
+          DOTNET_SDK_CHANGED: ${{ steps.sdk-changes.outputs.dotnet }}
           RUST_SDK_CHANGED: ${{ steps.sdk-changes.outputs.rust }}
 
       # changesets/action v2 only warns when a tag push fails. Release detection
       # needs this tag as its baseline, so fail the job if it was not pushed.
       - name: Verify canonical release tag
-        if: ${{ steps.changesets.outputs.has-changesets == 'false' && (steps.sdk-changes.outputs.typescript == 'true' || steps.sdk-changes.outputs.python == 'true' || steps.sdk-changes.outputs.go == 'true' || steps.sdk-changes.outputs.rust == 'true') }}
+        if: ${{ steps.changesets.outputs.has-changesets == 'false' && (steps.sdk-changes.outputs.typescript == 'true' || steps.sdk-changes.outputs.python == 'true' || steps.sdk-changes.outputs.go == 'true' || steps.sdk-changes.outputs.rust == 'true' || steps.sdk-changes.outputs.dotnet == 'true') }}
         run: |
           VERSION=$(node -p "require('./sdks/typescript/package.json').version")
           TAG="@cloudflare/flagship@${VERSION}"
@@ -145,6 +147,15 @@ jobs:
       contents: write
       id-token: write
 
+  publish-nuget:
+    name: Publish NuGet
+    needs: release
+    if: ${{ needs.release.outputs.has_changesets == 'false' && needs.release.outputs.dotnet_changed == 'true' }}
+    uses: ./.github/workflows/publish-nuget.yml
+    permissions:
+      contents: write
+    secrets:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
   publish-rust:
     name: Publish Rust SDK
     needs: release

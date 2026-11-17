@@ -28,9 +28,10 @@ type FlagshipClient struct {
 }
 
 type evaluationRequest struct {
-	method string
-	url    string
-	body   []byte
+	method       string
+	url          string
+	body         []byte
+	extraHeaders http.Header
 }
 
 // NewClient constructs a Flagship HTTP client.

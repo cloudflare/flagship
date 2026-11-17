@@ -1,9 +1,12 @@
 package flagship
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -15,6 +18,7 @@ import (
 var (
 	_ openfeature.FeatureProvider          = (*ServerProvider)(nil)
 	_ openfeature.ContextAwareStateHandler = (*ServerProvider)(nil)
+	_ openfeature.EventHandler             = (*ServerProvider)(nil)
 )
 
 // FlagshipServerProvider is an alias for ServerProvider kept for parity with
@@ -23,14 +27,15 @@ type FlagshipServerProvider = ServerProvider
 
 // ServerProvider is the OpenFeature provider for Cloudflare Flagship.
 type ServerProvider struct {
-	client          *FlagshipClient
-	hooks           []openfeature.Hook
-	cache           *responseCache
-	accountID       string
-	localEvaluation bool
-	refreshInterval time.Duration
-	logging         bool
-	logger          Logger
+	client              *FlagshipClient
+	hooks               []openfeature.Hook
+	cache               *responseCache
+	accountID           string
+	localEvaluation     bool
+	configurationEvents bool
+	refreshInterval     time.Duration
+	logging             bool
+	logger              Logger
 
 	// Local-evaluation lifecycle state.
 	//
@@ -45,6 +50,12 @@ type ServerProvider struct {
 	refreshMu     sync.Mutex
 	refreshCancel context.CancelFunc
 	refreshWG     sync.WaitGroup
+	events        chan openfeature.Event
+	stale         atomic.Bool
+	terminal      atomic.Bool
+	snapshotMu    sync.Mutex
+	remoteVersion string
+	localVersion  string
 }
 
 const (
@@ -83,6 +94,11 @@ func NewProvider(options Options) (*ServerProvider, error) {
 	if err != nil {
 		return nil, err
 	}
+	if options.ConfigurationEvents && !localEvaluation {
+		if _, err := client.bulkEndpoint(); err != nil {
+			return nil, err
+		}
+	}
 
 	var cache *responseCache
 	if options.CacheTTL > 0 {
@@ -90,14 +106,16 @@ func NewProvider(options Options) (*ServerProvider, error) {
 	}
 
 	provider := &ServerProvider{
-		client:          client,
-		hooks:           append([]openfeature.Hook(nil), options.Hooks...),
-		cache:           cache,
-		accountID:       options.AccountID,
-		localEvaluation: localEvaluation,
-		refreshInterval: refreshInterval,
-		logging:         options.Logging,
-		logger:          resolveLogger(options.Logger),
+		client:              client,
+		hooks:               append([]openfeature.Hook(nil), options.Hooks...),
+		cache:               cache,
+		accountID:           options.AccountID,
+		localEvaluation:     localEvaluation,
+		configurationEvents: options.ConfigurationEvents,
+		refreshInterval:     refreshInterval,
+		logging:             options.Logging,
+		logger:              resolveLogger(options.Logger),
+		events:              make(chan openfeature.Event, 16),
 	}
 	provider.etag.Store("")
 	return provider, nil
@@ -118,6 +136,10 @@ func (p *ServerProvider) Hooks() []openfeature.Hook {
 	return append([]openfeature.Hook(nil), p.hooks...)
 }
 
+func (p *ServerProvider) EventChannel() <-chan openfeature.Event {
+	return p.events
+}
+
 // Init initializes the provider without a cancellation-aware context.
 func (p *ServerProvider) Init(openfeature.EvaluationContext) error {
 	return p.InitWithContext(context.Background(), openfeature.NewTargetlessEvaluationContext(nil))
@@ -130,7 +152,7 @@ func (p *ServerProvider) Init(openfeature.EvaluationContext) error {
 // OpenFeature provider in ERROR. In HTTP mode this is a no-op: connectivity
 // and authentication errors are reported by individual flag evaluations.
 func (p *ServerProvider) InitWithContext(ctx context.Context, _ openfeature.EvaluationContext) error {
-	if !p.localEvaluation {
+	if !p.localEvaluation && !p.configurationEvents {
 		return nil
 	}
 
@@ -143,9 +165,15 @@ func (p *ServerProvider) InitWithContext(ctx context.Context, _ openfeature.Eval
 	epoch := p.epoch.Add(1)
 	p.snapshot.Store(nil)
 	p.etag.Store("")
+	p.stale.Store(false)
+	p.terminal.Store(false)
+	p.localVersion = ""
+	p.remoteVersion = ""
 
-	if err := p.fetchAndApplySnapshot(ctx, true, epoch); err != nil {
-		return err
+	if p.localEvaluation {
+		if err := p.fetchAndApplySnapshot(ctx, true, epoch); err != nil {
+			return err
+		}
 	}
 
 	// Only start the refresh loop if this initialize was not superseded by
@@ -157,10 +185,20 @@ func (p *ServerProvider) InitWithContext(ctx context.Context, _ openfeature.Eval
 	refreshCtx, cancel := context.WithCancel(context.Background())
 	p.refreshMu.Lock()
 	p.refreshCancel = cancel
-	p.refreshWG.Add(1)
+	if p.localEvaluation {
+		p.refreshWG.Add(1)
+	}
+	if p.configurationEvents {
+		p.refreshWG.Add(1)
+	}
 	p.refreshMu.Unlock()
 
-	go p.refreshLoop(refreshCtx, epoch)
+	if p.localEvaluation {
+		go p.refreshLoop(refreshCtx, epoch)
+	}
+	if p.configurationEvents {
+		go p.configurationEventsLoop(refreshCtx, epoch)
+	}
 	return nil
 }
 
@@ -172,13 +210,15 @@ func (p *ServerProvider) Shutdown() {
 // ShutdownWithContext releases provider resources, cancelling the local
 // evaluation refresh goroutine and waiting for it to exit (respecting ctx).
 func (p *ServerProvider) ShutdownWithContext(ctx context.Context) error {
-	if p.localEvaluation {
+	if p.localEvaluation || p.configurationEvents {
 		p.stopRefreshLocked()
 		// Bump the epoch so in-flight fetches observe a stale generation and
 		// refuse to write.
 		p.epoch.Add(1)
 		p.snapshot.Store(nil)
 		p.etag.Store("")
+		p.stale.Store(false)
+		p.terminal.Store(false)
 
 		done := make(chan struct{})
 		go func() {
@@ -229,8 +269,22 @@ func (p *ServerProvider) refreshLoop(ctx context.Context, epoch uint64) {
 }
 
 func (p *ServerProvider) fetchAndApplySnapshot(ctx context.Context, initial bool, epoch uint64) error {
+	return p.refreshSnapshot(ctx, initial, epoch, "", false, false)
+}
+
+func (p *ServerProvider) refreshSnapshot(ctx context.Context, initial bool, epoch uint64, hint string, unconditional, notification bool) error {
+	p.snapshotMu.Lock()
+	defer p.snapshotMu.Unlock()
 	currentETag, _ := p.etag.Load().(string)
-	result, err := p.client.fetchDefinitions(ctx, currentETag)
+	previous := p.snapshot.Load()
+	requestETag := currentETag
+	if unconditional {
+		requestETag = ""
+	}
+	result, err := p.client.fetchDefinitionsHint(ctx, requestETag, hint, false)
+	if err == nil && hint != "" && result.Version != hint {
+		err = fmt.Errorf("configuration version has not propagated")
+	}
 	// Stale session (closed or superseded by a newer initialize).
 	if p.epoch.Load() != epoch {
 		return nil
@@ -239,12 +293,32 @@ func (p *ServerProvider) fetchAndApplySnapshot(ctx context.Context, initial bool
 		if initial {
 			return err
 		}
+		if flagshipErr, ok := asFlagshipError(err); ok &&
+			(flagshipErr.StatusCode == http.StatusNotFound || flagshipErr.StatusCode == http.StatusUnauthorized || flagshipErr.StatusCode == http.StatusForbidden) {
+			p.snapshot.Store(nil)
+			p.etag.Store("")
+			p.localVersion = ""
+			p.stale.Store(true)
+			if p.terminal.CompareAndSwap(false, true) {
+				p.emit(openfeature.ProviderError, openfeature.ProviderEventDetails{
+					Message: "Configuration unavailable", ErrorCode: openfeature.ProviderFatalCode,
+				})
+			}
+			return err
+		}
+		if p.stale.CompareAndSwap(false, true) {
+			p.emit(openfeature.ProviderStale, openfeature.ProviderEventDetails{Message: err.Error()})
+		}
 		if p.logging {
 			p.logger.WarnContext(ctx, "Flagship definitions refresh failed; keeping last good snapshot", "error", err)
 		}
-		return nil
+		return err
 	}
 	if result.NotModified {
+		p.terminal.Store(false)
+		if p.stale.CompareAndSwap(true, false) {
+			p.emit(openfeature.ProviderReady, openfeature.ProviderEventDetails{})
+		}
 		if p.logging {
 			p.logger.DebugContext(ctx, "Flagship definitions not modified (304)")
 		}
@@ -259,13 +333,51 @@ func (p *ServerProvider) fetchAndApplySnapshot(ctx context.Context, initial bool
 	}
 	p.snapshot.Store(snap)
 	p.etag.Store(result.ETag)
+	p.terminal.Store(false)
+	previousVersion := p.localVersion
+	p.localVersion = result.Version
 	if result.ETag == "" && p.logging {
 		p.logger.DebugContext(ctx, "Flagship definitions response had no ETag; conditional refresh (304) is unavailable")
 	}
 	if p.logging {
 		p.logger.DebugContext(ctx, "Flagship definitions snapshot updated", "flags", len(result.Flags))
 	}
+	if p.stale.CompareAndSwap(true, false) {
+		p.emit(openfeature.ProviderReady, openfeature.ProviderEventDetails{})
+	}
+	if !initial && (result.ETag != currentETag || (notification && result.Version != previousVersion)) {
+		p.emit(openfeature.ProviderConfigChange, openfeature.ProviderEventDetails{FlagChanges: changedDefinitionKeys(previous, snap)})
+	}
 	return nil
+}
+
+func (p *ServerProvider) emit(eventType openfeature.EventType, details openfeature.ProviderEventDetails) {
+	event := openfeature.Event{ProviderName: p.Metadata().Name, EventType: eventType, ProviderEventDetails: details}
+	select {
+	case p.events <- event:
+	default:
+	}
+}
+
+func changedDefinitionKeys(previous, next *definitionsSnapshot) []string {
+	if previous == nil {
+		return nil
+	}
+	keys := make(map[string]struct{}, len(previous.flags)+len(next.flags))
+	for key := range previous.flags {
+		keys[key] = struct{}{}
+	}
+	for key := range next.flags {
+		keys[key] = struct{}{}
+	}
+	changed := make([]string, 0, len(keys))
+	for key := range keys {
+		if !bytes.Equal(previous.flags[key], next.flags[key]) {
+			changed = append(changed, key)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 // BooleanEvaluation evaluates a boolean flag.

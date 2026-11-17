@@ -56,9 +56,11 @@ func (s *definitionsSnapshot) get(flagKey string) (evalFlag, bool, error) {
 
 // definitionsFetchResult is the outcome of a definitions HTTP request.
 type definitionsFetchResult struct {
-	NotModified bool
-	ETag        string
-	Flags       map[string]json.RawMessage
+	NotModified  bool
+	ETag         string
+	Flags        map[string]json.RawMessage
+	Version      string
+	EventStreams []eventStreamDescriptor
 }
 
 // fetchDefinitions downloads the app's flag definitions for local evaluation.
@@ -67,15 +69,31 @@ type definitionsFetchResult struct {
 // yields the parsed flags map and the new ETag. Reuses the client's retry,
 // timeout, and header logic.
 func (c *FlagshipClient) fetchDefinitions(ctx context.Context, etag string) (definitionsFetchResult, error) {
+	return c.fetchDefinitionsHint(ctx, etag, "", false)
+}
+
+func (c *FlagshipClient) fetchDefinitionsHint(ctx context.Context, etag, hint string, discover bool) (definitionsFetchResult, error) {
 	if c.definitionsEndpoint == "" {
 		return definitionsFetchResult{}, fmt.Errorf(
 			"Flagship: definitions endpoint is not configured. Provide appID+accountID, or an endpoint ending in /evaluate",
 		)
 	}
 
+	u, err := url.Parse(c.definitionsEndpoint)
+	if err != nil {
+		return definitionsFetchResult{}, err
+	}
+	if hint != "" {
+		query := u.Query()
+		query.Set("flagConfigEtag", hint)
+		u.RawQuery = query.Encode()
+	}
 	request := evaluationRequest{
 		method: http.MethodGet,
-		url:    c.definitionsEndpoint,
+		url:    u.String(),
+	}
+	if discover {
+		request.extraHeaders = http.Header{"Flagship-Event-Stream": []string{"sse"}}
 	}
 	return fetchWithRetry(ctx, c, request, etag, parseDefinitionsResponse)
 }
@@ -93,6 +111,8 @@ func parseDefinitionsResponse(resp *http.Response) (definitionsFetchResult, erro
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return definitionsFetchResult{}, newError(ErrorCodeFlagNotFound, errorDetail(body, resp.Status), resp.StatusCode, nil)
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return definitionsFetchResult{}, newError(ErrorCodeBadRequest, "configuration authorization failed", resp.StatusCode, nil)
 	case resp.StatusCode == http.StatusBadRequest:
 		return definitionsFetchResult{}, newError(ErrorCodeBadRequest, errorDetail(body, resp.Status), resp.StatusCode, nil)
 	case resp.StatusCode >= http.StatusBadRequest:
@@ -103,7 +123,11 @@ func parseDefinitionsResponse(resp *http.Response) (definitionsFetchResult, erro
 	decoder.UseNumber()
 
 	var payload struct {
-		Flags map[string]json.RawMessage `json:"flags"`
+		Flags    map[string]json.RawMessage `json:"flags"`
+		Metadata struct {
+			Version string `json:"version"`
+		} `json:"metadata"`
+		EventStreams []eventStreamDescriptor `json:"eventStreams"`
 	}
 	if err := decoder.Decode(&payload); err != nil {
 		return definitionsFetchResult{}, newError(ErrorCodeParse, fmt.Sprintf("invalid definitions JSON response: %v", err), resp.StatusCode, err)
@@ -114,8 +138,10 @@ func parseDefinitionsResponse(resp *http.Response) (definitionsFetchResult, erro
 	}
 
 	return definitionsFetchResult{
-		ETag:  resp.Header.Get("ETag"),
-		Flags: payload.Flags,
+		ETag:         resp.Header.Get("ETag"),
+		Flags:        payload.Flags,
+		Version:      payload.Metadata.Version,
+		EventStreams: payload.EventStreams,
 	}, nil
 }
 
@@ -239,6 +265,12 @@ func fetchOnce[T any](
 		return zero, err
 	}
 	req.Header = headers
+	for key, values := range request.extraHeaders {
+		req.Header.Del(key)
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
 	if request.method == http.MethodPost && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}

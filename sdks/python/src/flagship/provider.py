@@ -1,14 +1,18 @@
 import json
 import logging
 import math
+import random
 import threading
 from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
+import httpx
 from cachetools import TTLCache
 from openfeature.evaluation_context import EvaluationContext
+from openfeature.event import ProviderEventDetails
 from openfeature.exception import (
+    ErrorCode,
     FlagNotFoundError,
     GeneralError,
     ParseError,
@@ -29,6 +33,7 @@ from ._metadata import to_flag_metadata
 from ._types import FlagshipEvaluationResponse
 from .client import FLAGSHIP_DEFAULT_BASE_URL, FlagshipClient, resolve_definitions_endpoint
 from .context import normalize_context
+from .sse import StreamAuthError, parse_sse_lines, stream_url
 
 __all__ = ["FlagshipServerProvider"]
 
@@ -90,9 +95,11 @@ class FlagshipServerProvider(AbstractProvider):
         cache_max_size: int = 1000,
         local_evaluation: bool = False,
         refresh_interval: float = _DEFAULT_REFRESH_INTERVAL,
+        configuration_events: bool = False,
     ) -> None:
         self._logging = logging
         self._local_evaluation = local_evaluation is True
+        self._configuration_events = configuration_events is True
         self._refresh_interval = refresh_interval
         self._account_id = account_id
 
@@ -123,6 +130,8 @@ class FlagshipServerProvider(AbstractProvider):
             retries=retries,
             retry_delay=retry_delay,
         )
+        if self._configuration_events and not self._local_evaluation and not self._client.bulk_endpoint:
+            raise ValueError('Flagship: configuration events require an endpoint ending in "/evaluate"')
         self._cache: TTLCache[Hashable, FlagResolutionDetails[Any]] | None = (
             TTLCache(maxsize=cache_max_size, ttl=cache_ttl) if cache_ttl is not None and cache_ttl > 0 else None
         )
@@ -133,11 +142,18 @@ class FlagshipServerProvider(AbstractProvider):
         self._snapshot: tuple[str, dict[str, Any]] | None = None
         self._stop_event = threading.Event()
         self._refresh_thread: threading.Thread | None = None
+        self._event_thread: threading.Thread | None = None
+        self._active_stream: httpx.Response | None = None
+        self._refresh_lock = threading.RLock()
+        self._remote_version: str | None = None
+        self._local_version: str | None = None
         # Generation counter: bumped on every initialize() and shutdown() so
         # in-flight refreshes from a previous session cannot apply their result
         # after close or re-init. A boolean "closed" flag is not enough.
         self._epoch = 0
         self._lifecycle_lock = threading.Lock()
+        self._stale = False
+        self._terminal = False
 
     def get_metadata(self) -> Metadata:
         return Metadata(name="Flagship Server Provider")
@@ -151,7 +167,7 @@ class FlagshipServerProvider(AbstractProvider):
         Called by the OpenFeature registry. Failure raises and puts the provider
         in ``ERROR``. No-op when local evaluation is disabled.
         """
-        if not self._local_evaluation:
+        if not self._local_evaluation and not self._configuration_events:
             return
 
         # Stop any prior refresh thread before starting a new session. Bump the
@@ -161,28 +177,51 @@ class FlagshipServerProvider(AbstractProvider):
             self._epoch += 1
             epoch = self._epoch
             self._snapshot = None
+            self._stale = False
+            self._terminal = False
+            self._remote_version = None
+            self._local_version = None
             self._stop_event.set()
             old_thread = self._refresh_thread
+            old_event_thread = self._event_thread
+            old_stream = self._active_stream
             self._refresh_thread = None
+            self._event_thread = None
+            self._active_stream = None
             self._stop_event = threading.Event()
 
+        if old_stream is not None:
+            old_stream.close()
         if old_thread is not None and old_thread.is_alive():
             old_thread.join(timeout=_REFRESH_JOIN_TIMEOUT)
+        if old_event_thread is not None and old_event_thread.is_alive():
+            old_event_thread.join(timeout=_REFRESH_JOIN_TIMEOUT)
 
-        self._fetch_and_apply_snapshot(initial=True, epoch=epoch)
+        if self._local_evaluation:
+            self._fetch_and_apply_snapshot(initial=True, epoch=epoch)
 
         with self._lifecycle_lock:
             # Only start the refresh thread if this initialize was not superseded
             # by shutdown/re-init while the blocking fetch ran.
             if epoch == self._epoch:
-                thread = threading.Thread(
-                    target=self._refresh_loop,
-                    args=(epoch,),
-                    name="flagship-definitions-refresh",
-                    daemon=True,
-                )
-                self._refresh_thread = thread
-                thread.start()
+                if self._local_evaluation:
+                    thread = threading.Thread(
+                        target=self._refresh_loop,
+                        args=(epoch,),
+                        name="flagship-definitions-refresh",
+                        daemon=True,
+                    )
+                    self._refresh_thread = thread
+                    thread.start()
+                if self._configuration_events:
+                    event_thread = threading.Thread(
+                        target=self._event_loop,
+                        args=(epoch, self._stop_event),
+                        name="flagship-configuration-events",
+                        daemon=True,
+                    )
+                    self._event_thread = event_thread
+                    event_thread.start()
 
     def shutdown(self) -> None:
         self._shutdown_local()
@@ -195,18 +234,28 @@ class FlagshipServerProvider(AbstractProvider):
         await self._client.aclose()
 
     def _shutdown_local(self) -> None:
-        if not self._local_evaluation:
+        if not self._local_evaluation and not self._configuration_events:
             return
         with self._lifecycle_lock:
             # Bump the epoch so in-flight fetches observe a stale generation and
             # refuse to write.
             self._epoch += 1
             self._snapshot = None
+            self._stale = False
+            self._terminal = False
             self._stop_event.set()
             thread = self._refresh_thread
+            event_thread = self._event_thread
+            stream = self._active_stream
             self._refresh_thread = None
+            self._event_thread = None
+            self._active_stream = None
+        if stream is not None:
+            stream.close()
         if thread is not None and thread.is_alive():
             thread.join(timeout=_REFRESH_JOIN_TIMEOUT)
+        if event_thread is not None and event_thread.is_alive():
+            event_thread.join(timeout=_REFRESH_JOIN_TIMEOUT)
 
     def resolve_boolean_details(
         self,
@@ -410,35 +459,197 @@ class FlagshipServerProvider(AbstractProvider):
                 return
             self._fetch_and_apply_snapshot(initial=False, epoch=epoch)
 
-    def _fetch_and_apply_snapshot(self, *, initial: bool, epoch: int) -> None:
-        try:
-            current_etag = self._snapshot[0] if self._snapshot is not None else None
-            # Skip empty etag — conditional refresh is unavailable without one.
-            etag = current_etag if current_etag else None
-            result = self._client.fetch_definitions(etag)
-            # Stale session (closed or superseded by a newer initialize).
-            if epoch != self._epoch:
-                return
+    def _fetch_and_apply_snapshot(
+        self,
+        *,
+        initial: bool,
+        epoch: int,
+        expected_version: str | None = None,
+        unconditional: bool = False,
+        notification: bool = False,
+    ) -> bool:
+        with self._refresh_lock:
+            try:
+                current_etag = self._snapshot[0] if self._snapshot is not None else None
+                # Skip empty etag — conditional refresh is unavailable without one.
+                etag = current_etag if current_etag and not unconditional else None
+                result = self._client.fetch_definitions_response(etag, expected_version)
+                # Stale session (closed or superseded by a newer initialize).
+                if epoch != self._epoch:
+                    return False
 
-            if result is None:
-                self._log_debug("[Flagship] Definitions not modified (304)")
-                return
+                if result is None:
+                    if expected_version:
+                        raise GeneralError("Configuration version has not propagated")
+                    self._log_debug("[Flagship] Definitions not modified (304)")
+                    self._terminal = False
+                    if self._stale:
+                        self._stale = False
+                        self.emit_provider_ready(ProviderEventDetails())
+                    return True
 
-            flags, new_etag = result
-            # Assignment of the tuple is atomic under the GIL.
-            self._snapshot = (new_etag, flags)
-            if not new_etag:
-                self._log_debug("[Flagship] Definitions response had no ETag; conditional refresh (304) is unavailable")
-            self._log_debug("[Flagship] Definitions snapshot updated (%d flags)", len(flags))
-        except Exception as error:
-            if epoch != self._epoch:
-                return
-            if initial:
+                flags, new_etag, version, _ = result
+                if expected_version and version != expected_version:
+                    raise GeneralError("Configuration version has not propagated")
+                previous_flags = self._snapshot[1] if self._snapshot is not None else {}
+                previous_version = self._local_version
+                self._snapshot = (new_etag, flags)
+                self._local_version = version
+                self._terminal = False
+                if not new_etag:
+                    self._log_debug(
+                        "[Flagship] Definitions response had no ETag; conditional refresh (304) is unavailable"
+                    )
+                self._log_debug("[Flagship] Definitions snapshot updated (%d flags)", len(flags))
+                if self._stale:
+                    self._stale = False
+                    self.emit_provider_ready(ProviderEventDetails())
+                if not initial and (new_etag != current_etag or (notification and version != previous_version)):
+                    changed = sorted(
+                        key for key in set(previous_flags) | set(flags) if previous_flags.get(key) != flags.get(key)
+                    )
+                    self.emit_provider_configuration_changed(ProviderEventDetails(flags_changed=changed or None))
+                return True
+            except Exception as error:
+                if epoch != self._epoch:
+                    return False
+                if initial:
+                    raise
+                if isinstance(error, (FlagNotFoundError, StreamAuthError)):
+                    self._snapshot = None
+                    self._local_version = None
+                    self._stale = True
+                    if not self._terminal:
+                        self._terminal = True
+                        self.emit_provider_error(
+                            ProviderEventDetails(
+                                message="Configuration unavailable", error_code=ErrorCode.PROVIDER_FATAL
+                            )
+                        )
+                    if unconditional and isinstance(error, StreamAuthError):
+                        raise
+                    return False
+                if not self._stale:
+                    self._stale = True
+                    self.emit_provider_stale(ProviderEventDetails(message=str(error)))
+                self._log_error(
+                    "[Flagship] Definitions refresh failed; keeping last good snapshot: %s",
+                    error,
+                )
+                return False
+
+    def _refresh_remote_events(self, epoch: int, expected_version: str | None, notification: bool) -> bool:
+        with self._refresh_lock:
+            try:
+                version, _ = self._client.fetch_bulk_version(expected_version)
+                if epoch != self._epoch:
+                    return False
+                if expected_version and version != expected_version:
+                    raise GeneralError("Configuration version has not propagated")
+                self._clear_cache()
+                if self._stale:
+                    self._stale = False
+                    self.emit_provider_ready(ProviderEventDetails())
+                if notification and version != self._remote_version:
+                    self.emit_provider_configuration_changed(ProviderEventDetails())
+                self._remote_version = version
+                return True
+            except StreamAuthError:
                 raise
-            self._log_error(
-                "[Flagship] Definitions refresh failed; keeping last good snapshot: %s",
-                error,
-            )
+            except Exception:
+                return False
+
+    def _refresh_for_event(self, epoch: int, stop: threading.Event, hint: str | None, notification: bool) -> bool:
+        for attempt in range(5):
+            if stop.is_set() or epoch != self._epoch:
+                return False
+            if self._local_evaluation:
+                success = self._fetch_and_apply_snapshot(
+                    initial=False, epoch=epoch, expected_version=hint, unconditional=True, notification=notification
+                )
+            else:
+                success = self._refresh_remote_events(epoch, hint, notification)
+            if success:
+                return True
+            if stop.wait(min(16, 2**attempt)):
+                return False
+        return False
+
+    def _event_loop(self, epoch: int, stop: threading.Event) -> None:
+        delay = 0.5
+        connected = False
+        while not stop.is_set() and epoch == self._epoch:
+            try:
+                if self._local_evaluation:
+                    discovery = self._client.fetch_definitions_response(request_event_stream=True)
+                    if discovery is None:
+                        raise GeneralError("Configuration discovery returned 304")
+                    _, _, _, descriptors = discovery
+                    base = self._client.definitions_endpoint or ""
+                else:
+                    version, descriptors = self._client.fetch_bulk_version(request_event_stream=True)
+                    base = self._client.bulk_endpoint or ""
+                    if not connected:
+                        self._remote_version = version
+                address = stream_url(descriptors, base)
+                if address is None:
+                    raise GeneralError("Configuration stream not available")
+                timeout = httpx.Timeout(None, connect=self._client.timeout if self._client.timeout > 0 else 5.0)
+                with self._client._sync_client.stream(
+                    "GET", address, headers={"Accept": "text/event-stream"}, timeout=timeout, follow_redirects=False
+                ) as response:
+                    if response.status_code in (401, 403):
+                        raise StreamAuthError("Configuration stream was not authorized")
+                    if response.status_code != 200 or not response.headers.get("content-type", "").lower().startswith(
+                        "text/event-stream"
+                    ):
+                        raise GeneralError(f"Configuration stream returned HTTP {response.status_code}")
+                    with self._lifecycle_lock:
+                        if stop.is_set() or epoch != self._epoch:
+                            return
+                        self._active_stream = response
+                    if not self._refresh_for_event(epoch, stop, None, connected or not self._local_evaluation):
+                        raise GeneralError("Configuration catch-up failed")
+                    connected = True
+                    for hint in parse_sse_lines(response.iter_lines()):
+                        if stop.is_set() or epoch != self._epoch:
+                            return
+                        version = hint.get("etag")
+                        if not self._refresh_for_event(
+                            epoch, stop, version if isinstance(version, str) else None, True
+                        ):
+                            raise GeneralError("Configuration refresh failed")
+                    raise GeneralError("Configuration stream closed")
+            except StreamAuthError:
+                if not stop.is_set() and epoch == self._epoch:
+                    if self._local_evaluation:
+                        self._snapshot = None
+                        self._local_version = None
+                        self._stale = True
+                        if not self._terminal:
+                            self._terminal = True
+                            self.emit_provider_error(
+                                ProviderEventDetails(
+                                    message="Configuration stream authorization failed",
+                                    error_code=ErrorCode.PROVIDER_FATAL,
+                                )
+                            )
+                    else:
+                        self._clear_cache()
+                    self._log_error("[Flagship] Configuration stream authorization failed")
+            except Exception:
+                if not stop.is_set() and epoch == self._epoch:
+                    if (self._local_evaluation or self._cache is not None) and not self._stale:
+                        self._stale = True
+                        self.emit_provider_stale(ProviderEventDetails(message="Configuration stream interrupted"))
+                    self._log_error("[Flagship] Configuration stream interrupted")
+            finally:
+                with self._lifecycle_lock:
+                    if epoch == self._epoch:
+                        self._active_stream = None
+            if stop.wait(delay * (0.75 + random.random() * 0.5)):
+                return
+            delay = min(30.0, delay * 2)
 
     def _cache_key(
         self,

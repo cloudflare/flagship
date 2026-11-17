@@ -3,6 +3,7 @@
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 type SharedError = Arc<dyn Error + Send + Sync + 'static>;
 
@@ -78,6 +79,7 @@ pub struct FlagshipError {
     status: Option<u16>,
     retryable: bool,
     server_code: Option<String>,
+    retry_after: Option<Duration>,
     source: Option<SharedError>,
 }
 
@@ -89,8 +91,20 @@ impl FlagshipError {
             status: None,
             retryable: code.is_retryable_by_default(),
             server_code: None,
+            retry_after: None,
             source: None,
         }
+    }
+
+    pub(crate) const fn with_retry_after(mut self, retry_after: Option<Duration>) -> Self {
+        self.retry_after = retry_after;
+
+        self
+    }
+
+    /// The delay a `429` response's `Retry-After` header requested, if any.
+    pub(crate) const fn retry_after(&self) -> Option<Duration> {
+        self.retry_after
     }
 
     pub(crate) const fn with_status(mut self, status: u16) -> Self {
@@ -170,6 +184,7 @@ impl fmt::Debug for FlagshipError {
             .field("status", &self.status)
             .field("retryable", &self.retryable)
             .field("server_code", &self.server_code)
+            .field("retry_after", &self.retry_after)
             .field("source", &self.source.as_ref().map(|_| "<redacted>"))
             .finish()
     }

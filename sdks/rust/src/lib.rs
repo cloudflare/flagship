@@ -30,6 +30,7 @@ compile_error!(
 
 mod cache;
 pub mod client;
+pub mod client_provider;
 pub mod config;
 mod context;
 mod definitions;
@@ -41,6 +42,9 @@ pub mod provider;
 pub mod types;
 
 pub use client::FlagshipClient;
+pub use client_provider::{
+    ChangeDetection, ClientProviderEvent, FlagshipClientProvider, FlagshipClientProviderBuilder,
+};
 pub use config::{
     FLAGSHIP_DEFAULT_BASE_URL, FlagshipClientOptions, FlagshipClientOptionsBuilder,
     HeaderFactoryError, HeaderMap, HeaderValue, TimeoutPolicy,

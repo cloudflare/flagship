@@ -431,7 +431,7 @@ impl FlagshipServerProvider {
     }
 }
 
-fn resolution_details<T>(
+pub(crate) fn resolution_details<T>(
     response: &FlagshipEvaluationResponse,
     reason: OpenFeatureReason,
     expected_name: &'static str,
@@ -882,7 +882,7 @@ fn to_flag_metadata(metadata: &serde_json::Map<String, JsonValue>) -> FlagMetada
     out
 }
 
-fn map_reason(reason: &EvaluationReason) -> OpenFeatureReason {
+pub(crate) fn map_reason(reason: &EvaluationReason) -> OpenFeatureReason {
     match reason.as_str() {
         "STATIC" => OpenFeatureReason::Static,
         "TARGETING_MATCH" => OpenFeatureReason::TargetingMatch,
@@ -900,7 +900,7 @@ fn map_reason(reason: &EvaluationReason) -> OpenFeatureReason {
     clippy::needless_pass_by_value,
     reason = "owned signature composes directly with Result::map_err"
 )]
-fn map_flagship_error(error: FlagshipError) -> EvaluationError {
+pub(crate) fn map_flagship_error(error: FlagshipError) -> EvaluationError {
     let backend_invalid_context = error.server_code() == Some("INVALID_CONTEXT");
     let (code, category, summary) = match error.code() {
         ErrorCode::ProviderNotReady => (
@@ -990,14 +990,14 @@ fn json_kind(value: &JsonValue) -> &'static str {
     }
 }
 
-fn provider_not_ready() -> EvaluationError {
+pub(crate) fn provider_not_ready() -> EvaluationError {
     map_flagship_error(FlagshipError::new(
         ErrorCode::ProviderNotReady,
         "provider is not ready",
     ))
 }
 
-fn flag_not_found() -> EvaluationError {
+pub(crate) fn flag_not_found() -> EvaluationError {
     map_flagship_error(FlagshipError::new(
         ErrorCode::FlagNotFound,
         "requested flag was not found",
@@ -1043,7 +1043,7 @@ fn json_value(value: &JsonValue) -> Result<OpenFeatureValue, ()> {
     }
 }
 
-fn json_struct(value: &JsonValue) -> Result<StructValue, ()> {
+pub(crate) fn json_struct(value: &JsonValue) -> Result<StructValue, ()> {
     let object = value.as_object().ok_or(())?;
     let fields = object
         .iter()

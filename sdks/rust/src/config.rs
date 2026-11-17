@@ -161,11 +161,21 @@ pub struct FlagshipClientOptions {
     header_factory: Option<HeaderFactory>,
     http_client: Client,
     timeout: TimeoutPolicy,
+    timeout_explicit: bool,
     retries: u32,
     retry_delay: Duration,
 }
 
 impl FlagshipClientOptions {
+    /// Applies `timeout` unless the builder set or disabled the timeout explicitly.
+    pub(crate) fn with_default_timeout(mut self, timeout: Duration) -> Self {
+        if !self.timeout_explicit {
+            self.timeout = TimeoutPolicy::Duration(timeout);
+        }
+
+        self
+    }
+
     /// Starts a client-options builder.
     ///
     /// # Examples
@@ -248,6 +258,7 @@ impl fmt::Debug for FlagshipClientOptions {
             .field("header_factory", &self.header_factory)
             .field("http_client", &"<configured>")
             .field("timeout", &self.timeout)
+            .field("timeout_explicit", &self.timeout_explicit)
             .field("retries", &self.retries)
             .field("retry_delay", &self.retry_delay)
             .finish()
@@ -272,9 +283,20 @@ pub struct FlagshipClientOptionsBuilder {
     timeout: Option<TimeoutPolicy>,
     retries: Option<u32>,
     retry_delay: Option<Duration>,
+    ofrep_base_url: Option<String>,
 }
 
 impl FlagshipClientOptionsBuilder {
+    /// Sets the base URL of any OFREP-compatible server, up to but not
+    /// including `/ofrep`. Mutually exclusive with `app_id`, `endpoint`, and
+    /// `base_url`; only [`crate::FlagshipClientProvider`] uses it.
+    #[must_use]
+    pub fn ofrep_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.ofrep_base_url = Some(base_url.into());
+
+        self
+    }
+
     /// Sets the application ID.
     ///
     /// Rejects empty values, surrounding whitespace, control characters, and
@@ -433,6 +455,7 @@ impl FlagshipClientOptionsBuilder {
     pub fn build(self) -> Result<FlagshipClientOptions, ConfigError> {
         let endpoint = self.build_endpoint()?;
         let evaluation_url = resolve_evaluation_endpoint(&endpoint);
+        let timeout_explicit = self.timeout.is_some();
         let timeout = self.timeout.unwrap_or_default();
         if matches!(timeout, TimeoutPolicy::Duration(duration) if duration.is_zero()) {
             return Err(ConfigError::new(
@@ -464,6 +487,7 @@ impl FlagshipClientOptionsBuilder {
             header_factory: self.header_factory,
             http_client,
             timeout,
+            timeout_explicit,
             retries: self.retries.unwrap_or(DEFAULT_RETRIES).min(MAX_RETRIES),
             retry_delay: self
                 .retry_delay
@@ -473,6 +497,24 @@ impl FlagshipClientOptionsBuilder {
     }
 
     pub(crate) fn build_endpoint(&self) -> Result<FlagshipEndpoint, ConfigError> {
+        if let Some(base_url) = &self.ofrep_base_url {
+            if self.endpoint.is_some() || self.app_id.is_some() || self.base_url.is_some() {
+                return Err(ConfigError::new(
+                    "ofrep_base_url cannot be combined with app_id, endpoint, or base_url",
+                ));
+            }
+            let mut endpoint = parse_http_url(base_url, "ofrep_base_url")?;
+            let path = format!("{}/evaluate", endpoint.path().trim_end_matches('/'));
+            endpoint.set_path(&path);
+            endpoint.set_query(None);
+            endpoint.set_fragment(None);
+            let account_id = validate_optional_id(self.account_id.as_deref(), "account_id")?;
+
+            return Ok(FlagshipEndpoint::Explicit(ExplicitEndpoint {
+                endpoint,
+                account_id,
+            }));
+        }
         if self.endpoint.is_some() && self.app_id.is_some() {
             return Err(ConfigError::new(
                 "endpoint and app_id are mutually exclusive",
@@ -525,6 +567,10 @@ impl fmt::Debug for FlagshipClientOptionsBuilder {
             )
             .field("endpoint", &self.endpoint.as_ref().map(|_| "<configured>"))
             .field("base_url", &self.base_url.as_ref().map(|_| "<configured>"))
+            .field(
+                "ofrep_base_url",
+                &self.ofrep_base_url.as_ref().map(|_| "<configured>"),
+            )
             .field(
                 "auth_token",
                 &self.auth_token.as_ref().map(|_| "<redacted>"),

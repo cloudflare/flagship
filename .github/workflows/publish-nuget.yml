@@ -1,0 +1,99 @@
+name: Publish NuGet
+
+on:
+  workflow_call:
+    secrets:
+      NUGET_API_KEY:
+        description: nuget.org API key scoped to both Cloudflare.Flagship packages
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  credentials:
+    name: Check NuGet credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check optional API key
+        id: check
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: bash
+        run: |
+          if [[ -z "$NUGET_API_KEY" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "NuGet publication skipped: NUGET_API_KEY is not configured. See sdks/dotnet/PUBLISHING.md." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    name: Publish
+    needs: credentials
+    if: ${{ needs.credentials.outputs.configured == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: sdks/dotnet
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Validate release tag
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(dotnet msbuild src/Cloudflare.Flagship/Cloudflare.Flagship.csproj -getProperty:Version -nologo)
+          TAG="sdks/dotnet/v${VERSION}"
+          if git rev-parse --verify --quiet "refs/tags/${TAG}"; then
+            test "$(git rev-list -n 1 "${TAG}")" = "${GITHUB_SHA}" || {
+              echo "${TAG} exists on a different commit." >&2
+              exit 1
+            }
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Pack both SDK packages
+        run: |
+          dotnet pack src/Cloudflare.Flagship/Cloudflare.Flagship.csproj -c Release -o artifacts
+          dotnet pack src/Cloudflare.Flagship.OpenFeature/Cloudflare.Flagship.OpenFeature.csproj -c Release -o artifacts
+
+      - name: Publish both packages to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          for PACKAGE in Cloudflare.Flagship Cloudflare.Flagship.OpenFeature; do
+            dotnet nuget push "artifacts/${PACKAGE}.${VERSION}.nupkg" \
+              --source https://api.nuget.org/v3/index.json \
+              --api-key "$NUGET_API_KEY" \
+              --skip-duplicate
+          done
+
+      # Advance the publication baseline only after both pushes succeed.
+      - name: Tag .NET SDK release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          TAG="sdks/dotnet/v${VERSION}"
+          if git rev-parse --verify --quiet "refs/tags/${TAG}"; then
+            test "$(git rev-list -n 1 "${TAG}")" = "${GITHUB_SHA}"
+            echo "${TAG} already exists on this release; skipping."
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          fi

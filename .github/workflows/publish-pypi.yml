@@ -30,6 +30,14 @@ jobs:
         working-directory: sdks/python
         run: uv build
 
+      # uv publish does not generate attestations. This signs the dists with the
+      # job's OIDC identity; uv publish then uploads the *.publish.attestation
+      # files next to each distribution automatically (PEP 740).
+      - name: Generate PEP 740 attestations
+        uses: astral-sh/attest-action@39b6ce43875c196a579e31635b11aa2a2036384a # v0.0.7
+        with:
+          paths: sdks/python/dist/*
+
       - name: Publish
         working-directory: sdks/python
         run: uv publish --check-url https://pypi.org/simple

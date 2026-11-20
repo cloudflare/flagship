@@ -4,7 +4,7 @@
 
 Cloudflare Flagship SDKs — OpenFeature-compatible SDKs for Cloudflare's Flagship feature flag platform.
 
-This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The TypeScript SDK is the recommended SDK, especially for Cloudflare Workers because it supports the native Flagship Workers binding. The Python, Go, and Rust SDKs support HTTP evaluation only.
+This is a **pnpm monorepo** with SDKs organized by implementation language under `sdks/<language>/`. The TypeScript SDK is the recommended SDK, especially for Cloudflare Workers because it supports the native Flagship Workers binding. The Python, Go, and Rust SDKs support HTTP evaluation and local evaluation, but not the Workers binding.
 
 ## Repository Structure
 
@@ -24,20 +24,20 @@ sdks/
     tests/           # Vitest unit and integration tests
     examples/        # Node.js, browser, and Cloudflare Workers examples
 
-  python/            # cloudflare-flagship — OpenFeature provider SDK (HTTP only)
+  python/            # cloudflare-flagship — OpenFeature provider SDK (HTTP and local evaluation)
     src/flagship/    # Client, provider, context serialization, hooks
     tests/           # pytest unit and integration tests
     examples/        # Sync and async OpenFeature examples
     pyproject.toml   # Python package metadata and uv build config
     uv.lock          # Python dependency lockfile
 
-  go/                # github.com/cloudflare/flagship/sdks/go — OpenFeature provider SDK (HTTP only)
+  go/                # github.com/cloudflare/flagship/sdks/go — OpenFeature provider SDK (HTTP and local evaluation)
     *.go             # Client, provider, context serialization, hooks
     *_test.go        # Go unit and integration tests
     examples/        # OpenFeature usage examples
     go.mod           # Go module metadata
 
-  rust/              # cloudflare-flagship (crates.io) — OpenFeature provider SDK (HTTP only)
+  rust/              # cloudflare-flagship (crates.io) — OpenFeature provider SDK (HTTP and local evaluation)
     src/             # Client, provider, context, cache, local evaluator, hooks, with inline unit tests
     examples/        # Remote and local OpenFeature examples
     Cargo.toml       # Crate metadata, features, and MSRV
@@ -129,25 +129,27 @@ The constructor accepts a discriminated union: provide **either** HTTP config (`
 
 ### Python
 
-The Python SDK is published as `cloudflare-flagship` and supports HTTP evaluation only.
+The Python SDK is published as `cloudflare-flagship` and supports HTTP evaluation and local evaluation.
 
 - `FlagshipClient` handles endpoint construction, auth headers, retries, timeouts, and response parsing.
 - `FlagshipServerProvider` implements the OpenFeature Python provider interface.
+- With `local_evaluation=True`, the provider downloads flag definitions, evaluates flags in-process, and refreshes definitions in the background.
 - Sync and async evaluation APIs are supported.
 - Native Cloudflare Workers binding mode is not available in Python.
 
 ### Go
 
-The Go SDK is published through Go modules at `github.com/cloudflare/flagship/sdks/go` and supports HTTP evaluation only.
+The Go SDK is published through Go modules at `github.com/cloudflare/flagship/sdks/go` and supports HTTP evaluation and local evaluation.
 
 - `FlagshipClient` handles endpoint construction, auth headers, retries, timeouts, and response parsing.
 - `ServerProvider` implements the OpenFeature Go provider interface, including context-aware initialization, provider events, and typed resolution details.
+- With `LocalEvaluation` enabled, the provider downloads flag definitions during initialization, evaluates flags in-process, and refreshes definitions in the background.
 - Built-in `LoggingHook` and `TelemetryHook` mirror the other SDK hook conveniences.
 - Native Cloudflare Workers binding mode is not available in Go.
 
 ### Rust
 
-The Rust SDK is published to crates.io as `cloudflare-flagship` and supports HTTP evaluation only.
+The Rust SDK is published to crates.io as `cloudflare-flagship` and supports HTTP evaluation and local evaluation.
 
 - `FlagshipClient` handles endpoint construction, auth headers, retries, timeouts, and response parsing.
 - `FlagshipServerProvider` implements the `open-feature` 0.3 `FeatureProvider` trait, with remote, cached, and local evaluation.

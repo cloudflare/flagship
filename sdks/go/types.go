@@ -68,7 +68,8 @@ type Options struct {
 	LocalEvaluation bool
 	// RefreshInterval is the background definitions refresh period in local
 	// evaluation mode. Defaults to 30s. Must be greater than 0 when set.
-	RefreshInterval time.Duration
+	RefreshInterval     time.Duration
+	ConfigurationEvents bool
 }
 
 // EvaluationReason is the reason returned by the Flagship evaluation API.

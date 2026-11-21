@@ -89,27 +89,28 @@ provider, err := flagship.NewProvider(flagship.Options{
 })
 ```
 
-| Option            | Description                                                                    |
-| ----------------- | ------------------------------------------------------------------------------ |
-| `AppID`           | Flagship app ID. Mutually exclusive with `Endpoint`.                           |
-| `AccountID`       | Required with `AppID`.                                                         |
-| `BaseURL`         | Base URL override used with `AppID`; defaults to `https://api.cloudflare.com`. |
-| `Endpoint`        | Full absolute evaluation endpoint URL.                                         |
-| `AuthToken`       | Adds `Authorization: Bearer <token>` to each request.                          |
-| `Headers`         | Static headers. Explicit `Authorization` overrides `AuthToken`.                |
-| `HeadersFactory`  | Dynamic per-request headers. Values override `Headers` and `AuthToken`.        |
-| `HTTPClient`      | Custom HTTP client.                                                            |
-| `Timeout`         | Per-attempt timeout; defaults to 5 seconds.                                    |
-| `Retries`         | Retry attempts on transient errors; defaults to 1 and is capped at 10.         |
-| `DisableRetries`  | Disables retries when set to true.                                             |
-| `RetryDelay`      | Delay between retries; defaults to 1 second and is capped at 30 seconds.       |
-| `CacheTTL`        | Cache TTL; enables response caching when greater than 0.                       |
-| `CacheMaxSize`    | Maximum cached entries; defaults to 1000 when `CacheTTL` is set.               |
-| `LocalEvaluation` | Downloads definitions once and evaluates flags in-process; off by default.     |
-| `RefreshInterval` | Background definitions refresh period in local mode; defaults to 30s.          |
-| `Logging`         | Enables provider debug/error logs; off by default.                             |
-| `Logger`          | Optional `slog`-compatible logger.                                             |
-| `Hooks`           | Provider-level OpenFeature hooks.                                              |
+| Option                | Description                                                                    |
+| --------------------- | ------------------------------------------------------------------------------ |
+| `AppID`               | Flagship app ID. Mutually exclusive with `Endpoint`.                           |
+| `AccountID`           | Required with `AppID`.                                                         |
+| `BaseURL`             | Base URL override used with `AppID`; defaults to `https://api.cloudflare.com`. |
+| `Endpoint`            | Full absolute evaluation endpoint URL.                                         |
+| `AuthToken`           | Adds `Authorization: Bearer <token>` to each request.                          |
+| `Headers`             | Static headers. Explicit `Authorization` overrides `AuthToken`.                |
+| `HeadersFactory`      | Dynamic per-request headers. Values override `Headers` and `AuthToken`.        |
+| `HTTPClient`          | Custom HTTP client.                                                            |
+| `Timeout`             | Per-attempt timeout; defaults to 5 seconds.                                    |
+| `Retries`             | Retry attempts on transient errors; defaults to 1 and is capped at 10.         |
+| `DisableRetries`      | Disables retries when set to true.                                             |
+| `RetryDelay`          | Delay between retries; defaults to 1 second and is capped at 30 seconds.       |
+| `CacheTTL`            | Cache TTL; enables response caching when greater than 0.                       |
+| `CacheMaxSize`        | Maximum cached entries; defaults to 1000 when `CacheTTL` is set.               |
+| `LocalEvaluation`     | Downloads definitions once and evaluates flags in-process; off by default.     |
+| `RefreshInterval`     | Background definitions refresh period in local mode; defaults to 30s.          |
+| `ConfigurationEvents` | Opt in to OFREP SSE configuration notifications; off by default.               |
+| `Logging`             | Enables provider debug/error logs; off by default.                             |
+| `Logger`              | Optional `slog`-compatible logger.                                             |
+| `Hooks`               | Provider-level OpenFeature hooks.                                              |
 
 ## Local Evaluation
 
@@ -135,6 +136,62 @@ Requirements and constraints:
 - Init fails (and puts the OpenFeature provider in `ERROR`) if the first definitions fetch fails. Later refresh failures keep the last good snapshot.
 
 See `examples/local` for a full program.
+
+## Configuration Events
+
+Set `ConfigurationEvents: true` to listen for configuration changes in either local or HTTP evaluation mode. The provider obtains a short-lived, single-use stream URL through an authenticated definitions (local mode) or bulk evaluation (HTTP mode) request. The stream carries **notification hints only**: the provider refreshes definitions or bulk evaluation before emitting an OpenFeature configuration-changed event. Local mode keeps its configured `RefreshInterval`; enabling SSE does not disable polling.
+
+```go
+provider, err := flagship.NewProvider(flagship.Options{
+    AppID:               "your-app-id",
+    AccountID:           "your-account-id",
+    AuthToken:           "your-read-token",
+    LocalEvaluation:     true,
+    ConfigurationEvents: true,
+})
+```
+
+The token needs app read permission for stream discovery. In HTTP mode, `Endpoint` must end in `/evaluate` so the bulk evaluation URL can be derived. Each reconnect obtains a new ticket and performs an unconditional refresh; one connection is not guaranteed to last forever. Call `Shutdown` to stop the background subscriber. Do not log or share stream URLs because their tickets grant access to a single stream.
+
+## Static-Context Provider
+
+`ClientProvider` is an [OFREP static-context provider](https://github.com/open-feature/protocol/blob/main/guideline/static-context-provider.md) for one evaluation context, such as a single user in a CLI or desktop application. Initialization evaluates every flag with one bulk request, and evaluations read only that cache.
+
+```go
+provider, err := flagship.NewClientProvider(flagship.ClientProviderOptions{
+    AppID:     "your-app-id",
+    AccountID: "your-account-id",
+    AuthToken: "your-token",
+})
+if err != nil {
+    log.Fatal(err)
+}
+openfeature.SetEvaluationContext(openfeature.NewEvaluationContext("user-123", nil))
+if err := openfeature.SetProviderAndWait(provider); err != nil {
+    log.Fatal(err)
+}
+
+// When the user changes, update the provider and the OpenFeature context together.
+next := openfeature.NewEvaluationContext("user-456", nil)
+if err := provider.Identify(ctx, next); err != nil {
+    log.Fatal(err)
+}
+openfeature.SetEvaluationContext(next)
+```
+
+The OpenFeature Go SDK doesn't notify providers when the evaluation context changes, so call `Identify` yourself. An evaluation whose non-empty context differs from the provider's context returns `INVALID_CONTEXT` instead of another context's cached values.
+
+| `ChangeDetection`              | Behavior                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------- |
+| `ChangeDetectionSSE` (default) | Connects to every event stream the server advertises and refreshes when notified. |
+| `ChangeDetectionPolling`       | Ignores event streams and refreshes every `PollInterval`.                         |
+| `ChangeDetectionNone`          | Refreshes only on initialization and `Identify`.                                  |
+
+`PollInterval` defaults to `0`, which disables timer polling, as [OFREP ADR-0010](https://github.com/open-feature/protocol/blob/main/service/adrs/0010-disable-default-polling-for-static-context-providers.md) specifies. In SSE mode, a positive interval polls only while no stream is connected. Change events forward `etag` and `lastModified` to the refresh request; other refreshes revalidate with the stored response `ETag`. A `429` pauses requests until its `Retry-After` time, and a `401` or `403` emits a `PROVIDER_FATAL` error and stops background refreshes.
+
+If your application has an inactive state, call `Pause` when it becomes inactive and `Resume` when it becomes active. Streams close after the inactivity delay (`InactivityDelay`, else the server's `inactivityDelaySec`, else 120 seconds); `Resume` then refetches unconditionally and reconnects.
+
+To use any OFREP-compatible server, set `OFREPBaseURL` (the URL up to, but not including, `/ofrep`) and `Headers` instead of `AppID` or `Endpoint`. The default request timeout is 10 seconds.
 
 ## Response Caching
 

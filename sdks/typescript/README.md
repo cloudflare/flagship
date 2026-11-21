@@ -169,6 +169,26 @@ const client = OpenFeature.getClient();
 const darkMode = client.getBooleanValue('dark-mode', false);
 ```
 
+### Change detection
+
+`FlagshipClientProvider` is an [OFREP static-context provider](https://github.com/open-feature/protocol/blob/main/guideline/static-context-provider.md): it evaluates every flag for the current context in one bulk request and resolves flags from that cache. It detects configuration changes as [OFREP ADR-0008](https://github.com/open-feature/protocol/blob/main/service/adrs/0008-sse-for-bulk-evaluation-changes.md) and [ADR-0010](https://github.com/open-feature/protocol/blob/main/service/adrs/0010-disable-default-polling-for-static-context-providers.md) describe:
+
+| `changeDetection` | Behavior                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `'sse'` (default) | Connects to every event stream the server advertises. Without a stream, refreshes when the page becomes visible. |
+| `'polling'`       | Ignores event streams. Refreshes every `pollInterval` milliseconds and when the page becomes visible.            |
+| `'none'`          | Refreshes only on `initialize()` and context changes.                                                            |
+
+`pollInterval` defaults to `0`, which disables timer polling. In `'sse'` mode, a positive `pollInterval` polls only while no stream is connected.
+
+When a change event arrives, the provider refreshes its cache before it emits `PROVIDER_CONFIGURATION_CHANGED`. It forwards the event's `etag` and `lastModified` as the `flagConfigEtag` and `flagConfigLastModified` query parameters, and revalidates other refreshes with the stored response `ETag`. After the page stays hidden for the stream's inactivity delay (`inactivityDelaySec`, default 120 seconds), the provider closes the stream; when the page becomes visible again, it refetches unconditionally and reconnects. A `429` response pauses requests until its `Retry-After` time, and a `401` or `403` moves the provider to `FATAL`.
+
+To use any OFREP-compatible server, pass `ofrepBaseUrl` (the URL up to, but not including, `/ofrep`) and `headers` instead of `appId` or `endpoint`. The provider's default request timeout is 10 seconds.
+
+Event stream URLs can carry credentials such as single-use tickets. Don't log or store them.
+
+Local-evaluation server providers emit `PROVIDER_CONFIGURATION_CHANGED` after a changed definitions snapshot has been applied. Binding providers can lazily invalidate cached evaluations when the platform binding exposes `getConfigurationVersion()`.
+
 ## Features
 
 | Feature               | Description                                                                    |

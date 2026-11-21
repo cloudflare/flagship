@@ -153,11 +153,67 @@ export interface FlagshipClientProviderOptions extends FlagshipProviderOptions {
 	 */
 	prefetchFlags?: string[];
 	/**
-	 * Milliseconds between background re-evaluations of every flag for the
+	 * Base URL of any OFREP-compatible flag management system, up to but not
+	 * including the `/ofrep` path segment. Mutually exclusive with `appId` and
+	 * `endpoint`.
+	 *
+	 * @example 'https://flags.example.com'
+	 */
+	ofrepBaseUrl?: string;
+	/**
+	 * Headers sent with every OFREP request, such as `Authorization`. Headers in
+	 * `fetchOptions.headers` take precedence.
+	 */
+	headers?: Record<string, string>;
+	/**
+	 * Milliseconds between timer-based re-evaluations of every flag for the
 	 * current context. Emits `PROVIDER_CONFIGURATION_CHANGED` when results
-	 * change. Disabled by default.
+	 * change. Defaults to `0`, which disables timer polling.
+	 *
+	 * In `'sse'` mode, polling runs only while no event stream is connected.
 	 */
 	pollInterval?: number;
+	/**
+	 * How the provider detects configuration changes after initialization.
+	 *
+	 * - `'sse'` (default): connect to event streams advertised by the server and
+	 *   refresh when notified. Without a stream, the provider refreshes when the
+	 *   page becomes visible and polls only if `pollInterval` is set.
+	 * - `'polling'`: ignore event streams; refresh when the page becomes visible
+	 *   and every `pollInterval` milliseconds.
+	 * - `'none'`: refresh only on `initialize()` and context changes.
+	 *
+	 * @default 'sse'
+	 */
+	changeDetection?: 'sse' | 'polling' | 'none';
+	/** `EventSource` implementation. Defaults to `globalThis.EventSource`. */
+	eventSource?: typeof EventSource;
+	/**
+	 * Seconds a hidden page keeps its event stream open before closing it.
+	 * Overrides the server's `inactivityDelaySec`; the default is 120.
+	 */
+	inactivityDelaySec?: number;
+}
+
+export interface FlagshipEventStream {
+	type: string;
+	url?: string;
+	endpoint?: { origin?: string; requestUri: string };
+	inactivityDelaySec?: number;
+}
+
+export interface FlagshipBulkEvaluationResponse {
+	flags: FlagshipBulkEvaluationResult[];
+	eventStreams?: FlagshipEventStream[];
+	metadata?: { version?: string };
+	etag?: string;
+}
+
+export interface FlagshipDefinitionsResponse {
+	flags: Record<string, unknown>;
+	etag: string;
+	eventStreams?: FlagshipEventStream[];
+	metadata?: { version?: string };
 }
 
 /**
@@ -224,7 +280,9 @@ export interface FlagshipEvaluationResponse {
  * }
  * ```
  */
-export type FlagshipBinding = Flagship;
+export type FlagshipBinding = Flagship & {
+	getConfigurationVersion?(): Promise<string | null>;
+};
 
 /**
  * Evaluation details returned by the Flagship binding's `*Details` methods.
@@ -257,6 +315,8 @@ export interface FlagshipBindingProviderOptions {
 	 * @default false
 	 */
 	logging?: boolean;
+
+	configurationVersionCheckInterval?: number;
 }
 
 /**
@@ -306,6 +366,9 @@ export interface FlagshipLocalEvaluationOptions {
 	 * @default 30_000
 	 */
 	refreshInterval?: number;
+	configurationEvents?: boolean;
+	eventSource?: typeof EventSource;
+	inactivityDelaySec?: number;
 }
 
 /**

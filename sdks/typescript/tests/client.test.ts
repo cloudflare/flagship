@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { FlagshipClient, mergeSignals } from '../src/client.js';
+import { FlagshipClient, mergeSignals, retryAfterMs } from '../src/client.js';
 import { FlagshipError, FlagshipErrorCode } from '../src/types.js';
 
 // Mock fetch globally
@@ -623,6 +623,17 @@ describe('FlagshipClient', () => {
 			expect(JSON.parse(init.body)).toEqual({ context: { targetingKey: 'user-1', nested: { plan: 'pro' } } });
 		});
 
+		it('requests event stream advertisement only when enabled', async () => {
+			(global.fetch as any).mockImplementation(() => Promise.resolve(Response.json({ flags: [] })));
+			const instance = client();
+
+			await instance.evaluateAllResponse({}, undefined, undefined, true);
+			expect((global.fetch as any).mock.calls[0][1].headers.get('Flagship-Event-Stream')).toBe('sse');
+
+			await instance.evaluateAllResponse({});
+			expect((global.fetch as any).mock.calls[1][1].headers.get('Flagship-Event-Stream')).toBeNull();
+		});
+
 		it('derives the bulk endpoint from appId and accountId', async () => {
 			(global.fetch as any).mockResolvedValueOnce(Response.json({ flags: [] }));
 
@@ -654,6 +665,48 @@ describe('FlagshipClient', () => {
 				errorCode: 'INVALID_CONTEXT',
 				message: 'HTTP 400: bad',
 			});
+		});
+	});
+
+	describe('fetchBulk', () => {
+		const client = () => new FlagshipClient({ endpoint: 'https://api.example.com/v1/acct/apps/app/evaluate', retries: 2, retryDelay: 0 });
+
+		it('sends If-None-Match and resolves a 304 to not-modified', async () => {
+			(global.fetch as any).mockResolvedValueOnce(new Response(null, { status: 304 }));
+
+			await expect(client().fetchBulk({}, { ifNoneMatch: '"abc"' })).resolves.toBe('not-modified');
+			expect((global.fetch as any).mock.calls[0][1].headers.get('If-None-Match')).toBe('"abc"');
+		});
+
+		it('forwards change-event metadata as query parameters only', async () => {
+			(global.fetch as any).mockResolvedValueOnce(Response.json({ flags: [] }, { headers: { etag: '"e2"' } }));
+
+			const response = await client().fetchBulk({}, { flagConfigEtag: 'v2', flagConfigLastModified: 1771622898 });
+
+			const [url, init] = (global.fetch as any).mock.calls[0];
+			expect(new URL(url).searchParams.get('flagConfigEtag')).toBe('v2');
+			expect(new URL(url).searchParams.get('flagConfigLastModified')).toBe('1771622898');
+			expect(init.headers.get('If-None-Match')).toBeNull();
+			expect(response).toMatchObject({ etag: '"e2"' });
+		});
+
+		it('does not retry a 429 so the caller can honor Retry-After', async () => {
+			(global.fetch as any).mockResolvedValue(new Response(null, { status: 429, headers: { 'Retry-After': '7' } }));
+
+			const error = await client()
+				.fetchBulk({})
+				.catch((caught: unknown) => caught);
+
+			expect(global.fetch).toHaveBeenCalledTimes(1);
+			expect(retryAfterMs(error)).toBe(7_000);
+		});
+
+		it('reads Retry-After as an HTTP date', () => {
+			const now = Date.parse('2026-02-20T21:28:00Z');
+			const response = new Response(null, { status: 429, headers: { 'Retry-After': 'Fri, 20 Feb 2026 21:28:18 GMT' } });
+
+			expect(retryAfterMs(new FlagshipError('limited', FlagshipErrorCode.NETWORK_ERROR, response), now)).toBe(18_000);
+			expect(retryAfterMs(new Error('other'))).toBeUndefined();
 		});
 	});
 

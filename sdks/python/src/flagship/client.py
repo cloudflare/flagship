@@ -1,9 +1,11 @@
 import asyncio
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, TypeVar
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 from openfeature.evaluation_context import EvaluationContext
@@ -15,6 +17,7 @@ from openfeature.exception import (
 
 from ._types import FlagshipEvaluationResponse
 from .context import JsonValue, context_to_query_params, normalize_context
+from .sse import StreamAuthError
 
 __all__ = ["FLAGSHIP_DEFAULT_BASE_URL", "FlagshipClient", "resolve_definitions_endpoint"]
 
@@ -28,6 +31,28 @@ T = TypeVar("T")
 
 class _BadRequestError(GeneralError):
     """400 Bad Request — terminal, never retried."""
+
+
+class RateLimitedError(GeneralError):
+    """429 Too Many Requests. Never retried; callers wait ``retry_after`` seconds."""
+
+    def __init__(self, message: str, retry_after: float | None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+@dataclass(frozen=True)
+class BulkEvaluation:
+    """A successful OFREP bulk evaluation.
+
+    ``etag`` is the HTTP response validator for this context's results;
+    ``version`` is the app-wide configuration version from ``metadata``.
+    """
+
+    flags: dict[str, dict[str, Any]]
+    etag: str | None
+    version: str | None
+    event_streams: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -70,6 +95,20 @@ class FlagshipClient:
         # path does not end in /evaluate (local evaluation will reject that case).
         self.definitions_endpoint = _try_resolve_definitions_endpoint(
             app_id=app_id, account_id=account_id, endpoint=endpoint, base_url=base_url
+        )
+        parsed = urlsplit(self.endpoint)
+        self.bulk_endpoint = (
+            urlunsplit(
+                (
+                    parsed.scheme,
+                    parsed.netloc,
+                    parsed.path.removesuffix("/evaluate") + "/ofrep/v1/evaluate/flags",
+                    "",
+                    "",
+                )
+            )
+            if parsed.path.endswith("/evaluate")
+            else None
         )
         self.timeout = timeout
         self.retries = min(retries, _MAX_RETRIES)
@@ -121,13 +160,82 @@ class FlagshipClient:
                 'Provide app_id+account_id, or an endpoint ending in "/evaluate".'
             )
 
-        extra_headers = {"If-None-Match": etag} if etag else None
+        result = self.fetch_definitions_response(etag)
+        if result is None:
+            return None
+        flags, new_etag, _, _ = result
+        return flags, new_etag
+
+    def fetch_definitions_response(
+        self,
+        etag: str | None = None,
+        flag_config_etag: str | None = None,
+        request_event_stream: bool = False,
+    ) -> tuple[dict[str, Any], str, str, list[dict[str, object]]] | None:
+        if not self.definitions_endpoint:
+            raise ValueError("Flagship: definitions endpoint is not configured")
+        headers = {"If-None-Match": etag} if etag else {}
+        if request_event_stream:
+            headers["Flagship-Event-Stream"] = "sse"
         request = _HttpRequest(
             method="GET",
             url=self.definitions_endpoint,
-            extra_headers=extra_headers,
+            params={"flagConfigEtag": flag_config_etag} if flag_config_etag else None,
+            extra_headers=headers,
         )
-        return self._fetch_with_retry_sync(request, retries_left=self.retries, parse=_parse_definitions_response)
+        return self._fetch_with_retry_sync(request, retries_left=self.retries, parse=_parse_definitions_with_stream)
+
+    def fetch_bulk_version(
+        self,
+        flag_config_etag: str | None = None,
+        request_event_stream: bool = False,
+    ) -> tuple[str, list[dict[str, object]]]:
+        if not self.bulk_endpoint:
+            raise ValueError('Flagship: configuration events require an endpoint ending in "/evaluate"')
+        request = _HttpRequest(
+            method="POST",
+            url=self.bulk_endpoint,
+            params={"flagConfigEtag": flag_config_etag} if flag_config_etag else None,
+            body={"context": {}},
+            extra_headers={"Flagship-Event-Stream": "sse"} if request_event_stream else None,
+        )
+        return self._fetch_with_retry_sync(request, retries_left=self.retries, parse=_parse_bulk_version)
+
+    def fetch_bulk(
+        self,
+        context: EvaluationContext | None,
+        *,
+        if_none_match: str | None = None,
+        flag_config_etag: str | None = None,
+        flag_config_last_modified: int | str | None = None,
+        request_event_stream: bool = False,
+    ) -> BulkEvaluation | None:
+        """Evaluate every flag for ``context`` with one OFREP bulk request.
+
+        Returns ``None`` on ``304 Not Modified``. ``flag_config_etag`` and
+        ``flag_config_last_modified`` carry change-event metadata as query
+        parameters. Raises :class:`RateLimitedError` on ``429`` without retrying.
+        """
+        if not self.bulk_endpoint:
+            raise ValueError('Flagship: bulk evaluation requires an endpoint ending in "/evaluate"')
+        params: dict[str, str] = {}
+        if flag_config_etag:
+            params["flagConfigEtag"] = flag_config_etag
+        if flag_config_last_modified is not None:
+            params["flagConfigLastModified"] = str(flag_config_last_modified)
+        headers: dict[str, str] = {}
+        if if_none_match:
+            headers["If-None-Match"] = if_none_match
+        if request_event_stream:
+            headers["Flagship-Event-Stream"] = "sse"
+        request = _HttpRequest(
+            method="POST",
+            url=self.bulk_endpoint,
+            params=params or None,
+            body={"context": normalize_context(context).values},
+            extra_headers=headers or None,
+        )
+        return self._fetch_with_retry_sync(request, retries_left=self.retries, parse=_parse_bulk_evaluation)
 
     def _build_request(self, flag_key: str, context: EvaluationContext | None) -> _HttpRequest:
         normalized = normalize_context(context)
@@ -169,8 +277,8 @@ class FlagshipClient:
             except httpx.HTTPError as e:
                 raise GeneralError(f"Network error: {e}") from e
             return parse(response)
-        except (FlagNotFoundError, _BadRequestError, ParseError):
-            # 404, 400, parse errors — deterministic, never retry.
+        except (FlagNotFoundError, _BadRequestError, ParseError, StreamAuthError, RateLimitedError):
+            # 404, 400, 401/403, 429, parse errors — deterministic or server-paced, never retry here.
             raise
         except Exception:
             if retries_left > 0:
@@ -259,6 +367,93 @@ def _parse_definitions_response(response: httpx.Response) -> tuple[dict[str, Any
 
     etag = response.headers.get("etag") or ""
     return data["flags"], etag
+
+
+def _parse_definitions_with_stream(
+    response: httpx.Response,
+) -> tuple[dict[str, Any], str, str, list[dict[str, object]]] | None:
+    if response.status_code in (401, 403):
+        raise StreamAuthError("Configuration discovery was not authorized")
+    result = _parse_definitions_response(response)
+    if result is None:
+        return None
+    flags, etag = result
+    body: Any = response.json()
+    metadata = body.get("metadata")
+    version = metadata.get("version") if isinstance(metadata, dict) else None
+    streams = body.get("eventStreams")
+    return (
+        flags,
+        etag,
+        version if isinstance(version, str) else etag.strip('"'),
+        [item for item in streams if isinstance(item, dict)] if isinstance(streams, list) else [],
+    )
+
+
+def _parse_bulk_version(response: httpx.Response) -> tuple[str, list[dict[str, object]]]:
+    if response.status_code in (401, 403):
+        raise StreamAuthError("Configuration discovery was not authorized")
+    if response.status_code == 404:
+        raise FlagNotFoundError("Configuration not found")
+    if response.status_code != 200:
+        raise GeneralError(f"Configuration discovery returned HTTP {response.status_code}")
+    try:
+        body: Any = response.json()
+    except ValueError as error:
+        raise ParseError("Invalid configuration discovery response") from error
+    if not isinstance(body, dict) or not isinstance(body.get("metadata"), dict):
+        raise ParseError("Missing configuration metadata")
+    version = body["metadata"].get("version")
+    if not isinstance(version, str) or not version:
+        raise ParseError("Missing configuration version")
+    streams = body.get("eventStreams")
+    return version, [item for item in streams if isinstance(item, dict)] if isinstance(streams, list) else []
+
+
+def _parse_bulk_evaluation(response: httpx.Response) -> BulkEvaluation | None:
+    status = response.status_code
+    if status == 304:
+        return None
+    if status in (401, 403):
+        raise StreamAuthError(f"Bulk evaluation was not authorized (HTTP {status})")
+    if status == 429:
+        raise RateLimitedError("Bulk evaluation was rate limited (HTTP 429)", _retry_after(response))
+    if status == 404:
+        raise FlagNotFoundError(_error_detail(response))
+    if status == 400:
+        raise _BadRequestError(_error_detail(response))
+    if status >= 400:
+        raise GeneralError(f"HTTP {status}: {response.reason_phrase}")
+    try:
+        body: Any = response.json()
+    except ValueError as error:
+        raise ParseError("Invalid bulk evaluation response") from error
+    if not isinstance(body, dict) or not isinstance(body.get("flags"), list):
+        raise ParseError("Invalid bulk evaluation response format")
+    flags = {item["key"]: item for item in body["flags"] if isinstance(item, dict) and isinstance(item.get("key"), str)}
+    metadata = body.get("metadata")
+    version = metadata.get("version") if isinstance(metadata, dict) else None
+    streams = body.get("eventStreams")
+    return BulkEvaluation(
+        flags=flags,
+        etag=response.headers.get("etag") or None,
+        version=version if isinstance(version, str) and version else None,
+        event_streams=[item for item in streams if isinstance(item, dict)] if isinstance(streams, list) else [],
+    )
+
+
+def _retry_after(response: httpx.Response) -> float | None:
+    """Seconds from a ``Retry-After`` header, given as a delay or an HTTP date."""
+    value = (response.headers.get("retry-after") or "").strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
 
 
 def _error_detail(response: httpx.Response) -> str:

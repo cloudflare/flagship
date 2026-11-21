@@ -120,6 +120,7 @@ FlagshipServerProvider(
 | `cache_max_size`    | `int`                          | `1000`                       | Maximum cached entries; least-recently-used is evicted              |
 | `local_evaluation`  | `bool`                         | `False`                      | Evaluate flags in-process from downloaded definitions               |
 | `refresh_interval`  | `float`                        | `30.0`                       | Seconds between background definition refreshes (local mode only)   |
+| `configuration_events` | `bool`                     | `False`                      | Opt in to OFREP SSE configuration notifications                      |
 
 ## Caching
 
@@ -169,6 +170,59 @@ Notes:
 - See [`examples/local_evaluation.py`](examples/local_evaluation.py).
 
 **Context size limits:** the data plane enforces request-size limits on the network hop. Local evaluation does not re-implement those limits; very large contexts that the HTTP API would reject are still evaluated in-process. This is a known difference.
+
+## Configuration events
+
+Set `configuration_events=True` to subscribe to OFREP SSE notifications in local or HTTP evaluation mode. The provider discovers a single-use stream ticket through an authenticated definitions (local) or bulk evaluation (HTTP) request, then refreshes the normal endpoint before emitting an OpenFeature configuration-changed event. Existing local definitions polling remains enabled.
+
+```python
+provider = FlagshipServerProvider(
+    app_id="your-app-id",
+    account_id="your-account-id",
+    auth_token="your-read-token",
+    local_evaluation=True,
+    configuration_events=True,
+)
+```
+
+Stream discovery requires app read permission; a custom HTTP-mode `endpoint` must end in `/evaluate`. The provider obtains a fresh ticket and refreshes unconditionally on reconnect. Call `shutdown()` (or `shutdown_async()`) to stop the background subscriber. Stream URLs contain sensitive tickets; do not log or share them.
+
+## Static-context provider
+
+`FlagshipClientProvider` is an [OFREP static-context provider](https://github.com/open-feature/protocol/blob/main/guideline/static-context-provider.md) for one evaluation context, such as a single user in a desktop or CLI application. `initialize` evaluates every flag with one bulk request, and resolutions read only that cache.
+
+```python
+from openfeature import api
+from openfeature.evaluation_context import EvaluationContext
+from flagship import FlagshipClientProvider
+
+provider = FlagshipClientProvider(
+    app_id="your-app-id",
+    account_id="your-account-id",
+    auth_token="your-token",
+    context=EvaluationContext(targeting_key="user-123"),
+)
+api.set_provider(provider)
+
+# When the user changes, update the provider and the OpenFeature context together.
+context = EvaluationContext(targeting_key="user-456")
+provider.identify(context)
+api.set_evaluation_context(context)
+```
+
+The OpenFeature Python SDK doesn't notify providers when the evaluation context changes, so call `identify()` yourself. A resolution whose non-empty context differs from the provider's context raises `INVALID_CONTEXT` instead of returning another context's cached values.
+
+| `change_detection` | Behavior                                                                                                   |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `"sse"` (default)  | Connects to every event stream the server advertises and refreshes when notified.                          |
+| `"polling"`        | Ignores event streams and refreshes every `poll_interval` seconds.                                         |
+| `"none"`           | Refreshes only on `initialize()` and `identify()`.                                                         |
+
+`poll_interval` defaults to `0`, which disables timer polling, as [OFREP ADR-0010](https://github.com/open-feature/protocol/blob/main/service/adrs/0010-disable-default-polling-for-static-context-providers.md) specifies. In `"sse"` mode, a positive interval polls only while no stream is connected. Change events forward `etag` and `lastModified` to the refresh request; other refreshes revalidate with the stored response `ETag`. A `429` pauses requests until its `Retry-After` time, and a `401` or `403` emits a `PROVIDER_FATAL` error and stops background refreshes.
+
+If your application has an inactive state, call `pause()` when it becomes inactive and `resume()` when it becomes active. Streams close after the inactivity delay (`inactivity_delay`, else the server's `inactivityDelaySec`, else 120 seconds); `resume()` then refetches unconditionally and reconnects. Without a stream, `resume()` revalidates the cache.
+
+To use any OFREP-compatible server, pass `ofrep_base_url` (the URL up to, but not including, `/ofrep`) and `headers` instead of `app_id` or `endpoint`. The default request timeout is 10 seconds. Call `shutdown()` to stop background threads.
 
 ## Evaluation context
 

@@ -2,6 +2,7 @@ from importlib.metadata import version
 
 from ._types import FlagshipEvaluationResponse
 from .client import FLAGSHIP_DEFAULT_BASE_URL, FlagshipClient
+from .client_provider import FlagshipClientProvider
 from .context import context_to_query_params
 from .hooks import LoggingHook, TelemetryEvent, TelemetryHook
 from .provider import FlagshipServerProvider
@@ -12,6 +13,7 @@ __all__ = [
     "__version__",
     "FLAGSHIP_DEFAULT_BASE_URL",
     "FlagshipClient",
+    "FlagshipClientProvider",
     "FlagshipEvaluationResponse",
     "FlagshipServerProvider",
     "LoggingHook",

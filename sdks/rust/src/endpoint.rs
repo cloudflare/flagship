@@ -41,6 +41,21 @@ pub(crate) fn resolve_definitions_endpoint(
     }
 }
 
+/// Derives the OFREP bulk evaluation URL from an evaluation URL ending in `/evaluate`.
+pub(crate) fn resolve_bulk_endpoint(evaluation_url: &Url) -> Option<Url> {
+    let prefix = evaluation_url
+        .path()
+        .trim_end_matches('/')
+        .strip_suffix(EVALUATE_SUFFIX)?
+        .to_owned();
+    let mut endpoint = evaluation_url.clone();
+    endpoint.set_path(&format!("{prefix}/ofrep/v1/evaluate/flags"));
+    endpoint.set_query(None);
+    endpoint.set_fragment(None);
+
+    Some(endpoint)
+}
+
 fn resolve_app_endpoint(base_url: &Url, account_id: &str, app_id: &str, resource: &str) -> Url {
     let mut endpoint = base_url.clone();
 

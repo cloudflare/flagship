@@ -2,10 +2,10 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use open_feature::EvaluationContext;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, RETRY_AFTER};
 use reqwest::{Method, StatusCode, Url};
 use serde::Serialize;
 use serde_json::Value;
@@ -163,7 +163,11 @@ impl FlagshipClient {
 
         loop {
             match self.execute_attempt(request).await {
-                Err(error) if error.is_retryable() && retries_left > 0 => {
+                Err(error)
+                    if error.is_retryable()
+                        && retries_left > 0
+                        && !(request.respect_retry_after && error.status() == Some(429)) =>
+                {
                     retries_left -= 1;
                     if !self.inner.retry_delay.is_zero() {
                         tokio::time::sleep(self.inner.retry_delay).await;
@@ -207,7 +211,48 @@ impl FlagshipClient {
         let response = read_response(response, request.body_limit).await?;
 
         if is_error_status(response.status) {
-            return Err(http_error(response.status, &response.body));
+            let retry_after = (response.status == StatusCode::TOO_MANY_REQUESTS)
+                .then(|| response.headers.get(RETRY_AFTER))
+                .flatten()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| parse_retry_after(value, SystemTime::now()));
+            return Err(http_error(response.status, &response.body).with_retry_after(retry_after));
+        }
+
+        Ok(response)
+    }
+
+    /// Opens a server-sent events stream without credentials: stream URLs carry
+    /// their own single-use tickets. The timeout covers only the response head.
+    pub(crate) async fn open_stream(&self, url: Url) -> Result<reqwest::Response, FlagshipError> {
+        let send = self
+            .inner
+            .http_client
+            .get(url)
+            .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
+            .send();
+        let response = match self.inner.timeout {
+            TimeoutPolicy::Duration(duration) => tokio::time::timeout(duration, send)
+                .await
+                .map_err(|source| {
+                    FlagshipError::new(ErrorCode::TimeoutError, "stream connection timed out")
+                        .with_source(source)
+                })?,
+            TimeoutPolicy::Disabled => send.await,
+        }
+        .map_err(FlagshipError::from_reqwest)?;
+        let is_event_stream = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.to_ascii_lowercase().starts_with("text/event-stream"));
+        if response.status() != StatusCode::OK || !is_event_stream {
+            let status = response.status().as_u16();
+            return Err(
+                FlagshipError::new(ErrorCode::General, "event stream was not accepted")
+                    .with_status(status)
+                    .with_retryable(false),
+            );
         }
 
         Ok(response)
@@ -296,6 +341,7 @@ pub(crate) struct RawRequest {
     body: Option<Vec<u8>>,
     body_limit: usize,
     extra_headers: HeaderMap,
+    respect_retry_after: bool,
 }
 
 impl RawRequest {
@@ -311,11 +357,20 @@ impl RawRequest {
             body: None,
             body_limit,
             extra_headers,
+            respect_retry_after: false,
         }
     }
 
     pub(crate) fn with_body(mut self, body: Vec<u8>) -> Self {
         self.body = Some(body);
+
+        self
+    }
+
+    /// Returns a `429` to the caller instead of retrying it, so the caller can
+    /// wait for its `Retry-After` delay.
+    pub(crate) const fn respecting_retry_after(mut self) -> Self {
+        self.respect_retry_after = true;
 
         self
     }
@@ -448,6 +503,42 @@ fn parse_evaluation_response(
             .with_status(status.as_u16())
             .with_source(source)
     })
+}
+
+/// Parses `Retry-After` as delay seconds or an IMF-fixdate such as
+/// `Sun, 06 Nov 1994 08:49:37 GMT`.
+pub(crate) fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    let [_, day, month, year, time, "GMT"] = parts.as_slice() else {
+        return None;
+    };
+    let month = i64::try_from(MONTHS.iter().position(|name| name == month)? + 1).ok()?;
+    let day: i64 = day.parse().ok()?;
+    let year: i64 = year.parse().ok()?;
+    let mut clock = time.split(':').map(str::parse::<i64>);
+    let (Some(Ok(hour)), Some(Ok(minute)), Some(Ok(second)), None) =
+        (clock.next(), clock.next(), clock.next(), clock.next())
+    else {
+        return None;
+    };
+    // Days since the Unix epoch for a proleptic Gregorian date.
+    let shifted = if month <= 2 { year - 1 } else { year };
+    let era = shifted.div_euclid(400);
+    let year_of_era = shifted - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let target = u64::try_from(days * 86_400 + hour * 3_600 + minute * 60 + second).ok()?;
+    let now = now.duration_since(UNIX_EPOCH).ok()?.as_secs();
+
+    Some(Duration::from_secs(target.saturating_sub(now)))
 }
 
 /// Statuses >= 400 and redirects other than 304 (which the default client

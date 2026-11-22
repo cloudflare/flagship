@@ -344,7 +344,9 @@ function discardResponse(error: unknown): void {
 
 	try {
 		void Promise.resolve(body.cancel()).catch(noop);
-	} catch {}
+	} catch {
+		// Response body cancellation is best effort.
+	}
 }
 
 function waitForRetry(delay: number, signals: Array<AbortSignal>): Promise<void> {

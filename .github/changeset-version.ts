@@ -137,7 +137,9 @@ export function refreshNativeLockfiles(): void {
 				execSync('uv lock', { cwd: pkg.dir, stdio: 'inherit' });
 				console.log(`Refreshed ${relative(ROOT, uvLockPath)}.`);
 			} catch (error) {
-				throw new Error(`Failed to refresh ${relative(ROOT, uvLockPath)}: ${error instanceof Error ? error.message : String(error)}`);
+				throw new Error(`Failed to refresh ${relative(ROOT, uvLockPath)}: ${error instanceof Error ? error.message : String(error)}`, {
+					cause: error,
+				});
 			}
 		}
 
@@ -150,7 +152,9 @@ export function refreshNativeLockfiles(): void {
 				execSync('cargo update --workspace', { cwd: pkg.dir, stdio: 'inherit' });
 				console.log(`Refreshed ${relative(ROOT, cargoLockPath)}.`);
 			} catch (error) {
-				throw new Error(`Failed to refresh ${relative(ROOT, cargoLockPath)}: ${error instanceof Error ? error.message : String(error)}`);
+				throw new Error(`Failed to refresh ${relative(ROOT, cargoLockPath)}: ${error instanceof Error ? error.message : String(error)}`, {
+					cause: error,
+				});
 			}
 		}
 	}

@@ -15,8 +15,8 @@ type Sdk = (typeof SDKS)[number];
 export type SdkChanges = Record<Sdk, boolean>;
 const NO_CHANGES: SdkChanges = { typescript: false, python: false, go: false, rust: false };
 
-export function classifySdkChanges(paths: string[]): SdkChanges {
-	const relative = (sdk: Sdk): string[] =>
+export function classifySdkChanges(paths: Array<string>): SdkChanges {
+	const relative = (sdk: Sdk): Array<string> =>
 		paths.filter((path) => path.startsWith(`sdks/${sdk}/`)).map((path) => path.slice(`sdks/${sdk}/`.length));
 	const typescript = relative('typescript');
 	const python = relative('python');
@@ -50,7 +50,7 @@ export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): S
 
 type ChangesetCommand = ['changeset', 'publish' | 'git-tag'];
 
-export function publishCommands(changes: SdkChanges): ChangesetCommand[] {
+export function publishCommands(changes: SdkChanges): Array<ChangesetCommand> {
 	if (changes.typescript)
 		return [
 			['changeset', 'publish'],
@@ -99,12 +99,12 @@ function revisionExists(cwd: string, revision: string): boolean {
  * This is a union of per-commit changes rather than a net diff, so a change that is
  * later reverted still counts — deliberately conservative.
  */
-function changedPaths(cwd: string, base: string, head: string): string[] {
+function changedPaths(cwd: string, base: string, head: string): Array<string> {
 	const output = git(cwd, 'log', '--format=', '--name-only', '--invert-grep', '--grep', RELEASE_COMMIT_PATTERN, `${base}..${head}`);
 	return [...new Set(output.split('\n').filter(Boolean))];
 }
 
-function git(cwd: string, ...args: string[]): string {
+function git(cwd: string, ...args: Array<string>): string {
 	return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 

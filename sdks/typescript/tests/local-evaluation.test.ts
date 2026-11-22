@@ -16,7 +16,7 @@ const suite = JSON.parse(readFileSync(casesPath, 'utf8')) as {
 		accountId: string;
 		flagKey: string;
 		context: Record<string, unknown>;
-		expected: { value: unknown; variant: string; reason: string } | { error: string } | { reasonOneOf: string[] };
+		expected: { value: unknown; variant: string; reason: string } | { error: string } | { reasonOneOf: Array<string> };
 	}>;
 	murmur: Array<{ name: string; input: string; seed: number; expected: number }>;
 };

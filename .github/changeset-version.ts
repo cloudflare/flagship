@@ -22,7 +22,7 @@ const ROOT = process.cwd();
 const CANONICAL_PACKAGE_NAME = '@cloudflare/flagship';
 const BUMP_RANK: Record<VersionType, number> = { none: 0, patch: 1, minor: 2, major: 3 };
 
-function readSdkPackages(): Package[] {
+function readSdkPackages(): Array<Package> {
 	const { packages } = getPackagesSync(ROOT);
 	return packages.filter((pkg) => pkg.relativeDir.startsWith('sdks/') && !pkg.relativeDir.slice('sdks/'.length).includes('/'));
 }
@@ -30,7 +30,7 @@ function readSdkPackages(): Package[] {
 export async function validatePendingChangesets(): Promise<void> {
 	const sdkNames = new Set(readSdkPackages().map((pkg) => pkg.packageJson.name));
 	const changesets = await readChangesets(ROOT);
-	const errors: string[] = [];
+	const errors: Array<string> = [];
 
 	for (const { id, releases } of changesets) {
 		const path = `.changeset/${id}.md`;
@@ -79,7 +79,7 @@ export async function rewriteChangesetsToCanonicalPackage(): Promise<void> {
 		if (sdkReleases.length === 0) continue;
 
 		const bump = highestBump(sdkReleases.map((release) => release.type));
-		const rewritten: Release[] = [{ name: CANONICAL_PACKAGE_NAME, type: bump }];
+		const rewritten: Array<Release> = [{ name: CANONICAL_PACKAGE_NAME, type: bump }];
 		const alreadyCanonical =
 			changeset.releases.length === rewritten.length &&
 			changeset.releases[0]?.name === CANONICAL_PACKAGE_NAME &&
@@ -91,7 +91,7 @@ export async function rewriteChangesetsToCanonicalPackage(): Promise<void> {
 	}
 }
 
-function highestBump(bumps: VersionType[]): VersionType {
+function highestBump(bumps: Array<VersionType>): VersionType {
 	return bumps.reduce<VersionType>((highest, bump) => (BUMP_RANK[bump] > BUMP_RANK[highest] ? bump : highest), 'none');
 }
 
@@ -115,7 +115,7 @@ export function syncPrivateSdkPackageVersions(): void {
 }
 
 export function syncNativeManifests(): void {
-	const errors: string[] = [];
+	const errors: Array<string> = [];
 
 	for (const pkg of readSdkPackages()) {
 		const targetVersion = pkg.packageJson.version;
@@ -163,7 +163,7 @@ export function refreshNativeLockfiles(): void {
 type PyProjectToml = { project?: { version?: string }; tool?: { poetry?: { version?: string } } };
 type CargoToml = { package?: { version?: string } };
 
-function syncPythonPackageVersion(packageDir: string, targetVersion: string, errors: string[]): void {
+function syncPythonPackageVersion(packageDir: string, targetVersion: string, errors: Array<string>): void {
 	patchTomlField(join(packageDir, 'pyproject.toml'), targetVersion, errors, (parsed: PyProjectToml) => {
 		const hasProjectVersion = parsed.project?.version !== undefined;
 		const hasPoetryVersion = parsed.tool?.poetry?.version !== undefined;
@@ -176,7 +176,7 @@ function syncPythonPackageVersion(packageDir: string, targetVersion: string, err
 	});
 }
 
-function syncRustPackageVersion(packageDir: string, targetVersion: string, errors: string[]): void {
+function syncRustPackageVersion(packageDir: string, targetVersion: string, errors: Array<string>): void {
 	patchTomlField(join(packageDir, 'Cargo.toml'), targetVersion, errors, (parsed: CargoToml) => {
 		if (parsed.package?.version === undefined) return '[package].version';
 		parsed.package.version = targetVersion;
@@ -184,7 +184,12 @@ function syncRustPackageVersion(packageDir: string, targetVersion: string, error
 	});
 }
 
-function patchTomlField<T>(manifestPath: string, targetVersion: string, errors: string[], mutate: (parsed: T) => string | undefined): void {
+function patchTomlField<T>(
+	manifestPath: string,
+	targetVersion: string,
+	errors: Array<string>,
+	mutate: (parsed: T) => string | undefined,
+): void {
 	if (!existsSync(manifestPath)) return;
 	const relativePath = relative(ROOT, manifestPath);
 	const original = readFileSync(manifestPath, 'utf8');

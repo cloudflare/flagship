@@ -209,7 +209,7 @@ describe('ContextTransformer', () => {
 		});
 
 		it('should populate droppedKeys when complex context values are present', () => {
-			const dropped: string[] = [];
+			const dropped: Array<string> = [];
 			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
 			ContextTransformer.buildUrl('https://api.example.com/evaluate', 'my-flag', { nested: { a: 1 } as any }, dropped);
@@ -238,7 +238,7 @@ describe('ContextTransformer', () => {
 		});
 
 		it('collects multiple dropped keys when droppedKeys array provided', () => {
-			const dropped: string[] = [];
+			const dropped: Array<string> = [];
 			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
 			const result = ContextTransformer.toQueryParams(

@@ -86,7 +86,7 @@ export class FlagshipClient {
 	 *
 	 * @internal
 	 */
-	async evaluateAll(context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipBulkEvaluationResult[]> {
+	async evaluateAll(context: EvaluationContext, options?: FlagshipRequestOptions): Promise<Array<FlagshipBulkEvaluationResult>> {
 		const endpoint = this.options.bulkEndpoint;
 		if (!endpoint) {
 			throw new Error('Flagship: bulk evaluation requires an endpoint ending in /evaluate, or appId and accountId.');
@@ -143,7 +143,7 @@ export class FlagshipClient {
 		request: EvaluationRequest,
 		retriesLeft: number,
 		transport: typeof globalThis.fetch,
-		signals: AbortSignal[],
+		signals: Array<AbortSignal>,
 		parse: (response: Response) => Promise<T>,
 	): Promise<T> {
 		try {
@@ -171,7 +171,7 @@ export class FlagshipClient {
 		request: EvaluationRequest,
 		timeout: number,
 		transport: typeof globalThis.fetch,
-		signals: AbortSignal[],
+		signals: Array<AbortSignal>,
 		parse: (response: Response) => Promise<T>,
 	): Promise<T> {
 		const alreadyAborted = signals.find((signal) => signal.aborted);
@@ -228,7 +228,7 @@ async function parseEvaluationResponse(response: Response): Promise<FlagshipEval
 	return data as FlagshipEvaluationResponse;
 }
 
-async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResult[]> {
+async function parseBulkResponse(response: Response): Promise<Array<FlagshipBulkEvaluationResult>> {
 	if (!response.ok) throw await httpError(response);
 
 	const data = (await response.json()) as { flags?: unknown } | null;
@@ -236,7 +236,7 @@ async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvalua
 		throw new FlagshipError('Invalid bulk evaluation response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
 
-	return data.flags as FlagshipBulkEvaluationResult[];
+	return data.flags as Array<FlagshipBulkEvaluationResult>;
 }
 
 async function parseDefinitionsResponse(response: Response): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
@@ -329,7 +329,7 @@ function discardResponse(error: unknown): void {
 	} catch {}
 }
 
-function waitForRetry(delay: number, signals: AbortSignal[]): Promise<void> {
+function waitForRetry(delay: number, signals: Array<AbortSignal>): Promise<void> {
 	const alreadyAborted = signals.find((signal) => signal.aborted);
 	if (alreadyAborted) return Promise.reject(abortedError(alreadyAborted.reason));
 	if (signals.length === 0) return new Promise((resolve) => setTimeout(resolve, delay));
@@ -366,7 +366,7 @@ function isRetryableStatus(status: number): boolean {
  *
  * @internal Exported for tests; not part of the package's public API.
  */
-export function mergeSignals(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
+export function mergeSignals(signals: Array<AbortSignal>): { signal: AbortSignal; dispose: () => void } {
 	if (signals.length === 1) {
 		return { signal: signals[0]!, dispose: noop };
 	}

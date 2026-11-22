@@ -4,14 +4,14 @@
  * @internal
  */
 
-export type FlagValue = boolean | string | number | Record<string, unknown> | unknown[];
+export type FlagValue = boolean | string | number | Record<string, unknown> | Array<unknown>;
 export type EvaluationReason = 'STATIC' | 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT' | 'ERROR';
 export type EvaluationContextValue =
 	| string
 	| number
 	| boolean
 	| null
-	| EvaluationContextValue[]
+	| Array<EvaluationContextValue>
 	| { [key: string]: EvaluationContextValue };
 export type EvaluationContext = Record<string, EvaluationContextValue>;
 
@@ -26,7 +26,7 @@ export class FlagConfigError extends Error {
 
 /** Evaluation-only rule — priority is stripped at write time after sorting. */
 export interface EvalRule {
-	conditions: Condition[];
+	conditions: Array<Condition>;
 	serve_variation: string;
 	rollout?: { percentage: number; attribute?: string };
 }
@@ -37,7 +37,7 @@ export interface EvalFlag {
 	default_variation: string;
 	variations: Record<string, unknown>;
 	/** Rules pre-sorted by priority at write time. Priority field stripped — iteration order is evaluation order. */
-	rules: EvalRule[];
+	rules: Array<EvalRule>;
 	/** Flat flag metadata; omitted by the backend when empty. */
 	metadata?: Record<string, string | number | boolean>;
 }
@@ -69,7 +69,7 @@ export interface BaseCondition {
 
 export interface LogicalCondition {
 	logical_operator: 'AND' | 'OR';
-	clauses: Condition[];
+	clauses: Array<Condition>;
 }
 
 export type Condition = BaseCondition | LogicalCondition;
@@ -178,7 +178,7 @@ function evaluateOrderingOperator(operator: OrderingOperator, attrValue: unknown
 	}
 }
 
-function containsValue(values: unknown[], target: unknown): boolean {
+function containsValue(values: Array<unknown>, target: unknown): boolean {
 	const expected = String(target);
 	for (const value of values) {
 		if (value !== null && String(value) === expected) return true;
@@ -186,7 +186,7 @@ function containsValue(values: unknown[], target: unknown): boolean {
 	return false;
 }
 
-function containsPrimitiveValue(values: unknown[], target: unknown): boolean {
+function containsPrimitiveValue(values: Array<unknown>, target: unknown): boolean {
 	const expected = String(target);
 	for (const value of values) {
 		if (isScalar(value) && String(value) === expected) return true;

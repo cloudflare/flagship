@@ -6,7 +6,7 @@ export type NormalizedContextValue =
 	| number
 	| boolean
 	| null
-	| NormalizedContextValue[]
+	| Array<NormalizedContextValue>
 	| { [key: string]: NormalizedContextValue };
 
 export interface NormalizedEvaluationContext {
@@ -102,7 +102,7 @@ export class ContextTransformer {
 	 * @param context - OpenFeature evaluation context
 	 * @param droppedKeys - Optional collector array; skipped key names are pushed here
 	 */
-	static toQueryParams(context: EvaluationContext, droppedKeys?: string[]): Record<string, string> {
+	static toQueryParams(context: EvaluationContext, droppedKeys?: Array<string>): Record<string, string> {
 		return Object.fromEntries(toSearchParams(context, droppedKeys));
 	}
 
@@ -114,12 +114,12 @@ export class ContextTransformer {
 	 * @param context - OpenFeature evaluation context
 	 * @param droppedKeys - Optional collector array; skipped context key names are pushed here
 	 */
-	static buildUrl(baseUrl: string, flagKey: string, context: EvaluationContext, droppedKeys?: string[]): string {
+	static buildUrl(baseUrl: string, flagKey: string, context: EvaluationContext, droppedKeys?: Array<string>): string {
 		return buildEvaluationUrl(new URL(baseUrl).toString(), flagKey, context, droppedKeys);
 	}
 }
 
-export function buildEvaluationUrl(baseUrl: string, flagKey: string, context: EvaluationContext, droppedKeys?: string[]): string {
+export function buildEvaluationUrl(baseUrl: string, flagKey: string, context: EvaluationContext, droppedKeys?: Array<string>): string {
 	const params = toSearchParams(context, droppedKeys, flagKey);
 
 	if (!baseUrl.includes('?') && !baseUrl.includes('#')) return `${baseUrl}?${params}`;
@@ -129,7 +129,7 @@ export function buildEvaluationUrl(baseUrl: string, flagKey: string, context: Ev
 	return url.toString();
 }
 
-function toSearchParams(context: EvaluationContext, droppedKeys?: string[], flagKey?: string): URLSearchParams {
+function toSearchParams(context: EvaluationContext, droppedKeys?: Array<string>, flagKey?: string): URLSearchParams {
 	const params = new URLSearchParams();
 	if (flagKey !== undefined) params.set('flagKey', flagKey);
 

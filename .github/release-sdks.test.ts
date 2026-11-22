@@ -282,6 +282,6 @@ function commit(repo: string, message: string): void {
 	git(repo, 'commit', '-m', message);
 }
 
-function git(repo: string, ...args: string[]): string {
+function git(repo: string, ...args: Array<string>): string {
 	return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }

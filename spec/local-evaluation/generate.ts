@@ -66,20 +66,20 @@ function murmurhash3(str: string, seed: number): number {
 	return h >>> 0;
 }
 
-type FlagValue = boolean | string | number | Record<string, unknown> | unknown[];
+type FlagValue = boolean | string | number | Record<string, unknown> | Array<unknown>;
 type EvalFlag = {
 	key: string;
 	enabled: boolean;
 	default_variation: string;
 	variations: Record<string, unknown>;
 	rules: Array<{
-		conditions: unknown[];
+		conditions: Array<unknown>;
 		serve_variation: string;
 		rollout?: { percentage: number; attribute?: string };
 	}>;
 };
 
-type CaseExpected = { value: FlagValue; variant: string; reason: string } | { error: string } | { reasonOneOf: string[] };
+type CaseExpected = { value: FlagValue; variant: string; reason: string } | { error: string } | { reasonOneOf: Array<string> };
 
 interface ConformanceCase {
 	name: string;
@@ -109,11 +109,11 @@ function base(attr: string, operator: string, value: unknown) {
 	return { attribute: attr, operator, value };
 }
 
-function and(...clauses: unknown[]) {
+function and(...clauses: Array<unknown>) {
 	return { logical_operator: 'AND' as const, clauses };
 }
 
-function or(...clauses: unknown[]) {
+function or(...clauses: Array<unknown>) {
 	return { logical_operator: 'OR' as const, clauses };
 }
 
@@ -144,7 +144,7 @@ function caseOf(name: string, flagDef: EvalFlag, context: Record<string, unknown
 	}
 }
 
-const cases: ConformanceCase[] = [];
+const cases: Array<ConformanceCase> = [];
 
 // --- STATIC / DISABLED / DEFAULT ---
 cases.push(

@@ -749,7 +749,7 @@ describe('FlagshipClient', () => {
 	describe('abort signal', () => {
 		/** Transport that only settles when the signal it was handed aborts. */
 		function pendingTransport() {
-			const seen: (AbortSignal | undefined)[] = [];
+			const seen: Array<AbortSignal | undefined> = [];
 			const fetchImpl = vi.fn((_url: any, init?: RequestInit) => {
 				const signal = (init?.signal ?? undefined) as AbortSignal | undefined;
 				seen.push(signal);

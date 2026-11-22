@@ -16,8 +16,8 @@ describe('Hooks', () => {
 
 	describe('LoggingHook', () => {
 		it('should log flag evaluations', async () => {
-			const logMessages: any[] = [];
-			const logger = vi.fn((...args: any[]) => logMessages.push(args));
+			const logMessages: Array<any> = [];
+			const logger = vi.fn((...args: Array<any>) => logMessages.push(args));
 
 			(global.fetch as any).mockResolvedValueOnce({
 				ok: true,
@@ -51,8 +51,8 @@ describe('Hooks', () => {
 		});
 
 		it('should log errors during evaluation', async () => {
-			const logMessages: any[] = [];
-			const logger = vi.fn((...args: any[]) => logMessages.push(args));
+			const logMessages: Array<any> = [];
+			const logger = vi.fn((...args: Array<any>) => logMessages.push(args));
 
 			(global.fetch as any).mockRejectedValueOnce(new Error('Network error'));
 
@@ -108,7 +108,7 @@ describe('Hooks', () => {
 
 	describe('TelemetryHook', () => {
 		it('should track flag evaluations', async () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
 			(global.fetch as any).mockResolvedValueOnce({
@@ -148,7 +148,7 @@ describe('Hooks', () => {
 		});
 
 		it('should track errors during evaluation', async () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
 			(global.fetch as any).mockRejectedValueOnce(new Error('Network error'));
@@ -176,7 +176,7 @@ describe('Hooks', () => {
 		});
 
 		it('should track multiple flag evaluations', async () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
 			(global.fetch as any)
@@ -207,7 +207,7 @@ describe('Hooks', () => {
 		});
 
 		it('should include context in telemetry events', async () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
 			(global.fetch as any).mockResolvedValueOnce({
@@ -238,10 +238,10 @@ describe('Hooks', () => {
 
 	describe('Multiple Hooks', () => {
 		it('should execute both logging and telemetry hooks', async () => {
-			const logMessages: any[] = [];
-			const logger = vi.fn((...args: any[]) => logMessages.push(args));
+			const logMessages: Array<any> = [];
+			const logger = vi.fn((...args: Array<any>) => logMessages.push(args));
 
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const onEvent = vi.fn((event: TelemetryEvent) => events.push(event));
 
 			(global.fetch as any).mockResolvedValueOnce({

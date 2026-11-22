@@ -29,7 +29,7 @@ function makeDetails(overrides: Partial<EvaluationDetails<FlagValue>> = {}): Eva
 describe('TelemetryHook (unit)', () => {
 	describe('before + after (evaluation event)', () => {
 		it('emits an evaluation event with correct fields', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext('my-flag');
 			const details = makeDetails({ value: true, reason: 'TARGETING_MATCH', variant: 'on', errorCode: undefined });
@@ -48,7 +48,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('forwards hookHints to the evaluation event', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 			const hints = { requestId: 'req-123', traceId: 'trace-abc' };
@@ -61,7 +61,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('hints is undefined when no hookHints were passed to before', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -73,7 +73,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('includes context in the evaluation event', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -85,7 +85,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('includes errorCode from evaluationDetails when present', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 			const details = makeDetails({ errorCode: ErrorCode.TYPE_MISMATCH });
@@ -98,7 +98,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('duration is non-negative', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -111,7 +111,7 @@ describe('TelemetryHook (unit)', () => {
 
 		it('duration increases with elapsed time', async () => {
 			vi.useFakeTimers();
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -127,7 +127,7 @@ describe('TelemetryHook (unit)', () => {
 
 	describe('before + error (error event)', () => {
 		it('emits an error event with errorMessage from Error instance', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext('err-flag');
 
@@ -142,7 +142,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('stringifies non-Error thrown values', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -154,7 +154,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('forwards hookHints to the error event', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 			const hints = { requestId: 'req-456' };
@@ -167,7 +167,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('includes context in the error event', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -179,7 +179,7 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('error event has no errorCode field', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -234,7 +234,7 @@ describe('TelemetryHook (unit)', () => {
 
 	describe('after without preceding before', () => {
 		it('still emits event with undefined duration', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -248,7 +248,7 @@ describe('TelemetryHook (unit)', () => {
 
 	describe('error without preceding before', () => {
 		it('still emits event with undefined duration', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
@@ -263,7 +263,7 @@ describe('TelemetryHook (unit)', () => {
 	describe('multiple concurrent evaluations', () => {
 		it('tracks timing independently per hookContext object', () => {
 			vi.useFakeTimers();
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx1 = makeHookContext('flag-1');
 			const ctx2 = makeHookContext('flag-2');

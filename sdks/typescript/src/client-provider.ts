@@ -241,7 +241,7 @@ function resolveRelativeEndpoint(options: FlagshipClientProviderOptions): Flagsh
 	return { ...options, endpoint: `${window.location.origin}${endpoint}` };
 }
 
-function changedKeys(previous: Map<string, CachedFlag>, next: Map<string, CachedFlag>): string[] {
+function changedKeys(previous: Map<string, CachedFlag>, next: Map<string, CachedFlag>): Array<string> {
 	return [...new Set([...previous.keys(), ...next.keys()])].filter(
 		(key) => JSON.stringify(previous.get(key)) !== JSON.stringify(next.get(key)),
 	);

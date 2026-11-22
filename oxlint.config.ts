@@ -26,7 +26,6 @@ export default defineConfig({
 		'quality/no-object-parameters': 'off',
 		'quality/no-unknown-returns': 'off',
 		'quality/no-unsafe-dictionary-type': 'off',
-		'typescript/array-type': 'off',
 		'typescript/consistent-type-imports': 'off',
 		'typescript/no-base-to-string': 'off',
 		'typescript/no-import-type-side-effects': 'off',

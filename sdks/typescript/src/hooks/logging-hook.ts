@@ -16,9 +16,9 @@ import type { Hook, HookContext, EvaluationDetails, FlagValue, HookHints, Before
  * ```
  */
 export class LoggingHook implements Hook {
-	private readonly logger: (message: string, ...args: unknown[]) => void;
+	private readonly logger: (message: string, ...args: Array<unknown>) => void;
 
-	constructor(logger: (message: string, ...args: unknown[]) => void = console.log) {
+	constructor(logger: (message: string, ...args: Array<unknown>) => void = console.log) {
 		this.logger = logger;
 	}
 

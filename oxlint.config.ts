@@ -65,7 +65,6 @@ export default defineConfig({
 			files: [
 				'sdks/typescript/examples/browser.ts',
 				'sdks/typescript/examples/cloudflare-worker-binding.ts',
-				'sdks/typescript/src/context.ts',
 				'spec/local-evaluation/generate.ts',
 			],
 			rules: { 'typescript/no-unsafe-assignment': 'off' },

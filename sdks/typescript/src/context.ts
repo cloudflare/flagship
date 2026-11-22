@@ -75,7 +75,7 @@ function normalizeContextValue(
 			};
 		}
 
-		const prototype = Object.getPrototypeOf(value);
+		const prototype: unknown = Object.getPrototypeOf(value);
 		if (prototype !== Object.prototype && prototype !== null) {
 			throw invalidContext(path, 'only plain objects are supported');
 		}

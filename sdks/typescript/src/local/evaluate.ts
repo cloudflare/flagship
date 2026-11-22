@@ -236,7 +236,7 @@ export function murmurhash3(str: string, seed: number): number {
 	let h = seed >>> 0;
 	let i = 0;
 	while (i + 4 <= n) {
-		let k = b[i]! | (b[i + 1]! << 8) | (b[i + 2]! << 16) | (b[i + 3]! << 24);
+		let k = b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);
 		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
 		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
@@ -247,13 +247,13 @@ export function murmurhash3(str: string, seed: number): number {
 	}
 	let k = 0;
 	if (n - i >= 3) {
-		k ^= b[i + 2]! << 16;
+		k ^= b[i + 2] << 16;
 	}
 	if (n - i >= 2) {
-		k ^= b[i + 1]! << 8;
+		k ^= b[i + 1] << 8;
 	}
 	if (n > i) {
-		k ^= b[i]!;
+		k ^= b[i];
 		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
 		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
@@ -287,7 +287,7 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): bo
 		return false;
 	}
 
-	const { attribute, operator, value: target } = condition as BaseCondition;
+	const { attribute, operator, value: target } = condition;
 	const attrValue = getContextValue(context, attribute);
 	if (attrValue === undefined) {
 		return false;
@@ -356,7 +356,7 @@ export function evaluateFlag(
 	let seed: number | undefined;
 
 	for (let i = 0; i < flagDef.rules.length; i++) {
-		const rule = flagDef.rules[i]!;
+		const rule = flagDef.rules[i];
 		let ruleMatches = true;
 
 		for (const condition of rule.conditions) {
@@ -380,7 +380,7 @@ export function evaluateFlag(
 					const h = murmurhash3(String(attr), seed);
 					bucket = (h % 100) + Math.floor(h / 100) / HASH_QUOTIENT_RANGE;
 				} else {
-					bucket = (globalThis.crypto.getRandomValues(randomBuf)[0]! / 0x1_00_00_00_00) * 100;
+					bucket = (globalThis.crypto.getRandomValues(randomBuf)[0] / 0x1_00_00_00_00) * 100;
 				}
 				if (bucket >= rollout.percentage) {
 					ruleMatches = false;

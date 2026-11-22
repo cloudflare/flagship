@@ -49,17 +49,17 @@ describe('local evaluation engine — shared vectors', () => {
 			expect(flagDef).toBeDefined();
 
 			if ('error' in c.expected) {
-				expect(() => evaluateFlag(flagDef!, c.context as never, c.accountId)).toThrow(FlagConfigError);
+				expect(() => evaluateFlag(flagDef, c.context as never, c.accountId)).toThrow(FlagConfigError);
 				return;
 			}
 
 			if ('reasonOneOf' in c.expected) {
-				const result = evaluateFlag(flagDef!, c.context as never, c.accountId);
+				const result = evaluateFlag(flagDef, c.context as never, c.accountId);
 				expect(c.expected.reasonOneOf).toContain(result.reason);
 				return;
 			}
 
-			const result = evaluateFlag(flagDef!, c.context as never, c.accountId);
+			const result = evaluateFlag(flagDef, c.context as never, c.accountId);
 			expect(result).toEqual({
 				value: c.expected.value,
 				variant: c.expected.variant,
@@ -121,7 +121,7 @@ describe('FlagshipClient.fetchDefinitions', () => {
 		const result = await client.fetchDefinitions();
 		expect(result).toEqual({ etag: '"abc"', flags: { f1: { key: 'f1' } } });
 		expect(fetch).toHaveBeenCalledOnce();
-		const [url, init] = fetch.mock.calls[0]!;
+		const [url, init] = fetch.mock.calls[0];
 		expect(String(url)).toContain('/definitions');
 		expect(init.method).toBe('GET');
 	});
@@ -147,7 +147,7 @@ describe('FlagshipClient.fetchDefinitions', () => {
 
 		const result = await client.fetchDefinitions('"abc"');
 		expect(result).toBe('not-modified');
-		const init = fetch.mock.calls[0]![1] as RequestInit;
+		const init = fetch.mock.calls[0][1] as RequestInit;
 		expect(new Headers(init.headers).get('If-None-Match')).toBe('"abc"');
 	});
 
@@ -685,7 +685,7 @@ describe('FlagshipServerProvider local evaluation', () => {
 			await Promise.resolve();
 
 			await provider.onClose();
-			resolveFetch!({
+			resolveFetch({
 				ok: true,
 				status: 200,
 				headers: new Headers({ etag: '"v2"' }),
@@ -788,7 +788,7 @@ describe('FlagshipServerProvider local evaluation', () => {
 
 			// Stale refresh from the previous session finally resolves with the
 			// old definitions. It must not overwrite the fresh snapshot.
-			resolveStale!({
+			resolveStale({
 				ok: true,
 				status: 200,
 				headers: new Headers({ etag: '"stale"' }),

@@ -40,7 +40,7 @@ function murmurhash3(str: string, seed: number): number {
 	let h = seed >>> 0;
 	let i = 0;
 	while (i + 4 <= n) {
-		let k = b[i]! | (b[i + 1]! << 8) | (b[i + 2]! << 16) | (b[i + 3]! << 24);
+		let k = b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);
 		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
 		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
@@ -51,13 +51,13 @@ function murmurhash3(str: string, seed: number): number {
 	}
 	let k = 0;
 	if (n - i >= 3) {
-		k ^= b[i + 2]! << 16;
+		k ^= b[i + 2] << 16;
 	}
 	if (n - i >= 2) {
-		k ^= b[i + 1]! << 8;
+		k ^= b[i + 1] << 8;
 	}
 	if (n > i) {
-		k ^= b[i]!;
+		k ^= b[i];
 		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
 		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
@@ -204,7 +204,7 @@ for (const [name, operator, attr, value, context, shouldMatch] of [
 		...stringOps,
 		rules: [{ conditions: [base(attr, operator, value)], serve_variation: 'hit' }],
 	});
-	const c = caseOf(`string-${name}`, f, context as Record<string, unknown>);
+	const c = caseOf(`string-${name}`, f, context);
 	if (shouldMatch) {
 		if (!('value' in c.expected) || c.expected.reason !== 'TARGETING_MATCH') {
 			throw new Error(`expected match for ${name}`);

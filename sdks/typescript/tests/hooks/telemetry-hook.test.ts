@@ -35,9 +35,9 @@ describe('TelemetryHook (unit)', () => {
 			const ctx = makeHookContext('my-flag');
 			const details = makeDetails({ value: true, reason: 'TARGETING_MATCH', variant: 'on', errorCode: undefined });
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, details);
-			hook.finally(ctx as any, details);
+			hook.before(ctx);
+			hook.after(ctx, details);
+			hook.finally(ctx, details);
 
 			expect(events).toHaveLength(1);
 			expect(events[0].type).toBe('evaluation');
@@ -54,9 +54,9 @@ describe('TelemetryHook (unit)', () => {
 			const ctx = makeHookContext();
 			const hints = { requestId: 'req-123', traceId: 'trace-abc' };
 
-			hook.before(ctx as any, hints);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx, hints);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].hints).toEqual(hints);
 		});
@@ -66,9 +66,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].hints).toBeUndefined();
 		});
@@ -78,9 +78,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].context).toEqual(ctx.context);
 		});
@@ -91,9 +91,9 @@ describe('TelemetryHook (unit)', () => {
 			const ctx = makeHookContext();
 			const details = makeDetails({ errorCode: ErrorCode.TYPE_MISMATCH });
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, details);
-			hook.finally(ctx as any, details);
+			hook.before(ctx);
+			hook.after(ctx, details);
+			hook.finally(ctx, details);
 
 			expect(events[0].errorCode).toBe(ErrorCode.TYPE_MISMATCH);
 		});
@@ -103,9 +103,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].duration).toBeGreaterThanOrEqual(0);
 		});
@@ -116,10 +116,10 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
+			hook.before(ctx);
 			vi.advanceTimersByTime(100);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].duration).toBeGreaterThanOrEqual(100);
 			vi.useRealTimers();
@@ -132,9 +132,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext('err-flag');
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, new Error('network down'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, new Error('network down'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events).toHaveLength(1);
 			expect(events[0].type).toBe('error');
@@ -147,9 +147,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, 'some string error');
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, 'some string error');
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].errorMessage).toBe('some string error');
 		});
@@ -160,9 +160,9 @@ describe('TelemetryHook (unit)', () => {
 			const ctx = makeHookContext();
 			const hints = { requestId: 'req-456' };
 
-			hook.before(ctx as any, hints);
-			hook.error(ctx as any, new Error('boom'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx, hints);
+			hook.error(ctx, new Error('boom'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].hints).toEqual(hints);
 		});
@@ -172,9 +172,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, new Error('x'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, new Error('x'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].context).toEqual(ctx.context);
 		});
@@ -184,9 +184,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, new Error('x'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, new Error('x'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].errorCode).toBeUndefined();
 		});
@@ -197,9 +197,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook(() => {});
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			const startTimesSize = (hook as any).startTimes.size;
 			expect(startTimesSize).toBe(0);
@@ -209,9 +209,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook(() => {});
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, new Error('x'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, new Error('x'));
+			hook.finally(ctx, makeDetails());
 
 			expect((hook as any).startTimes.size).toBe(0);
 		});
@@ -220,9 +220,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook(() => {});
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any, { traceId: 'abc' });
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx, { traceId: 'abc' });
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect((hook as any).hints.has(ctx)).toBe(false);
 		});
@@ -239,8 +239,8 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events).toHaveLength(1);
 			expect(events[0].duration).toBeUndefined();
@@ -253,8 +253,8 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.error(ctx as any, new Error('x'));
-			hook.finally(ctx as any, makeDetails());
+			hook.error(ctx, new Error('x'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events).toHaveLength(1);
 			expect(events[0].duration).toBeUndefined();
@@ -269,15 +269,15 @@ describe('TelemetryHook (unit)', () => {
 			const ctx1 = makeHookContext('flag-1');
 			const ctx2 = makeHookContext('flag-2');
 
-			hook.before(ctx1 as any);
+			hook.before(ctx1);
 			vi.advanceTimersByTime(50);
-			hook.before(ctx2 as any);
+			hook.before(ctx2);
 			vi.advanceTimersByTime(50);
 
-			hook.after(ctx1 as any, makeDetails({ flagKey: 'flag-1' }));
-			hook.finally(ctx1 as any, makeDetails());
-			hook.after(ctx2 as any, makeDetails({ flagKey: 'flag-2' }));
-			hook.finally(ctx2 as any, makeDetails());
+			hook.after(ctx1, makeDetails({ flagKey: 'flag-1' }));
+			hook.finally(ctx1, makeDetails());
+			hook.after(ctx2, makeDetails({ flagKey: 'flag-2' }));
+			hook.finally(ctx2, makeDetails());
 
 			expect(events).toHaveLength(2);
 			expect(events[0].flagKey).toBe('flag-1');
@@ -294,8 +294,8 @@ describe('TelemetryHook (unit)', () => {
 			const ctx1 = makeHookContext('flag');
 			const ctx2 = makeHookContext('flag');
 
-			hook.before(ctx1 as any);
-			hook.before(ctx2 as any);
+			hook.before(ctx1);
+			hook.before(ctx2);
 
 			expect((hook as any).startTimes.size).toBe(2);
 		});

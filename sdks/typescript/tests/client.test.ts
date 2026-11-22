@@ -497,7 +497,7 @@ describe('FlagshipClient', () => {
 			const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 1,
 				retryDelay: 10_000,
 			});
@@ -521,7 +521,7 @@ describe('FlagshipClient', () => {
 				.mockResolvedValueOnce({ ok: true, json: async () => ({ flagKey: 'my-flag', value: true }) });
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 1,
 				retryDelay: 0,
 			});
@@ -735,7 +735,7 @@ describe('FlagshipClient', () => {
 
 			const original = globalThis.fetch;
 			const lateInstalled = vi.fn(async () => okResponse());
-			globalThis.fetch = lateInstalled as unknown as typeof globalThis.fetch;
+			globalThis.fetch = lateInstalled;
 
 			try {
 				await client.evaluate('my-flag', {});
@@ -751,7 +751,7 @@ describe('FlagshipClient', () => {
 		function pendingTransport() {
 			const seen: Array<AbortSignal | undefined> = [];
 			const fetchImpl = vi.fn((_url: any, init?: RequestInit) => {
-				const signal = (init?.signal ?? undefined) as AbortSignal | undefined;
+				const signal = init?.signal ?? undefined;
 				seen.push(signal);
 				return new Promise<Response>((_resolve, reject) => {
 					const fail = () => {
@@ -942,7 +942,7 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 1,
 				retryDelay: 0,
 			});
@@ -960,7 +960,7 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 3,
 				retryDelay: 0,
 			});
@@ -980,7 +980,7 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 0,
 			});
 

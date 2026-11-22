@@ -62,7 +62,7 @@ export class FlagshipClient {
 		const request = normalized.requiresPost
 			? buildPostRequest(this.options.endpoint, { flagKey, context: normalized.context }, this.options.fetchOptions)
 			: {
-					url: buildEvaluationUrl(this.options.endpoint, flagKey, normalized.context as EvaluationContext),
+					url: buildEvaluationUrl(this.options.endpoint, flagKey, normalized.context),
 					init: this.options.fetchOptions,
 				};
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
@@ -230,8 +230,8 @@ async function parseBulkResponse(response: Response): Promise<Array<FlagshipBulk
 		throw await httpError(response);
 	}
 
-	const data = (await response.json()) as { flags?: unknown } | null;
-	if (!data || !Array.isArray(data.flags)) {
+	const data: unknown = await response.json();
+	if (!data || typeof data !== 'object' || !('flags' in data) || !Array.isArray(data.flags)) {
 		throw new FlagshipError('Invalid bulk evaluation response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
 
@@ -252,9 +252,9 @@ async function parseDefinitionsResponse(response: Response): Promise<{ etag: str
 		!data ||
 		typeof data !== 'object' ||
 		!('flags' in data) ||
-		typeof (data as { flags: unknown }).flags !== 'object' ||
-		(data as { flags: unknown }).flags === null ||
-		Array.isArray((data as { flags: unknown }).flags)
+		typeof data.flags !== 'object' ||
+		data.flags === null ||
+		Array.isArray(data.flags)
 	) {
 		throw new FlagshipError('Invalid definitions response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
@@ -279,16 +279,20 @@ async function httpError(response: Response): Promise<FlagshipError> {
 	);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 async function readErrorBody(response: Response): Promise<{ message?: string; errorCode?: string }> {
 	try {
-		const body = (await response.json()) as Record<string, unknown> | null;
-		if (!body || typeof body !== 'object') {
+		const body: unknown = await response.json();
+		if (!isRecord(body)) {
 			return {};
 		}
 		const errors = Array.isArray(body.errors) ? (body.errors[0] as { message?: unknown } | undefined) : undefined;
 		const message = [body.errorMessage, body.errorDetails, body.error, errors?.message].find((value) => typeof value === 'string');
 		return {
-			message: message as string | undefined,
+			message,
 			errorCode: typeof body.errorCode === 'string' ? body.errorCode : undefined,
 		};
 	} catch {
@@ -389,7 +393,7 @@ function isRetryableStatus(status: number): boolean {
  */
 export function mergeSignals(signals: Array<AbortSignal>): { signal: AbortSignal; dispose: () => void } {
 	if (signals.length === 1) {
-		return { signal: signals[0]!, dispose: noop };
+		return { signal: signals[0], dispose: noop };
 	}
 
 	if (typeof AbortSignal.any === 'function') {
@@ -435,7 +439,7 @@ function buildFetchOptions(options: FlagshipProviderOptions): RequestInit {
 		return fetchOptions;
 	}
 
-	const existingHeaders = new Headers(fetchOptions.headers as HeadersInit | undefined);
+	const existingHeaders = new Headers(fetchOptions.headers);
 
 	// Only inject the Authorization header when the caller hasn't already
 	// provided one explicitly — their value takes precedence.

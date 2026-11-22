@@ -297,7 +297,7 @@ export class FlagshipServerProvider implements Provider {
 
 		const result = await this.resolve(flagKey, defaultValue, context, expectedType, logger);
 		if (isCacheable(result)) {
-			this.cache.set(key, result as ResolutionDetails<unknown>);
+			this.cache.set(key, result);
 		}
 		return result;
 	}

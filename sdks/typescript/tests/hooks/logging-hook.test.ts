@@ -31,7 +31,7 @@ describe('LoggingHook (unit)', () => {
 		it('calls the logger with the flag key', () => {
 			const logger = vi.fn();
 			const hook = new LoggingHook(logger);
-			hook.before(makeHookContext('my-flag') as any);
+			hook.before(makeHookContext('my-flag'));
 			expect(logger).toHaveBeenCalledTimes(1);
 			expect(logger.mock.calls[0][0]).toContain('my-flag');
 		});
@@ -40,7 +40,7 @@ describe('LoggingHook (unit)', () => {
 			const logger = vi.fn();
 			const hook = new LoggingHook(logger);
 			const ctx = makeHookContext();
-			hook.before(ctx as any);
+			hook.before(ctx);
 			const secondArg = logger.mock.calls[0][1];
 			expect(secondArg).toHaveProperty('defaultValue');
 			expect(secondArg).toHaveProperty('context');
@@ -56,7 +56,7 @@ describe('LoggingHook (unit)', () => {
 		it('calls the logger with the flag key', () => {
 			const logger = vi.fn();
 			const hook = new LoggingHook(logger);
-			hook.after(makeHookContext('after-flag') as any, makeDetails());
+			hook.after(makeHookContext('after-flag'), makeDetails());
 			expect(logger.mock.calls[0][0]).toContain('after-flag');
 		});
 
@@ -64,7 +64,7 @@ describe('LoggingHook (unit)', () => {
 			const logger = vi.fn();
 			const hook = new LoggingHook(logger);
 			hook.after(
-				makeHookContext() as any,
+				makeHookContext(),
 				makeDetails({ value: 42, reason: 'TARGETING_MATCH', variant: 'v1', errorCode: ErrorCode.TYPE_MISMATCH }),
 			);
 			const secondArg = logger.mock.calls[0][1];
@@ -84,7 +84,7 @@ describe('LoggingHook (unit)', () => {
 		it('extracts message from Error instance', () => {
 			const logger = vi.fn();
 			const hook = new LoggingHook(logger);
-			hook.error(makeHookContext('err-flag') as any, new Error('boom'));
+			hook.error(makeHookContext('err-flag'), new Error('boom'));
 			expect(logger.mock.calls[0][0]).toContain('err-flag');
 			expect(logger.mock.calls[0][1]).toBe('boom');
 		});
@@ -92,14 +92,14 @@ describe('LoggingHook (unit)', () => {
 		it('stringifies non-Error thrown values', () => {
 			const logger = vi.fn();
 			const hook = new LoggingHook(logger);
-			hook.error(makeHookContext() as any, 'plain string error');
+			hook.error(makeHookContext(), 'plain string error');
 			expect(logger.mock.calls[0][1]).toBe('plain string error');
 		});
 
 		it('stringifies number thrown values', () => {
 			const logger = vi.fn();
 			const hook = new LoggingHook(logger);
-			hook.error(makeHookContext() as any, 42);
+			hook.error(makeHookContext(), 42);
 			expect(logger.mock.calls[0][1]).toBe('42');
 		});
 
@@ -113,7 +113,7 @@ describe('LoggingHook (unit)', () => {
 		it('is a no-op and does not call logger', () => {
 			const logger = vi.fn();
 			const hook = new LoggingHook(logger);
-			hook.finally(makeHookContext() as any, makeDetails());
+			hook.finally(makeHookContext(), makeDetails());
 			expect(logger).not.toHaveBeenCalled();
 		});
 
@@ -127,7 +127,7 @@ describe('LoggingHook (unit)', () => {
 		it('uses console.log when no logger is provided', () => {
 			const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 			const hook = new LoggingHook();
-			hook.before(makeHookContext() as any);
+			hook.before(makeHookContext());
 			expect(consoleSpy).toHaveBeenCalled();
 			consoleSpy.mockRestore();
 		});

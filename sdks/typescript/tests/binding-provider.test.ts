@@ -166,7 +166,7 @@ describe('FlagshipServerProvider (binding mode)', () => {
 					binding,
 					appId: 'app-123',
 					retries: 3,
-				} as any);
+				});
 				expect.fail('should have thrown');
 			} catch (error: any) {
 				expect(error.message).toContain('appId');
@@ -646,7 +646,7 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			const provider = new FlagshipServerProvider({ binding });
 			const date = new Date('2025-06-15T10:30:00.000Z');
 
-			await provider.resolveBooleanEvaluation('my-flag', false, { targetingKey: 'user-1', createdAt: date as any }, noopLogger);
+			await provider.resolveBooleanEvaluation('my-flag', false, { targetingKey: 'user-1', createdAt: date }, noopLogger);
 
 			expect(binding.getBooleanDetails).toHaveBeenCalledWith('my-flag', false, {
 				targetingKey: 'user-1',
@@ -661,7 +661,7 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			await provider.resolveBooleanEvaluation(
 				'my-flag',
 				false,
-				{ targetingKey: 'user-1', nullVal: null as any, undefVal: undefined as any },
+				{ targetingKey: 'user-1', nullVal: null, undefVal: undefined as any },
 				noopLogger,
 			);
 
@@ -681,8 +681,8 @@ describe('FlagshipServerProvider (binding mode)', () => {
 				false,
 				{
 					targetingKey: 'user-1',
-					profile: { account: { plan: 'enterprise', createdAt: new Date('2025-06-15T10:30:00.000Z') } } as any,
-					tags: ['beta', 'internal'] as any,
+					profile: { account: { plan: 'enterprise', createdAt: new Date('2025-06-15T10:30:00.000Z') } },
+					tags: ['beta', 'internal'],
 				},
 				spyLogger,
 			);

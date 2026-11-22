@@ -70,7 +70,7 @@ describe('FlagshipClient', () => {
 		it('should accept custom timeout and retries', () => {
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				timeout: 10000,
+				timeout: 10_000,
 				retries: 3,
 			});
 			expect(client).toBeInstanceOf(FlagshipClient);
@@ -250,7 +250,7 @@ describe('FlagshipClient', () => {
 			expect((global.fetch as any).mock.calls[0][1].body).toBe((global.fetch as any).mock.calls[1][1].body);
 		});
 
-		it('should not retry on 404', { timeout: 10000 }, async () => {
+		it('should not retry on 404', { timeout: 10_000 }, async () => {
 			// Reset mock to ensure clean state
 			vi.clearAllMocks();
 
@@ -275,7 +275,7 @@ describe('FlagshipClient', () => {
 			expect(global.fetch).toHaveBeenCalledTimes(1);
 		});
 
-		it('should handle timeout', { timeout: 10000 }, async () => {
+		it('should handle timeout', { timeout: 10_000 }, async () => {
 			// Mock a fetch that simulates an abort
 			(global.fetch as any).mockImplementation(() => {
 				const error = new Error('The operation was aborted');

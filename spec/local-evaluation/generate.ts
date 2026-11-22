@@ -39,12 +39,12 @@ function murmurhash3(str: string, seed: number): number {
 	let i = 0;
 	while (i + 4 <= n) {
 		let k = b[i]! | (b[i + 1]! << 8) | (b[i + 2]! << 16) | (b[i + 3]! << 24);
-		k = Math.imul(k, 0xcc9e2d51) >>> 0;
+		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
-		k = Math.imul(k, 0x1b873593) >>> 0;
+		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
 		h ^= k;
 		h = ((h << 13) | (h >>> 19)) >>> 0;
-		h = (Math.imul(h, 5) + 0xe6546b64) >>> 0;
+		h = (Math.imul(h, 5) + 0xe6_54_6b_64) >>> 0;
 		i += 4;
 	}
 	let k = 0;
@@ -52,16 +52,16 @@ function murmurhash3(str: string, seed: number): number {
 	if (n - i >= 2) k ^= b[i + 1]! << 8;
 	if (n > i) {
 		k ^= b[i]!;
-		k = Math.imul(k, 0xcc9e2d51) >>> 0;
+		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
-		k = Math.imul(k, 0x1b873593) >>> 0;
+		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
 		h ^= k;
 	}
 	h ^= n;
 	h ^= h >>> 16;
-	h = Math.imul(h, 0x85ebca6b) >>> 0;
+	h = Math.imul(h, 0x85_eb_ca_6b) >>> 0;
 	h ^= h >>> 13;
-	h = Math.imul(h, 0xc2b2ae35) >>> 0;
+	h = Math.imul(h, 0xc2_b2_ae_35) >>> 0;
 	h ^= h >>> 16;
 	return h >>> 0;
 }

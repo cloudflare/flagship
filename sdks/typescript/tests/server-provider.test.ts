@@ -418,7 +418,7 @@ describe('FlagshipServerProvider', () => {
 			expect(result.errorMessage).toBe('HTTP 404: Not Found');
 		});
 
-		it('should handle FLAG_NOT_FOUND error (404)', { timeout: 10000 }, async () => {
+		it('should handle FLAG_NOT_FOUND error (404)', { timeout: 10_000 }, async () => {
 			// Must use a real Response so `instanceof Response` succeeds in handleError().
 			const mockResponse = new Response(null, { status: 404, statusText: 'Not Found' });
 			(global.fetch as any).mockResolvedValue(mockResponse);
@@ -468,7 +468,7 @@ describe('FlagshipServerProvider', () => {
 			expect(result.reason).toBe('ERROR');
 		});
 
-		it('should handle TIMEOUT_ERROR', { timeout: 10000 }, async () => {
+		it('should handle TIMEOUT_ERROR', { timeout: 10_000 }, async () => {
 			// Mock a fetch that simulates an abort
 			(global.fetch as any).mockImplementation(() => {
 				const error = new Error('The operation was aborted');
@@ -646,7 +646,7 @@ describe('FlagshipServerProvider', () => {
 	});
 
 	describe('provider options', () => {
-		it('should pass custom timeout to client', { timeout: 10000 }, async () => {
+		it('should pass custom timeout to client', { timeout: 10_000 }, async () => {
 			// Mock a fetch that simulates an abort
 			(global.fetch as any).mockImplementation(() => {
 				const error = new Error('The operation was aborted');

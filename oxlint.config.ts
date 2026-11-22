@@ -45,7 +45,6 @@ export default defineConfig({
 		'typescript/use-unknown-in-catch-callback-variable': 'off',
 		'unicorn/catch-error-name': 'off',
 		'unicorn/consistent-function-scoping': 'off',
-		'unicorn/numeric-separators-style': 'off',
 		'unicorn/prefer-import-meta-properties': 'off',
 		'unicorn/prefer-number-properties': 'off',
 		'unicorn/prefer-single-call': 'off',

@@ -3,7 +3,8 @@ import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 import { toFlagMetadata } from '../src/metadata.js';
 import type { FlagshipBinding } from '../src/types.js';
-import { evaluateFlag, type EvalFlag } from '../src/local/evaluate.js';
+import { evaluateFlag } from '../src/local/evaluate.js';
+import type { EvalFlag } from '../src/local/evaluate.js';
 
 const metadata = { owner: 'team-payments', 'jira.id': 'PROJ-123', 'experiment.active': false, weight: 2 };
 const logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };

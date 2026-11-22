@@ -2,7 +2,7 @@ import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, Provide
 import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError, ProviderStatus } from '@openfeature/web-sdk';
 import { FlagshipClient, isAuthFailure } from './client.js';
 import { toFlagMetadata } from './metadata.js';
-import { type FlagshipClientProviderOptions, type CachedFlag } from './types.js';
+import type { FlagshipClientProviderOptions, CachedFlag } from './types.js';
 
 const ERROR_CODES = new Set<string>(Object.values(ErrorCode));
 

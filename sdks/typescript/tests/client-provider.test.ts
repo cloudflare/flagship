@@ -3,7 +3,8 @@ import type { Logger } from '@openfeature/web-sdk';
 import { ErrorCode, ProviderEvents, ProviderStatus } from '@openfeature/web-sdk';
 import { FlagshipClientProvider } from '../src/client-provider.js';
 import { FlagshipClient } from '../src/client.js';
-import { FlagshipError, FlagshipErrorCode, type FlagshipBulkEvaluationResult } from '../src/types.js';
+import { FlagshipError, FlagshipErrorCode } from '../src/types.js';
+import type { FlagshipBulkEvaluationResult } from '../src/types.js';
 
 const noopLogger: Logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 const spyLogger = (): Logger => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });

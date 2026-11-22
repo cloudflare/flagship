@@ -1,14 +1,7 @@
 import type { EvaluationContext } from '@openfeature/core';
 import { buildEvaluationUrl, normalizeEvaluationContext } from './context.js';
-import {
-	FlagshipError,
-	FlagshipErrorCode,
-	FLAGSHIP_DEFAULT_BASE_URL,
-	type FlagshipBulkEvaluationResult,
-	type FlagshipEvaluationResponse,
-	type FlagshipProviderOptions,
-	type FlagshipRequestOptions,
-} from './types.js';
+import { FlagshipError, FlagshipErrorCode, FLAGSHIP_DEFAULT_BASE_URL } from './types.js';
+import type { FlagshipBulkEvaluationResult, FlagshipEvaluationResponse, FlagshipProviderOptions, FlagshipRequestOptions } from './types.js';
 
 interface ResolvedOptions {
 	endpoint: string;

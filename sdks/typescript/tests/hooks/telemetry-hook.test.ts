@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { HookContext, EvaluationDetails, FlagValue } from '@openfeature/server-sdk';
 import { ErrorCode } from '@openfeature/server-sdk';
-import { TelemetryHook, type TelemetryEvent } from '../../src/hooks/telemetry-hook.js';
+import { TelemetryHook } from '../../src/hooks/telemetry-hook.js';
+import type { TelemetryEvent } from '../../src/hooks/telemetry-hook.js';
 
 function makeHookContext(flagKey = 'test-flag'): HookContext {
 	return {

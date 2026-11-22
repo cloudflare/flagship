@@ -2,17 +2,13 @@ import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, Provide
 import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError } from '@openfeature/server-sdk';
 import { LRUCache } from 'lru-cache';
 import { FlagshipClient, isAuthFailure, resolveDefinitionsEndpoint } from './client.js';
-import { normalizeEvaluationContext, type NormalizedContextValue } from './context.js';
-import { evaluateFlag, FlagConfigError, type EvalFlag } from './local/evaluate.js';
+import { normalizeEvaluationContext } from './context.js';
+import type { NormalizedContextValue } from './context.js';
+import { evaluateFlag, FlagConfigError } from './local/evaluate.js';
+import type { EvalFlag } from './local/evaluate.js';
 import { toFlagMetadata } from './metadata.js';
-import {
-	FlagshipError,
-	FlagshipErrorCode,
-	isBindingOptions,
-	type FlagshipBinding,
-	type FlagshipBindingEvaluationDetails,
-	type FlagshipServerProviderOptions,
-} from './types.js';
+import { FlagshipError, FlagshipErrorCode, isBindingOptions } from './types.js';
+import type { FlagshipBinding, FlagshipBindingEvaluationDetails, FlagshipServerProviderOptions } from './types.js';
 
 const DEFAULT_CACHE_MAX_SIZE = 1000;
 const DEFAULT_REFRESH_INTERVAL_MS = 30_000;

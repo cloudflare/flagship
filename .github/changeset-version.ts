@@ -16,7 +16,8 @@ import { join, relative } from 'node:path';
 import readChangesets from '@changesets/read';
 import type { NewChangeset, Release, VersionType } from '@changesets/types';
 import { parse as parseToml, patch as patchToml } from '@decimalturn/toml-patch';
-import { getPackagesSync, type Package } from '@manypkg/get-packages';
+import { getPackagesSync } from '@manypkg/get-packages';
+import type { Package } from '@manypkg/get-packages';
 
 const ROOT = process.cwd();
 const CANONICAL_PACKAGE_NAME = '@cloudflare/flagship';

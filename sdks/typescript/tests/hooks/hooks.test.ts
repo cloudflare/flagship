@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '../../src/server-provider.js';
 import { LoggingHook } from '../../src/hooks/logging-hook.js';
-import { TelemetryHook, type TelemetryEvent } from '../../src/hooks/telemetry-hook.js';
+import { TelemetryHook } from '../../src/hooks/telemetry-hook.js';
+import type { TelemetryEvent } from '../../src/hooks/telemetry-hook.js';
 
 // Mock fetch globally
 global.fetch = vi.fn();

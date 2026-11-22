@@ -4,7 +4,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Logger } from '@openfeature/server-sdk';
 import { ErrorCode } from '@openfeature/server-sdk';
 import { FlagshipClient, resolveDefinitionsEndpoint } from '../src/client.js';
-import { evaluateFlag, FlagConfigError, murmurhash3, type EvalFlag } from '../src/local/evaluate.js';
+import { evaluateFlag, FlagConfigError, murmurhash3 } from '../src/local/evaluate.js';
+import type { EvalFlag } from '../src/local/evaluate.js';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 
 const __dirname = import.meta.dirname;

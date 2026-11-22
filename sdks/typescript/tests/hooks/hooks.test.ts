@@ -8,9 +8,9 @@ import { TelemetryHook, type TelemetryEvent } from '../../src/hooks/telemetry-ho
 global.fetch = vi.fn();
 
 describe('Hooks', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
-		OpenFeature.clearProviders();
+		await OpenFeature.clearProviders();
 		OpenFeature.clearHooks();
 	});
 

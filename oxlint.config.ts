@@ -64,10 +64,5 @@ export default defineConfig({
 			files: ['**/test/**', '**/*.test.ts', '**/*.spec.ts', '**/examples/**'],
 			rules: { 'typescript/no-explicit-any': 'off' },
 		},
-		{
-			// The rule remains enabled in production code.
-			files: ['**/*.test.ts'],
-			rules: { 'typescript/no-floating-promises': 'off' },
-		},
 	],
 });

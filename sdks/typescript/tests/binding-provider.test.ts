@@ -42,10 +42,10 @@ const noopLogger: Logger = {
 };
 
 describe('FlagshipServerProvider (binding mode)', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
 		OpenFeature.clearHandlers();
-		OpenFeature.clearProviders();
+		await OpenFeature.clearProviders();
 	});
 
 	// -----------------------------------------------------------------------
@@ -786,8 +786,8 @@ describe('FlagshipServerProvider (binding mode)', () => {
 	// -----------------------------------------------------------------------
 
 	describe('integration with OpenFeature', () => {
-		beforeEach(() => {
-			OpenFeature.clearProviders();
+		beforeEach(async () => {
+			await OpenFeature.clearProviders();
 		});
 
 		it('should work end-to-end with OpenFeature SDK', async () => {

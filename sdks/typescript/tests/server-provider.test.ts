@@ -15,10 +15,10 @@ const noopLogger: Logger = {
 };
 
 describe('FlagshipServerProvider', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
 		OpenFeature.clearHandlers();
-		OpenFeature.clearProviders();
+		await OpenFeature.clearProviders();
 	});
 
 	describe('constructor', () => {

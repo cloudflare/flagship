@@ -13,10 +13,10 @@ import { FlagshipServerProvider } from '../src/server-provider.js';
 global.fetch = vi.fn();
 
 describe('Flagship Integration Tests', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
 		// Clear any previous providers
-		OpenFeature.clearProviders();
+		await OpenFeature.clearProviders();
 	});
 
 	describe('Server Provider Integration', () => {

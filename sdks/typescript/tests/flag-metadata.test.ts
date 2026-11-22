@@ -48,9 +48,9 @@ describe('local evaluation metadata', () => {
 });
 
 describe('FlagshipServerProvider flag metadata', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		OpenFeature.clearHandlers();
-		OpenFeature.clearProviders();
+		await OpenFeature.clearProviders();
 	});
 
 	describe('HTTP mode', () => {

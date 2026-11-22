@@ -6,10 +6,10 @@ import { FlagshipServerProvider } from '../src/server-provider.js';
 global.fetch = vi.fn();
 
 describe('Provider Events', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks();
 		OpenFeature.clearHandlers();
-		OpenFeature.clearProviders();
+		await OpenFeature.clearProviders();
 	});
 
 	describe('Initialization', () => {

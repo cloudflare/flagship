@@ -10,8 +10,8 @@ const noopLogger: Logger = { debug: () => {}, info: () => {}, warn: () => {}, er
 const spyLogger = (): Logger => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });
 const endpoint = 'https://api.example.com/evaluate';
 
-vi.mock('../src/client.js', async (importOriginal) => ({
-	...(await importOriginal<typeof import('../src/client.js')>()),
+vi.mock(import('../src/client.js'), async (importOriginal) => ({
+	...(await importOriginal()),
 	FlagshipClient: vi.fn().mockImplementation(() => {
 		return { evaluateAll: vi.fn().mockResolvedValue([]) };
 	}),

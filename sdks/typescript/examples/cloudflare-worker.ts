@@ -39,7 +39,7 @@ export default {
 		// Build evaluation context from request
 		const context = {
 			targetingKey: userId,
-			country: country,
+			country,
 			path: url.pathname,
 			userAgent: request.headers.get('user-agent') || '',
 		};
@@ -59,11 +59,11 @@ export default {
 			message: welcomeMessage,
 			features: {
 				darkMode: darkModeEnabled,
-				maxUploads: maxUploads,
+				maxUploads,
 			},
 			user: {
 				id: userId,
-				country: country,
+				country,
 			},
 		};
 

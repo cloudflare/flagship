@@ -19,7 +19,6 @@ export default defineConfig({
 		'import/consistent-type-specifier-style': 'off',
 		'no-empty': 'off',
 		'no-promise-executor-return': 'off',
-		'object-shorthand': 'off',
 		'prefer-object-has-own': 'off',
 		'quality/no-array-filter-map': 'off',
 		'quality/no-chained-type-assertions': 'off',

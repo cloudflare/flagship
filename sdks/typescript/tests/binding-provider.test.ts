@@ -168,9 +168,9 @@ describe('FlagshipServerProvider (binding mode)', () => {
 					retries: 3,
 				} as any);
 				expect.fail('should have thrown');
-			} catch (e: any) {
-				expect(e.message).toContain('appId');
-				expect(e.message).toContain('retries');
+			} catch (error: any) {
+				expect(error.message).toContain('appId');
+				expect(error.message).toContain('retries');
 			}
 		});
 	});

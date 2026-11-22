@@ -210,7 +210,7 @@ describe('FlagshipClient', () => {
 			await expect(client.evaluate('my-flag', {})).rejects.toThrow(FlagshipError);
 			// The client catches PARSE_ERROR but re-throws as NETWORK_ERROR in the outer catch
 			// This is expected behavior - the inner error is a PARSE_ERROR but wrapped
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 			expect(error).toBeInstanceOf(FlagshipError);
 			// The underlying cause has PARSE_ERROR, but it gets wrapped
 		});
@@ -289,7 +289,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 			expect(error).toBeInstanceOf(FlagshipError);
 			expect(error.code).toBe(FlagshipErrorCode.TIMEOUT_ERROR);
 		});
@@ -416,7 +416,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 			expect(error).toBeInstanceOf(FlagshipError);
 			expect(error.code).toBe(FlagshipErrorCode.PARSE_ERROR);
 		});
@@ -506,7 +506,7 @@ describe('FlagshipClient', () => {
 			await vi.waitFor(() => expect(setTimeoutSpy.mock.calls.some((call) => call[1] === 10_000)).toBe(true));
 			controller.abort('cancelled');
 
-			const error = await pending.catch((e) => e);
+			const error = await pending.catch((error_) => error_);
 			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
 			expect(error.cause).toBe('cancelled');
 			expect(transport).toHaveBeenCalledTimes(1);
@@ -583,7 +583,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 			expect(error).toBeInstanceOf(FlagshipError);
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 		});
@@ -779,7 +779,7 @@ describe('FlagshipClient', () => {
 			const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
 			controller.abort();
 
-			const error = await pending.catch((e) => e);
+			const error = await pending.catch((error_) => error_);
 
 			expect(seen[0]?.aborted).toBe(true);
 			expect(error).toBeInstanceOf(FlagshipError);
@@ -800,7 +800,7 @@ describe('FlagshipClient', () => {
 
 			const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
 			controller.abort();
-			const error = await pending.catch((e) => e);
+			const error = await pending.catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
 			expect(calls).toHaveBeenCalledTimes(1);
@@ -817,7 +817,7 @@ describe('FlagshipClient', () => {
 				retryDelay: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.TIMEOUT_ERROR);
 			expect(error.retryable).toBe(true);
@@ -834,7 +834,7 @@ describe('FlagshipClient', () => {
 				retryDelay: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}, { signal: AbortSignal.abort('gone') }).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}, { signal: AbortSignal.abort('gone') }).catch((error_) => error_);
 
 			expect(error).toBeInstanceOf(FlagshipError);
 			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
@@ -855,7 +855,7 @@ describe('FlagshipClient', () => {
 
 			const pending = client.evaluate('my-flag', {});
 			controller.abort();
-			const error = await pending.catch((e) => e);
+			const error = await pending.catch((error_) => error_);
 
 			expect(seen[0]?.aborted).toBe(true);
 			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
@@ -876,13 +876,13 @@ describe('FlagshipClient', () => {
 			const callController = new AbortController();
 			const first = client.evaluate('my-flag', {}, { signal: callController.signal });
 			callController.abort();
-			expect((await first.catch((e) => e)).code).toBe(FlagshipErrorCode.ABORTED);
+			expect((await first.catch((error) => error)).code).toBe(FlagshipErrorCode.ABORTED);
 			expect(seen[0]?.aborted).toBe(true);
 
 			// fetchOptions signal aborts.
 			const second = client.evaluate('my-flag', {}, { signal: new AbortController().signal });
 			fetchOptionsController.abort();
-			expect((await second.catch((e) => e)).code).toBe(FlagshipErrorCode.ABORTED);
+			expect((await second.catch((error) => error)).code).toBe(FlagshipErrorCode.ABORTED);
 			expect(seen[1]?.aborted).toBe(true);
 		});
 
@@ -901,7 +901,7 @@ describe('FlagshipClient', () => {
 
 				const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
 				controller.abort();
-				const error = await pending.catch((e) => e);
+				const error = await pending.catch((error_) => error_);
 
 				expect(seen[0]).not.toBe(controller.signal);
 				expect(seen[0]?.aborted).toBe(true);
@@ -921,7 +921,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(seen[0]).toBeInstanceOf(AbortSignal);
 			expect(seen[0]?.aborted).toBe(true);
@@ -944,7 +944,7 @@ describe('FlagshipClient', () => {
 				retryDelay: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 			expect(error.retryable).toBe(true);
@@ -962,7 +962,7 @@ describe('FlagshipClient', () => {
 				retryDelay: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 			expect(error.retryable).toBe(false);
@@ -981,7 +981,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 			expect(error.retryable).toBe(true);

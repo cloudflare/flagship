@@ -12,9 +12,11 @@ const endpoint = 'https://api.example.com/evaluate';
 
 vi.mock(import('../src/client.js'), async (importOriginal) => ({
 	...(await importOriginal()),
-	FlagshipClient: vi.fn().mockImplementation(() => {
-		return { evaluateAll: vi.fn().mockResolvedValue([]) };
-	}),
+	FlagshipClient: vi.fn(
+		class {
+			evaluateAll = vi.fn().mockResolvedValue([]);
+		},
+	),
 }));
 
 function mockBulk(...responses: Array<Array<FlagshipBulkEvaluationResult> | Error>) {
@@ -26,9 +28,11 @@ function mockBulk(...responses: Array<Array<FlagshipBulkEvaluationResult> | Erro
 			evaluateAll.mockResolvedValueOnce(response);
 		}
 	}
-	(FlagshipClient as any).mockImplementation(() => {
-		return { evaluateAll };
-	});
+	(FlagshipClient as any).mockImplementation(
+		class {
+			evaluateAll = evaluateAll;
+		},
+	);
 	return evaluateAll;
 }
 

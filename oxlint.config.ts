@@ -44,7 +44,6 @@ export default defineConfig({
 		'typescript/switch-exhaustiveness-check': 'off',
 		'typescript/use-unknown-in-catch-callback-variable': 'off',
 		'unicorn/consistent-function-scoping': 'off',
-		'unicorn/prefer-import-meta-properties': 'off',
 		'unicorn/prefer-number-properties': 'off',
 		'unicorn/prefer-single-call': 'off',
 		'unicorn/prefer-top-level-await': 'off',

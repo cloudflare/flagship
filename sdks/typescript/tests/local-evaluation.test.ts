@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Logger } from '@openfeature/server-sdk';
 import { ErrorCode } from '@openfeature/server-sdk';
@@ -8,7 +7,7 @@ import { FlagshipClient, resolveDefinitionsEndpoint } from '../src/client.js';
 import { evaluateFlag, FlagConfigError, murmurhash3, type EvalFlag } from '../src/local/evaluate.js';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const casesPath = resolve(__dirname, '../../../spec/local-evaluation/cases.json');
 const suite = JSON.parse(readFileSync(casesPath, 'utf8')) as {
 	cases: Array<{

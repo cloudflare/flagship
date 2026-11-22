@@ -8,10 +8,10 @@
  *   FLAGSHIP_REPO=../flagship npx tsx spec/local-evaluation/generate.ts
  */
 import { writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const flagshipRepo = process.env.FLAGSHIP_REPO ?? resolve(__dirname, '../../../flagship');
 const evaluatePath = resolve(flagshipRepo, 'packages/data-plane/src/evaluate.ts');
 

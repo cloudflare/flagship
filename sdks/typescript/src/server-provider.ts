@@ -632,7 +632,7 @@ function buildCacheKey(flagKey: string, expectedType: ExpectedType, context: Eva
 
 function serializeContextValue(value: NormalizedContextValue): string {
 	// Sort object keys at every depth so semantically equal objects share a cache key.
-	return JSON.stringify(value, (_key, val) =>
+	return JSON.stringify(value, (_key, val: unknown) =>
 		val !== null && typeof val === 'object' && !Array.isArray(val)
 			? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 			: val,

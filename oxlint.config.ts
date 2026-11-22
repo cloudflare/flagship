@@ -56,7 +56,6 @@ export default defineConfig({
 				'sdks/typescript/examples/cloudflare-worker.ts',
 				'sdks/typescript/examples/server-local.ts',
 				'sdks/typescript/examples/server.ts',
-				'sdks/typescript/src/server-provider.ts',
 				'spec/local-evaluation/generate.ts',
 			],
 			rules: { 'typescript/no-unsafe-argument': 'off' },
@@ -107,6 +106,7 @@ export default defineConfig({
 		},
 		{ files: ['sdks/typescript/src/local/evaluate.ts'], rules: { 'quality/no-unknown-returns': 'off' } },
 		{
+			// Object.hasOwn requires ES2022. The SDK compiles against ES2021.
 			files: ['sdks/typescript/src/local/evaluate.ts', 'sdks/typescript/src/server-provider.ts', 'sdks/typescript/tests/client.test.ts'],
 			rules: { 'prefer-object-has-own': 'off' },
 		},
@@ -119,11 +119,7 @@ export default defineConfig({
 			rules: { 'quality/no-chained-type-assertions': 'off' },
 		},
 		{
-			files: [
-				'sdks/typescript/src/server-provider.ts',
-				'sdks/typescript/tests/client.test.ts',
-				'sdks/typescript/tests/server-provider.test.ts',
-			],
+			files: ['sdks/typescript/tests/client.test.ts', 'sdks/typescript/tests/server-provider.test.ts'],
 			rules: { 'typescript/no-unsafe-return': 'off' },
 		},
 		{

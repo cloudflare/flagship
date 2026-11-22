@@ -19,8 +19,11 @@ vi.mock('../src/client.js', async (importOriginal) => ({
 function mockBulk(...responses: Array<Array<FlagshipBulkEvaluationResult> | Error>) {
 	const evaluateAll = vi.fn();
 	for (const response of responses) {
-		if (response instanceof Error) evaluateAll.mockRejectedValueOnce(response);
-		else evaluateAll.mockResolvedValueOnce(response);
+		if (response instanceof Error) {
+			evaluateAll.mockRejectedValueOnce(response);
+		} else {
+			evaluateAll.mockResolvedValueOnce(response);
+		}
 	}
 	(FlagshipClient as any).mockImplementation(() => {
 		return { evaluateAll };

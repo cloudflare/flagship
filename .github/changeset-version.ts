@@ -76,7 +76,9 @@ export async function rewriteChangesetsToCanonicalPackage(): Promise<void> {
 
 	for (const changeset of await readChangesets(ROOT)) {
 		const sdkReleases = changeset.releases.filter((release) => sdkNames.has(release.name));
-		if (sdkReleases.length === 0) continue;
+		if (sdkReleases.length === 0) {
+			continue;
+		}
 
 		const bump = highestBump(sdkReleases.map((release) => release.type));
 		const rewritten: Array<Release> = [{ name: CANONICAL_PACKAGE_NAME, type: bump }];
@@ -84,7 +86,9 @@ export async function rewriteChangesetsToCanonicalPackage(): Promise<void> {
 			changeset.releases.length === rewritten.length &&
 			changeset.releases[0]?.name === CANONICAL_PACKAGE_NAME &&
 			changeset.releases[0]?.type === bump;
-		if (alreadyCanonical) continue;
+		if (alreadyCanonical) {
+			continue;
+		}
 
 		writeChangesetFile({ id: changeset.id, summary: changeset.summary, releases: rewritten });
 		console.log(`Rewrote .changeset/${changeset.id}.md to ${CANONICAL_PACKAGE_NAME} at bump '${bump}'.`);
@@ -104,8 +108,12 @@ export function syncPrivateSdkPackageVersions(): void {
 	const targetVersion = readCanonicalPackage().packageJson.version;
 
 	for (const pkg of readSdkPackages()) {
-		if (pkg.packageJson.private !== true) continue;
-		if (pkg.packageJson.version === targetVersion) continue;
+		if (pkg.packageJson.private !== true) {
+			continue;
+		}
+		if (pkg.packageJson.version === targetVersion) {
+			continue;
+		}
 
 		const packageJsonPath = join(pkg.dir, 'package.json');
 		const packageJson = `${JSON.stringify({ ...pkg.packageJson, version: targetVersion }, null, '\t')}\n`;
@@ -170,15 +178,21 @@ function syncPythonPackageVersion(packageDir: string, targetVersion: string, err
 		if (!hasProjectVersion && !hasPoetryVersion) {
 			return '[project].version (PEP 621) or [tool.poetry].version (legacy Poetry)';
 		}
-		if (parsed.project?.version !== undefined) parsed.project.version = targetVersion;
-		if (parsed.tool?.poetry?.version !== undefined) parsed.tool.poetry.version = targetVersion;
+		if (parsed.project?.version !== undefined) {
+			parsed.project.version = targetVersion;
+		}
+		if (parsed.tool?.poetry?.version !== undefined) {
+			parsed.tool.poetry.version = targetVersion;
+		}
 		return undefined;
 	});
 }
 
 function syncRustPackageVersion(packageDir: string, targetVersion: string, errors: Array<string>): void {
 	patchTomlField(join(packageDir, 'Cargo.toml'), targetVersion, errors, (parsed: CargoToml) => {
-		if (parsed.package?.version === undefined) return '[package].version';
+		if (parsed.package?.version === undefined) {
+			return '[package].version';
+		}
 		parsed.package.version = targetVersion;
 		return undefined;
 	});
@@ -190,7 +204,9 @@ function patchTomlField<T>(
 	errors: Array<string>,
 	mutate: (parsed: T) => string | undefined,
 ): void {
-	if (!existsSync(manifestPath)) return;
+	if (!existsSync(manifestPath)) {
+		return;
+	}
 	const relativePath = relative(ROOT, manifestPath);
 	const original = readFileSync(manifestPath, 'utf8');
 	const parsed = parseToml(original) as T;
@@ -223,7 +239,9 @@ function patchTomlField<T>(
 function stubPrivateSdkChangelogs(): void {
 	const targetVersion = readCanonicalPackage().packageJson.version;
 	for (const pkg of readSdkPackages()) {
-		if (pkg.packageJson.private !== true) continue;
+		if (pkg.packageJson.private !== true) {
+			continue;
+		}
 		const changelog = join(pkg.dir, 'CHANGELOG.md');
 		const content = `# ${pkg.packageJson.name}\n\n## ${targetVersion}\n`;
 		writeFileSync(changelog, content);

@@ -759,8 +759,11 @@ describe('FlagshipClient', () => {
 						error.name = 'AbortError';
 						reject(error);
 					};
-					if (signal?.aborted) fail();
-					else signal?.addEventListener('abort', fail);
+					if (signal?.aborted) {
+						fail();
+					} else {
+						signal?.addEventListener('abort', fail);
+					}
 				});
 			});
 			return { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch, calls: fetchImpl, seen };

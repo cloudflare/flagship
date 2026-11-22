@@ -15,7 +15,6 @@ export default defineConfig({
 		'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
 		// Existing violations to evaluate individually as part of the migration.
 		'@nkzw/no-instanceof': 'off',
-		curly: 'off',
 		'import/consistent-type-specifier-style': 'off',
 		'no-empty': 'off',
 		'no-promise-executor-return': 'off',

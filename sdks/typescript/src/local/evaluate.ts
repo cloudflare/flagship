@@ -97,15 +97,23 @@ function hasOwn(obj: object, key: PropertyKey): boolean {
 }
 
 function getContextValue(context: EvaluationContext, attribute: string): unknown {
-	if (hasOwn(context, attribute)) return context[attribute];
-	if (attribute.indexOf('.') === -1) return undefined;
+	if (hasOwn(context, attribute)) {
+		return context[attribute];
+	}
+	if (attribute.indexOf('.') === -1) {
+		return undefined;
+	}
 
 	const path = attribute.split('.');
-	if (path.length > MAX_PATH_DEPTH) return undefined;
+	if (path.length > MAX_PATH_DEPTH) {
+		return undefined;
+	}
 
 	let value: unknown = context;
 	for (const segment of path) {
-		if (isPrimitive(value) || !hasOwn(value as object, segment)) return undefined;
+		if (isPrimitive(value) || !hasOwn(value as object, segment)) {
+			return undefined;
+		}
 		value = (value as Record<string, unknown>)[segment];
 	}
 	return value;
@@ -115,8 +123,12 @@ type StringOperator = 'equals' | 'not_equals' | 'contains' | 'starts_with' | 'en
 type OrderingOperator = 'greater_than' | 'less_than' | 'greater_than_or_equals' | 'less_than_or_equals';
 
 function evaluateStringOperator(operator: StringOperator, attrValue: unknown, target: unknown): boolean {
-	if (attrValue === null) return operator === 'not_equals';
-	if (!isScalar(attrValue) || !isPrimitive(target)) return false;
+	if (attrValue === null) {
+		return operator === 'not_equals';
+	}
+	if (!isScalar(attrValue) || !isPrimitive(target)) {
+		return false;
+	}
 	const actual = String(attrValue);
 	const expected = String(target);
 
@@ -139,7 +151,9 @@ function toNumber(value: string | number | boolean): number {
 }
 
 function compareValues(attrValue: unknown, target: unknown): number | undefined {
-	if (!isScalar(attrValue) || !isScalar(target)) return undefined;
+	if (!isScalar(attrValue) || !isScalar(target)) {
+		return undefined;
+	}
 
 	let actual: number;
 	let expected: number;
@@ -157,14 +171,20 @@ function compareValues(attrValue: unknown, target: unknown): number | undefined 
 		expected = toNumber(target);
 	}
 
-	if (Number.isNaN(actual) || Number.isNaN(expected)) return undefined;
-	if (actual === expected) return 0;
+	if (Number.isNaN(actual) || Number.isNaN(expected)) {
+		return undefined;
+	}
+	if (actual === expected) {
+		return 0;
+	}
 	return actual < expected ? -1 : 1;
 }
 
 function evaluateOrderingOperator(operator: OrderingOperator, attrValue: unknown, target: unknown): boolean {
 	const comparison = compareValues(attrValue, target);
-	if (comparison === undefined) return false;
+	if (comparison === undefined) {
+		return false;
+	}
 
 	switch (operator) {
 		case 'greater_than':
@@ -181,7 +201,9 @@ function evaluateOrderingOperator(operator: OrderingOperator, attrValue: unknown
 function containsValue(values: Array<unknown>, target: unknown): boolean {
 	const expected = String(target);
 	for (const value of values) {
-		if (value !== null && String(value) === expected) return true;
+		if (value !== null && String(value) === expected) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -189,7 +211,9 @@ function containsValue(values: Array<unknown>, target: unknown): boolean {
 function containsPrimitiveValue(values: Array<unknown>, target: unknown): boolean {
 	const expected = String(target);
 	for (const value of values) {
-		if (isScalar(value) && String(value) === expected) return true;
+		if (isScalar(value) && String(value) === expected) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -203,7 +227,9 @@ export function murmurhash3(str: string, seed: number): number {
 		b = encoder.encode(str);
 		n = b.byteLength;
 	} else {
-		if (hashBuf.byteLength < requiredBytes) hashBuf = new Uint8Array(requiredBytes);
+		if (hashBuf.byteLength < requiredBytes) {
+			hashBuf = new Uint8Array(requiredBytes);
+		}
 		b = hashBuf;
 		n = encoder.encodeInto(str, b).written;
 	}
@@ -220,8 +246,12 @@ export function murmurhash3(str: string, seed: number): number {
 		i += 4;
 	}
 	let k = 0;
-	if (n - i >= 3) k ^= b[i + 2]! << 16;
-	if (n - i >= 2) k ^= b[i + 1]! << 8;
+	if (n - i >= 3) {
+		k ^= b[i + 2]! << 16;
+	}
+	if (n - i >= 2) {
+		k ^= b[i + 1]! << 8;
+	}
 	if (n > i) {
 		k ^= b[i]!;
 		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
@@ -243,19 +273,25 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): bo
 		const { logical_operator, clauses } = condition;
 		if (logical_operator === 'AND') {
 			for (const clause of clauses) {
-				if (!evaluateCondition(clause, context)) return false;
+				if (!evaluateCondition(clause, context)) {
+					return false;
+				}
 			}
 			return true;
 		}
 		for (const clause of clauses) {
-			if (evaluateCondition(clause, context)) return true;
+			if (evaluateCondition(clause, context)) {
+				return true;
+			}
 		}
 		return false;
 	}
 
 	const { attribute, operator, value: target } = condition as BaseCondition;
 	const attrValue = getContextValue(context, attribute);
-	if (attrValue === undefined) return false;
+	if (attrValue === undefined) {
+		return false;
+	}
 
 	switch (operator) {
 		case 'equals':
@@ -271,13 +307,21 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): bo
 			return evaluateOrderingOperator(operator, attrValue, target);
 		case 'in':
 		case 'not_in':
-			if (!Array.isArray(target)) return false;
-			if (attrValue === null) return operator === 'not_in';
-			if (!isScalar(attrValue)) return false;
+			if (!Array.isArray(target)) {
+				return false;
+			}
+			if (attrValue === null) {
+				return operator === 'not_in';
+			}
+			if (!isScalar(attrValue)) {
+				return false;
+			}
 			return operator === 'in' ? containsValue(target, attrValue) : !containsValue(target, attrValue);
 		case 'has':
 		case 'not_has':
-			if (!Array.isArray(attrValue) || !isPrimitive(target)) return false;
+			if (!Array.isArray(attrValue) || !isPrimitive(target)) {
+				return false;
+			}
 			return operator === 'has' ? containsPrimitiveValue(attrValue, target) : !containsPrimitiveValue(attrValue, target);
 		default:
 			return false;
@@ -300,8 +344,12 @@ export function evaluateFlag(
 		return { value: flagDef.variations[variant] as FlagValue, variant, reason, metadata: flagDef.metadata };
 	};
 
-	if (!flagDef.enabled) return serve(flagDef.default_variation, 'DISABLED');
-	if (flagDef.rules.length === 0) return serve(flagDef.default_variation, 'STATIC');
+	if (!flagDef.enabled) {
+		return serve(flagDef.default_variation, 'DISABLED');
+	}
+	if (flagDef.rules.length === 0) {
+		return serve(flagDef.default_variation, 'STATIC');
+	}
 
 	// Seed derived from accountId+flagKey so the same targetingKey lands in different buckets
 	// across different flags and accounts, preventing correlated rollouts.
@@ -334,7 +382,9 @@ export function evaluateFlag(
 				} else {
 					bucket = (globalThis.crypto.getRandomValues(randomBuf)[0]! / 0x1_00_00_00_00) * 100;
 				}
-				if (bucket >= rollout.percentage) ruleMatches = false;
+				if (bucket >= rollout.percentage) {
+					ruleMatches = false;
+				}
 			}
 		}
 

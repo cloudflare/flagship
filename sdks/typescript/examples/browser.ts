@@ -140,10 +140,14 @@ async function progressiveEnhancement() {
 		const betaAccess = client.getBooleanValue('beta-access', false);
 
 		const premiumElement = document.getElementById('premium-features');
-		if (premiumElement) premiumElement.style.display = premiumFeatures ? 'block' : 'none';
+		if (premiumElement) {
+			premiumElement.style.display = premiumFeatures ? 'block' : 'none';
+		}
 
 		const betaElement = document.getElementById('beta-features');
-		if (betaElement) betaElement.style.display = betaAccess ? 'block' : 'none';
+		if (betaElement) {
+			betaElement.style.display = betaAccess ? 'block' : 'none';
+		}
 	}
 
 	updateUI();
@@ -238,17 +242,23 @@ function applyDarkMode(client: any) {
 
 function applyWelcomeMessage(client: any) {
 	const element = document.getElementById('welcome');
-	if (element) element.textContent = client.getStringValue('welcome-message', 'Welcome!');
+	if (element) {
+		element.textContent = client.getStringValue('welcome-message', 'Welcome!');
+	}
 }
 
 function applyUploadLimits(client: any) {
 	const element = document.getElementById('upload-limit');
-	if (element) element.textContent = `Max uploads: ${client.getNumberValue('max-uploads', 5)}`;
+	if (element) {
+		element.textContent = `Max uploads: ${client.getNumberValue('max-uploads', 5)}`;
+	}
 }
 
 function applyPremiumFeatures(client: any) {
 	const element = document.getElementById('premium-section');
-	if (element) element.style.display = client.getBooleanValue('premium-features', false) ? 'block' : 'none';
+	if (element) {
+		element.style.display = client.getBooleanValue('premium-features', false) ? 'block' : 'none';
+	}
 }
 
 function applyTheme(client: any) {

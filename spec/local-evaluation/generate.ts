@@ -31,7 +31,9 @@ function murmurhash3(str: string, seed: number): number {
 		b = encoder.encode(str);
 		n = b.byteLength;
 	} else {
-		if (hashBuf.byteLength < requiredBytes) hashBuf = new Uint8Array(requiredBytes);
+		if (hashBuf.byteLength < requiredBytes) {
+			hashBuf = new Uint8Array(requiredBytes);
+		}
 		b = hashBuf;
 		n = encoder.encodeInto(str, b).written;
 	}
@@ -48,8 +50,12 @@ function murmurhash3(str: string, seed: number): number {
 		i += 4;
 	}
 	let k = 0;
-	if (n - i >= 3) k ^= b[i + 2]! << 16;
-	if (n - i >= 2) k ^= b[i + 1]! << 8;
+	if (n - i >= 3) {
+		k ^= b[i + 2]! << 16;
+	}
+	if (n - i >= 2) {
+		k ^= b[i + 1]! << 8;
+	}
 	if (n > i) {
 		k ^= b[i]!;
 		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;

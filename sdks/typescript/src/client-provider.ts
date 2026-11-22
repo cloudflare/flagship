@@ -61,7 +61,9 @@ export class FlagshipClientProvider implements Provider {
 	}
 
 	async initialize(context: EvaluationContext = {}): Promise<void> {
-		if (await this.load(context, 'initialization')) this.events.emit(ProviderEvents.Ready);
+		if (await this.load(context, 'initialization')) {
+			this.events.emit(ProviderEvents.Ready);
+		}
 	}
 
 	async onClose(): Promise<void> {
@@ -113,7 +115,9 @@ export class FlagshipClientProvider implements Provider {
 		clearTimeout(this.timer);
 		try {
 			const flags = await this.fetchAll(context, phase);
-			if (epoch !== this.epoch) return false;
+			if (epoch !== this.epoch) {
+				return false;
+			}
 			this.cache = flags;
 			this.currentStatus = ProviderStatus.READY;
 			this.schedulePoll(context, epoch);
@@ -127,20 +131,28 @@ export class FlagshipClientProvider implements Provider {
 	}
 
 	private schedulePoll(context: EvaluationContext, epoch: number): void {
-		if (this.pollInterval <= 0) return;
+		if (this.pollInterval <= 0) {
+			return;
+		}
 		this.timer = setTimeout(async () => {
 			try {
 				const flags = await this.fetchAll(context, 'refresh');
-				if (epoch !== this.epoch) return;
+				if (epoch !== this.epoch) {
+					return;
+				}
 				const flagsChanged = changedKeys(this.cache, flags);
 				this.cache = flags;
 				if (this.currentStatus === ProviderStatus.STALE) {
 					this.currentStatus = ProviderStatus.READY;
 					this.events.emit(ProviderEvents.Ready);
 				}
-				if (flagsChanged.length > 0) this.events.emit(ProviderEvents.ConfigurationChanged, { flagsChanged });
+				if (flagsChanged.length > 0) {
+					this.events.emit(ProviderEvents.ConfigurationChanged, { flagsChanged });
+				}
 			} catch (error) {
-				if (epoch !== this.epoch) return;
+				if (epoch !== this.epoch) {
+					return;
+				}
 				if (this.currentStatus === ProviderStatus.READY) {
 					this.currentStatus = ProviderStatus.STALE;
 					this.events.emit(ProviderEvents.Stale, { message: error instanceof Error ? error.message : String(error) });
@@ -160,7 +172,9 @@ export class FlagshipClientProvider implements Provider {
 			return new Map(flags.map(({ key, ...flag }) => [key, flag]));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			if (this.logging) console.warn(`[Flagship] Failed to evaluate flags during ${phase}: ${message}`);
+			if (this.logging) {
+				console.warn(`[Flagship] Failed to evaluate flags during ${phase}: ${message}`);
+			}
 			throw isAuthFailure(error) ? new ProviderFatalError(message) : error;
 		}
 	}
@@ -223,16 +237,24 @@ export class FlagshipClientProvider implements Provider {
 	}
 
 	private getValueType(value: unknown): string {
-		if (typeof value === 'boolean') return 'boolean';
-		if (typeof value === 'string') return 'string';
-		if (typeof value === 'number') return 'number';
+		if (typeof value === 'boolean') {
+			return 'boolean';
+		}
+		if (typeof value === 'string') {
+			return 'string';
+		}
+		if (typeof value === 'number') {
+			return 'number';
+		}
 		return 'object';
 	}
 }
 
 function resolveRelativeEndpoint(options: FlagshipClientProviderOptions): FlagshipClientProviderOptions {
 	const { endpoint } = options;
-	if (!endpoint || !endpoint.startsWith('/')) return options;
+	if (!endpoint || !endpoint.startsWith('/')) {
+		return options;
+	}
 
 	if (typeof window === 'undefined' || !window.location?.origin) {
 		throw new Error(`Flagship: relative endpoint "${endpoint}" requires a browser context with window.location.origin`);

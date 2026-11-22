@@ -118,7 +118,9 @@ export class FlagshipClient {
 		}
 
 		const headers = new Headers(this.options.fetchOptions.headers);
-		if (etag) headers.set('If-None-Match', etag);
+		if (etag) {
+			headers.set('If-None-Match', etag);
+		}
 
 		const request: EvaluationRequest = {
 			url: endpoint,
@@ -217,7 +219,9 @@ export class FlagshipClient {
 }
 
 async function parseEvaluationResponse(response: Response): Promise<FlagshipEvaluationResponse> {
-	if (!response.ok) throw await httpError(response);
+	if (!response.ok) {
+		throw await httpError(response);
+	}
 
 	const data = await response.json();
 
@@ -229,7 +233,9 @@ async function parseEvaluationResponse(response: Response): Promise<FlagshipEval
 }
 
 async function parseBulkResponse(response: Response): Promise<Array<FlagshipBulkEvaluationResult>> {
-	if (!response.ok) throw await httpError(response);
+	if (!response.ok) {
+		throw await httpError(response);
+	}
 
 	const data = (await response.json()) as { flags?: unknown } | null;
 	if (!data || !Array.isArray(data.flags)) {
@@ -244,7 +250,9 @@ async function parseDefinitionsResponse(response: Response): Promise<{ etag: str
 		return 'not-modified';
 	}
 
-	if (!response.ok) throw await httpError(response);
+	if (!response.ok) {
+		throw await httpError(response);
+	}
 
 	const data: unknown = await response.json();
 	if (
@@ -281,7 +289,9 @@ async function httpError(response: Response): Promise<FlagshipError> {
 async function readErrorBody(response: Response): Promise<{ message?: string; errorCode?: string }> {
 	try {
 		const body = (await response.json()) as Record<string, unknown> | null;
-		if (!body || typeof body !== 'object') return {};
+		if (!body || typeof body !== 'object') {
+			return {};
+		}
 		const errors = Array.isArray(body.errors) ? (body.errors[0] as { message?: unknown } | undefined) : undefined;
 		const message = [body.errorMessage, body.errorDetails, body.error, errors?.message].find((value) => typeof value === 'string');
 		return {
@@ -295,7 +305,9 @@ async function readErrorBody(response: Response): Promise<{ message?: string; er
 
 function buildPostRequest(url: string, body: object, fetchOptions: RequestInit): EvaluationRequest {
 	const headers = new Headers(fetchOptions.headers);
-	if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+	if (!headers.has('Content-Type')) {
+		headers.set('Content-Type', 'application/json');
+	}
 	return {
 		url,
 		init: {
@@ -310,7 +322,9 @@ function buildPostRequest(url: string, body: object, fetchOptions: RequestInit):
 function resolveBulkEndpoint(endpoint: string): string | undefined {
 	const url = new URL(endpoint);
 	const path = url.pathname.replace(/\/+$/, '');
-	if (!path.endsWith('/evaluate')) return undefined;
+	if (!path.endsWith('/evaluate')) {
+		return undefined;
+	}
 	url.pathname = `${path.slice(0, -'/evaluate'.length)}/ofrep/v1/evaluate/flags`;
 	return url.toString();
 }
@@ -320,9 +334,13 @@ function abortedError(cause: unknown): FlagshipError {
 }
 
 function discardResponse(error: unknown): void {
-	if (!(error instanceof FlagshipError) || typeof error.cause !== 'object' || error.cause === null || !('body' in error.cause)) return;
+	if (!(error instanceof FlagshipError) || typeof error.cause !== 'object' || error.cause === null || !('body' in error.cause)) {
+		return;
+	}
 	const body = error.cause.body;
-	if (typeof body !== 'object' || body === null || !('cancel' in body) || typeof body.cancel !== 'function') return;
+	if (typeof body !== 'object' || body === null || !('cancel' in body) || typeof body.cancel !== 'function') {
+		return;
+	}
 
 	try {
 		void Promise.resolve(body.cancel()).catch(noop);
@@ -331,8 +349,12 @@ function discardResponse(error: unknown): void {
 
 function waitForRetry(delay: number, signals: Array<AbortSignal>): Promise<void> {
 	const alreadyAborted = signals.find((signal) => signal.aborted);
-	if (alreadyAborted) return Promise.reject(abortedError(alreadyAborted.reason));
-	if (signals.length === 0) return new Promise((resolve) => setTimeout(resolve, delay));
+	if (alreadyAborted) {
+		return Promise.reject(abortedError(alreadyAborted.reason));
+	}
+	if (signals.length === 0) {
+		return new Promise((resolve) => setTimeout(resolve, delay));
+	}
 
 	const merged = mergeSignals(signals);
 	return new Promise((resolve, reject) => {
@@ -350,7 +372,9 @@ function waitForRetry(delay: number, signals: Array<AbortSignal>): Promise<void>
 			resolve();
 		}, delay);
 		merged.signal.addEventListener('abort', onAbort, { once: true });
-		if (merged.signal.aborted) onAbort();
+		if (merged.signal.aborted) {
+			onAbort();
+		}
 	});
 }
 

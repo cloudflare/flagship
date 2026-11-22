@@ -32,7 +32,9 @@ export function classifySdkChanges(paths: Array<string>): SdkChanges {
 }
 
 export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): SdkChanges {
-	if (!isReleaseCommit(cwd, releaseCommit)) return { ...NO_CHANGES };
+	if (!isReleaseCommit(cwd, releaseCommit)) {
+		return { ...NO_CHANGES };
+	}
 
 	const releaseParent = `${releaseCommit}^1`;
 	const canonicalTag = describeTag(cwd, '@cloudflare/flagship@*', releaseParent);
@@ -51,12 +53,15 @@ export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): S
 type ChangesetCommand = ['changeset', 'publish' | 'git-tag'];
 
 export function publishCommands(changes: SdkChanges): Array<ChangesetCommand> {
-	if (changes.typescript)
+	if (changes.typescript) {
 		return [
 			['changeset', 'publish'],
 			['changeset', 'git-tag'],
 		];
-	if (changes.python || changes.go || changes.rust) return [['changeset', 'git-tag']];
+	}
+	if (changes.python || changes.go || changes.rust) {
+		return [['changeset', 'git-tag']];
+	}
 	return [];
 }
 
@@ -71,7 +76,9 @@ export function publishCommands(changes: SdkChanges): Array<ChangesetCommand> {
  */
 function isReleaseCommit(cwd: string, commit: string): boolean {
 	const subjects = [subject(cwd, commit)];
-	if (revisionExists(cwd, `${commit}^2`)) subjects.push(subject(cwd, `${commit}^2`));
+	if (revisionExists(cwd, `${commit}^2`)) {
+		subjects.push(subject(cwd, `${commit}^2`));
+	}
 
 	return subjects.some((value) => value.startsWith(RELEASE_COMMIT_SUBJECT));
 }
@@ -124,7 +131,9 @@ function writeChanges(changes: SdkChanges): void {
 	const lines = [...SDKS.map((sdk) => `${sdk}=${changes[sdk]}`), `any=${Object.values(changes).some(Boolean)}`];
 	const output = process.env.GITHUB_OUTPUT;
 
-	if (output) appendFileSync(output, `${lines.join('\n')}\n`);
+	if (output) {
+		appendFileSync(output, `${lines.join('\n')}\n`);
+	}
 	console.log(lines.join('\n'));
 }
 
@@ -137,11 +146,17 @@ function publish(): void {
 		return;
 	}
 
-	if (!changes.typescript) console.log('TypeScript SDK unchanged; creating the canonical release tag without publishing to npm.');
+	if (!changes.typescript) {
+		console.log('TypeScript SDK unchanged; creating the canonical release tag without publishing to npm.');
+	}
 	for (const command of commands) {
 		const result = spawnSync('pnpm', command, { stdio: 'inherit' });
-		if (result.error) throw result.error;
-		if (result.status !== 0) process.exit(result.status ?? 1);
+		if (result.error) {
+			throw result.error;
+		}
+		if (result.status !== 0) {
+			process.exit(result.status ?? 1);
+		}
 	}
 }
 
@@ -158,4 +173,6 @@ async function main(): Promise<void> {
 	}
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	await main();
+}

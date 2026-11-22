@@ -20,7 +20,9 @@ export function normalizeEvaluationContext(context: EvaluationContext): Normaliz
 	const ancestors = new WeakSet<object>();
 
 	for (const [key, value] of Object.entries(context)) {
-		if (value === undefined) continue;
+		if (value === undefined) {
+			continue;
+		}
 		const result = normalizeContextValue(value, key, ancestors);
 		setOwn(normalized, key, result.value);
 		requiresPost ||= result.structured;
@@ -34,25 +36,39 @@ function normalizeContextValue(
 	path: string,
 	ancestors: WeakSet<object>,
 ): { value: NormalizedContextValue; structured: boolean } {
-	if (value === null) return { value: null, structured: true };
-	if (typeof value === 'string' || typeof value === 'boolean') return { value, structured: false };
+	if (value === null) {
+		return { value: null, structured: true };
+	}
+	if (typeof value === 'string' || typeof value === 'boolean') {
+		return { value, structured: false };
+	}
 	if (typeof value === 'number') {
-		if (Number.isFinite(value)) return { value, structured: false };
+		if (Number.isFinite(value)) {
+			return { value, structured: false };
+		}
 		throw invalidContext(path, 'numbers must be finite');
 	}
 	if (value instanceof Date) {
-		if (Number.isNaN(value.getTime())) throw invalidContext(path, 'date is invalid');
+		if (Number.isNaN(value.getTime())) {
+			throw invalidContext(path, 'date is invalid');
+		}
 		return { value: value.toISOString(), structured: false };
 	}
-	if (typeof value !== 'object') throw invalidContext(path, `unsupported value type '${typeof value}'`);
-	if (ancestors.has(value)) throw invalidContext(path, 'cyclic values are not supported');
+	if (typeof value !== 'object') {
+		throw invalidContext(path, `unsupported value type '${typeof value}'`);
+	}
+	if (ancestors.has(value)) {
+		throw invalidContext(path, 'cyclic values are not supported');
+	}
 
 	ancestors.add(value);
 	try {
 		if (Array.isArray(value)) {
 			return {
 				value: value.map((item, index) => {
-					if (item === undefined) throw invalidContext(`${path}[${index}]`, 'undefined is not supported inside arrays');
+					if (item === undefined) {
+						throw invalidContext(`${path}[${index}]`, 'undefined is not supported inside arrays');
+					}
 					return normalizeContextValue(item, `${path}[${index}]`, ancestors).value;
 				}),
 				structured: true,
@@ -60,11 +76,15 @@ function normalizeContextValue(
 		}
 
 		const prototype = Object.getPrototypeOf(value);
-		if (prototype !== Object.prototype && prototype !== null) throw invalidContext(path, 'only plain objects are supported');
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw invalidContext(path, 'only plain objects are supported');
+		}
 
 		const object: Record<string, NormalizedContextValue> = {};
 		for (const [key, item] of Object.entries(value)) {
-			if (item === undefined) throw invalidContext(`${path}.${key}`, 'undefined is not supported inside objects');
+			if (item === undefined) {
+				throw invalidContext(`${path}.${key}`, 'undefined is not supported inside objects');
+			}
 			setOwn(object, key, normalizeContextValue(item, `${path}.${key}`, ancestors).value);
 		}
 		return { value: object, structured: true };
@@ -122,19 +142,27 @@ export class ContextTransformer {
 export function buildEvaluationUrl(baseUrl: string, flagKey: string, context: EvaluationContext, droppedKeys?: Array<string>): string {
 	const params = toSearchParams(context, droppedKeys, flagKey);
 
-	if (!baseUrl.includes('?') && !baseUrl.includes('#')) return `${baseUrl}?${params}`;
+	if (!baseUrl.includes('?') && !baseUrl.includes('#')) {
+		return `${baseUrl}?${params}`;
+	}
 
 	const url = new URL(baseUrl);
-	for (const [key, value] of params) url.searchParams.set(key, value);
+	for (const [key, value] of params) {
+		url.searchParams.set(key, value);
+	}
 	return url.toString();
 }
 
 function toSearchParams(context: EvaluationContext, droppedKeys?: Array<string>, flagKey?: string): URLSearchParams {
 	const params = new URLSearchParams();
-	if (flagKey !== undefined) params.set('flagKey', flagKey);
+	if (flagKey !== undefined) {
+		params.set('flagKey', flagKey);
+	}
 
 	for (const [key, value] of Object.entries(context)) {
-		if (value === undefined || value === null) continue;
+		if (value === undefined || value === null) {
+			continue;
+		}
 
 		if (value instanceof Date) {
 			params.set(key, value.toISOString());

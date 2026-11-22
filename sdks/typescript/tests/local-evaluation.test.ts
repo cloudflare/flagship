@@ -210,7 +210,9 @@ describe('FlagshipServerProvider local evaluation', () => {
 			const href = String(url);
 			if (href.includes('/definitions')) {
 				handlers.onDefinitions?.({ ...init, url: href });
-				if (handlers.definitions) return handlers.definitions();
+				if (handlers.definitions) {
+					return handlers.definitions();
+				}
 				return {
 					ok: true,
 					status: 200,

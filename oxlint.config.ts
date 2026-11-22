@@ -49,7 +49,6 @@ export default defineConfig({
 		'unicorn/numeric-separators-style': 'off',
 		'unicorn/prefer-import-meta-properties': 'off',
 		'unicorn/prefer-number-properties': 'off',
-		'unicorn/prefer-optional-catch-binding': 'off',
 		'unicorn/prefer-single-call': 'off',
 		'unicorn/prefer-top-level-await': 'off',
 		'vitest/no-conditional-expect': 'off',

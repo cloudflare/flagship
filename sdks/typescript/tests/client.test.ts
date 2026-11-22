@@ -267,7 +267,7 @@ describe('FlagshipClient', () => {
 
 			try {
 				await client.evaluate('my-flag', {});
-			} catch (_e) {
+			} catch {
 				// Expected to throw
 			}
 

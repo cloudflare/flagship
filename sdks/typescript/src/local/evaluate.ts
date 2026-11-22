@@ -147,7 +147,7 @@ function evaluateStringOperator(operator: StringOperator, attrValue: unknown, ta
 }
 
 function toNumber(value: string | number | boolean): number {
-	return typeof value === 'string' && value.trim() === '' ? NaN : Number(value);
+	return typeof value === 'string' && value.trim() === '' ? Number.NaN : Number(value);
 }
 
 function compareValues(attrValue: unknown, target: unknown): number | undefined {

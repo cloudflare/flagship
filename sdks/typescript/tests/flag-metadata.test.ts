@@ -25,7 +25,7 @@ describe('toFlagMetadata', () => {
 	});
 
 	it('drops non-primitive and non-finite entries', () => {
-		expect(toFlagMetadata({ ok: 'yes', nested: { a: 1 }, list: [1], nil: null, nan: NaN, inf: Infinity })).toEqual({ ok: 'yes' });
+		expect(toFlagMetadata({ ok: 'yes', nested: { a: 1 }, list: [1], nil: null, nan: Number.NaN, inf: Infinity })).toEqual({ ok: 'yes' });
 	});
 
 	it('keeps __proto__ as an own key without polluting the prototype', () => {

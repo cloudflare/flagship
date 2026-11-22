@@ -266,7 +266,7 @@ describe('FlagshipServerProvider local evaluation', () => {
 			).toThrow(/binding/);
 		});
 
-		it.each([0, -1, NaN, Infinity])('throws on invalid refreshInterval %s', (refreshInterval) => {
+		it.each([0, -1, Number.NaN, Infinity])('throws on invalid refreshInterval %s', (refreshInterval) => {
 			expect(() => new FlagshipServerProvider({ appId: 'a', accountId: 'b', localEvaluation: true, refreshInterval })).toThrow(
 				/refreshInterval/,
 			);

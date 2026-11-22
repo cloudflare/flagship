@@ -134,7 +134,7 @@ export class FlagshipClientProvider implements Provider {
 		if (this.pollInterval <= 0) {
 			return;
 		}
-		this.timer = setTimeout(async () => {
+		const refresh = async () => {
 			try {
 				const flags = await this.fetchAll(context, 'refresh');
 				if (epoch !== this.epoch) {
@@ -159,6 +159,13 @@ export class FlagshipClientProvider implements Provider {
 				}
 			}
 			this.schedulePoll(context, epoch);
+		};
+		this.timer = setTimeout(() => {
+			refresh().catch((error: unknown) => {
+				if (this.logging) {
+					console.warn(`[Flagship] Failed to poll for flag updates: ${String(error)}`);
+				}
+			});
 		}, this.pollInterval);
 	}
 

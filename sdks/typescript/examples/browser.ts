@@ -152,7 +152,7 @@ async function progressiveEnhancement() {
 
 	updateUI();
 
-	document.getElementById('login-button')?.addEventListener('click', async () => {
+	const logIn = async () => {
 		// On login, update context with real user data — flags are re-fetched automatically
 		await OpenFeature.setContext({
 			targetingKey: 'user-789',
@@ -160,6 +160,9 @@ async function progressiveEnhancement() {
 			plan: 'premium',
 		});
 		updateUI();
+	};
+	document.getElementById('login-button')?.addEventListener('click', () => {
+		logIn().catch((error: unknown) => console.error('Failed to update the Flagship context:', error));
 	});
 }
 

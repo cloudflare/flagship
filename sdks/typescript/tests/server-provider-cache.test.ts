@@ -139,7 +139,9 @@ describe('FlagshipServerProvider caching', () => {
 		const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', cacheTtl: 20 });
 
 		await provider.resolveBooleanEvaluation('flag', false, { targetingKey: 'u1' }, noopLogger);
-		await new Promise((resolve) => setTimeout(resolve, 40));
+		await new Promise((resolve) => {
+			setTimeout(resolve, 40);
+		});
 		await provider.resolveBooleanEvaluation('flag', false, { targetingKey: 'u1' }, noopLogger);
 
 		expect(global.fetch).toHaveBeenCalledTimes(2);

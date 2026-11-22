@@ -287,7 +287,11 @@ describe('FlagshipClientProvider', () => {
 		it('discards an in-flight initialize on close without emitting READY', async () => {
 			let resolveEvaluate!: (flags: Array<FlagshipBulkEvaluationResult>) => void;
 			const evaluateAll = mockBulk();
-			evaluateAll.mockReturnValueOnce(new Promise((resolve) => (resolveEvaluate = resolve)));
+			evaluateAll.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveEvaluate = resolve;
+				}),
+			);
 			const provider = new FlagshipClientProvider({ endpoint });
 			const onReady = vi.fn();
 			provider.events.addHandler(ProviderEvents.Ready, onReady);

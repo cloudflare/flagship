@@ -353,7 +353,9 @@ function waitForRetry(delay: number, signals: Array<AbortSignal>): Promise<void>
 		return Promise.reject(abortedError(alreadyAborted.reason));
 	}
 	if (signals.length === 0) {
-		return new Promise((resolve) => setTimeout(resolve, delay));
+		return new Promise((resolve) => {
+			setTimeout(resolve, delay);
+		});
 	}
 
 	const merged = mergeSignals(signals);

@@ -17,7 +17,6 @@ export default defineConfig({
 		'@nkzw/no-instanceof': 'off',
 		'import/consistent-type-specifier-style': 'off',
 		'no-empty': 'off',
-		'no-promise-executor-return': 'off',
 		'prefer-object-has-own': 'off',
 		'quality/no-array-filter-map': 'off',
 		'quality/no-chained-type-assertions': 'off',

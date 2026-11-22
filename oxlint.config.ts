@@ -31,7 +31,6 @@ export default defineConfig({
 		'typescript/no-unsafe-member-access': 'off',
 		'typescript/no-unsafe-return': 'off',
 		'typescript/no-unsafe-type-assertion': 'off',
-		'typescript/restrict-template-expressions': 'off',
 		'typescript/switch-exhaustiveness-check': 'off',
 		'typescript/use-unknown-in-catch-callback-variable': 'off',
 		'unicorn/consistent-function-scoping': 'off',

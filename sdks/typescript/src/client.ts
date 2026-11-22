@@ -203,7 +203,7 @@ export class FlagshipClient {
 				throw new FlagshipError(`Request timeout after ${timeout}ms`, FlagshipErrorCode.TIMEOUT_ERROR, error, true);
 			}
 
-			throw new FlagshipError(`Network error: ${error}`, FlagshipErrorCode.NETWORK_ERROR, error, true);
+			throw new FlagshipError(`Network error: ${String(error)}`, FlagshipErrorCode.NETWORK_ERROR, error, true);
 		} finally {
 			clearTimeout(timeoutId);
 			merged.dispose();

@@ -150,6 +150,35 @@ def test_orders_infinity_via_js_number() -> None:
     assert result["value"] == "hit"
 
 
+def test_iso_date_accepts_any_fractional_second_length() -> None:
+    """Date.parse accepts any number of fractional digits, not only 3 or 6.
+
+    Go's RFC3339Nano trims trailing zeros (``.5Z``) and keeps nanoseconds
+    (``.123456789Z``); these must still compare as dates on every supported
+    Python version.
+    """
+    assert _parse_iso_ms("2024-06-01T12:00:00.5Z") == 1717243200500.0
+    assert _parse_iso_ms("2024-06-01T12:00:00.25+02:00") == 1717236000250.0
+    assert _parse_iso_ms("2024-06-01T12:00:00.12345Z") == 1717243200123.0
+    assert _parse_iso_ms("2024-06-01T12:00:00.123456789Z") == 1717243200123.0
+
+    flag_def = {
+        "key": "iso",
+        "enabled": True,
+        "default_variation": "none",
+        "variations": {"none": "none", "hit": "hit"},
+        "rules": [
+            {
+                "conditions": [{"attribute": "seen", "operator": "greater_than", "value": "2024-01-01T00:00:00.5Z"}],
+                "serve_variation": "hit",
+            }
+        ],
+    }
+    for seen in ("2024-06-01T12:00:00.5Z", "2024-06-01T12:00:00.1234567Z", "2024-06-01T12:00:00.123456789Z"):
+        result = evaluate_flag(flag_def, {"seen": seen}, "acct")
+        assert result["reason"] == "TARGETING_MATCH", seen
+
+
 def test_iso_date_truncates_fractional_seconds_like_date_parse() -> None:
     """Date.parse keeps only 3 fractional digits (truncate, not round).
 

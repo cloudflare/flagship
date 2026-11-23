@@ -31,6 +31,8 @@ class EvaluationResult(_EvaluationResultRequired, total=False):
 
 
 _ISO_8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
+# Fractional seconds right after the seconds field of an ISO-8601 time.
+_ISO_FRACTION_RE = re.compile(r"(T\d{2}:\d{2}:\d{2})\.(\d+)")
 _SCI_RE = re.compile(r"^(-?)(\d+)(?:\.(\d+))?e([+-]?)(\d+)$", re.IGNORECASE)
 _JS_WHITESPACE_RE = re.compile(r"^[\t\v\f \u00a0\ufeff\n\r\u2028\u2029]+|[\t\v\f \u00a0\ufeff\n\r\u2028\u2029]+$")
 _MAX_PATH_DEPTH = 5
@@ -241,6 +243,9 @@ def _parse_iso_ms(value: str) -> float:
     try:
         # Python 3.10 needs Z → +00:00; 3.11+ accepts Z natively.
         normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        # Python 3.10's fromisoformat only takes 3 or 6 fractional digits, while
+        # Date.parse takes any count. Pad or cut to 6; only the first 3 matter.
+        normalized = _ISO_FRACTION_RE.sub(lambda m: f"{m[1]}.{m[2][:6].ljust(6, '0')}", normalized, count=1)
         dt = datetime.fromisoformat(normalized)
         if dt.tzinfo is None:
             # Naive strings shouldn't reach here (regex requires offset), but

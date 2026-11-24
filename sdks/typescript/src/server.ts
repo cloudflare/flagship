@@ -47,6 +47,7 @@ export {
 export type {
 	FlagshipProviderOptions,
 	FlagshipRequestOptions,
+	FlagshipEventStreamRequestOptions,
 	FlagshipEvaluationResponse,
 	FlagshipBinding,
 	FlagshipBindingEvaluationDetails,

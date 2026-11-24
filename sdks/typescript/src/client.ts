@@ -4,8 +4,11 @@ import {
 	FlagshipError,
 	FlagshipErrorCode,
 	FLAGSHIP_DEFAULT_BASE_URL,
+	type FlagshipBulkEvaluationResponse,
 	type FlagshipBulkEvaluationResult,
+	type FlagshipDefinitionsResponse,
 	type FlagshipEvaluationResponse,
+	type FlagshipEventStreamRequestOptions,
 	type FlagshipProviderOptions,
 	type FlagshipRequestOptions,
 } from './types.js';
@@ -21,6 +24,14 @@ interface ResolvedOptions {
 	timeout: number;
 	retries: number;
 	retryDelay: number;
+}
+
+/** @internal */
+export interface BulkFetchOptions extends FlagshipEventStreamRequestOptions {
+	ifNoneMatch?: string;
+	flagConfigEtag?: string;
+	flagConfigLastModified?: number | string;
+	requestEventStream?: boolean;
 }
 
 interface EvaluationRequest {
@@ -87,16 +98,58 @@ export class FlagshipClient {
 	 * @internal
 	 */
 	async evaluateAll(context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipBulkEvaluationResult[]> {
+		return (await this.evaluateAllResponse(context, undefined, options)).flags;
+	}
+
+	async evaluateAllResponse(
+		context: EvaluationContext,
+		flagConfigEtag?: string,
+		options?: FlagshipEventStreamRequestOptions,
+		requestEventStream = false,
+	): Promise<FlagshipBulkEvaluationResponse> {
 		const endpoint = this.options.bulkEndpoint;
 		if (!endpoint) {
 			throw new Error('Flagship: bulk evaluation requires an endpoint ending in /evaluate, or appId and accountId.');
 		}
-
-		const request = buildPostRequest(endpoint, { context: normalizeEvaluationContext(context).context }, this.options.fetchOptions);
+		const url = new URL(endpoint);
+		if (flagConfigEtag) url.searchParams.set('flagConfigEtag', flagConfigEtag);
+		const request = buildPostRequest(
+			url.toString(),
+			{ context: normalizeEvaluationContext(context).context },
+			withEventStreamCapability(this.options.fetchOptions, requestEventStream, options?.browserOrigin),
+		);
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
-
 		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseBulkResponse);
+	}
+
+	/**
+	 * Evaluates every flag for one context, optionally as a conditional request.
+	 *
+	 * `ifNoneMatch` sends the stored bulk response `ETag` and resolves to
+	 * `'not-modified'` on a `304`. `flagConfigEtag` and `flagConfigLastModified`
+	 * carry metadata from a change event and are sent as query parameters, as
+	 * OFREP specifies. A `429` is not retried here, so callers can honor its
+	 * `Retry-After` header; read it with `retryAfterMs`.
+	 *
+	 * @internal
+	 */
+	async fetchBulk(context: EvaluationContext, request: BulkFetchOptions = {}): Promise<FlagshipBulkEvaluationResponse | 'not-modified'> {
+		const endpoint = this.options.bulkEndpoint;
+		if (!endpoint) {
+			throw new Error('Flagship: bulk evaluation requires an endpoint ending in /evaluate, or appId and accountId.');
+		}
+		const url = new URL(endpoint);
+		if (request.flagConfigEtag) url.searchParams.set('flagConfigEtag', request.flagConfigEtag);
+		if (request.flagConfigLastModified !== undefined)
+			url.searchParams.set('flagConfigLastModified', String(request.flagConfigLastModified));
+		const init = withEventStreamCapability(this.options.fetchOptions, request.requestEventStream ?? false, request.browserOrigin);
+		const headers = new Headers(init.headers);
+		if (request.ifNoneMatch && request.browserOrigin === undefined) headers.set('If-None-Match', request.ifNoneMatch);
+		const built = buildPostRequest(url.toString(), { context: normalizeEvaluationContext(context).context }, { ...init, headers });
+		const signals = [request.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
+		const transport = request.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
+		return this.fetchWithRetry(built, this.options.retries, transport, signals, parseConditionalBulkResponse);
 	}
 
 	/**
@@ -111,26 +164,32 @@ export class FlagshipClient {
 		etag?: string,
 		options?: FlagshipRequestOptions,
 	): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
+		const response = await this.fetchDefinitionsResponse(etag, undefined, options);
+		return response === 'not-modified' ? response : { etag: response.etag, flags: response.flags };
+	}
+
+	async fetchDefinitionsResponse(
+		etag?: string,
+		flagConfigEtag?: string,
+		options?: FlagshipEventStreamRequestOptions,
+		requestEventStream = false,
+	): Promise<FlagshipDefinitionsResponse | 'not-modified'> {
 		const endpoint = this.options.definitionsEndpoint;
 		if (!endpoint) {
 			// Configuration problem, not an evaluation failure — mirror the constructor's plain Errors.
 			throw new Error('Flagship: definitions endpoint is not configured. Provide appId+accountId, or an endpoint ending in /evaluate.');
 		}
-
-		const headers = new Headers(this.options.fetchOptions.headers);
-		if (etag) headers.set('If-None-Match', etag);
-
+		const url = new URL(endpoint);
+		if (flagConfigEtag) url.searchParams.set('flagConfigEtag', flagConfigEtag);
+		const requestOptions = withEventStreamCapability(this.options.fetchOptions, requestEventStream, options?.browserOrigin);
+		const headers = new Headers(requestOptions.headers);
+		if (etag && options?.browserOrigin === undefined) headers.set('If-None-Match', etag);
 		const request: EvaluationRequest = {
-			url: endpoint,
-			init: {
-				...this.options.fetchOptions,
-				method: 'GET',
-				headers,
-			},
+			url: url.toString(),
+			init: { ...requestOptions, method: 'GET', headers },
 		};
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
-
 		return this.fetchWithRetry(request, this.options.retries, transport, signals, parseDefinitionsResponse);
 	}
 
@@ -216,6 +275,29 @@ export class FlagshipClient {
 	}
 }
 
+function withEventStreamCapability(options: RequestInit, enabled: boolean, browserOrigin?: string): RequestInit {
+	if (browserOrigin !== undefined) {
+		let valid = false;
+		try {
+			const url = new URL(browserOrigin);
+			valid =
+				url.origin === browserOrigin &&
+				(url.protocol === 'https:' || (url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')));
+		} catch {
+			// Invalid configuration must fail before sending an authenticated request.
+		}
+		if (!valid) throw new Error('Flagship: browserOrigin must be a canonical HTTPS origin or a loopback HTTP origin.');
+	}
+	if (!enabled && browserOrigin === undefined) return options;
+	const headers = new Headers(options.headers);
+	headers.set('Flagship-Event-Stream', 'sse');
+	if (browserOrigin !== undefined) {
+		headers.set('Origin', browserOrigin);
+		headers.delete('If-None-Match');
+	}
+	return { ...options, headers };
+}
+
 async function parseEvaluationResponse(response: Response): Promise<FlagshipEvaluationResponse> {
 	if (!response.ok) throw await httpError(response);
 
@@ -228,18 +310,42 @@ async function parseEvaluationResponse(response: Response): Promise<FlagshipEval
 	return data as FlagshipEvaluationResponse;
 }
 
-async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResult[]> {
+async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResponse> {
 	if (!response.ok) throw await httpError(response);
-
-	const data = (await response.json()) as { flags?: unknown } | null;
+	const data = (await response.json()) as Omit<FlagshipBulkEvaluationResponse, 'etag'> | null;
 	if (!data || !Array.isArray(data.flags)) {
 		throw new FlagshipError('Invalid bulk evaluation response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
-
-	return data.flags as FlagshipBulkEvaluationResult[];
+	return { ...data, etag: response.headers.get('etag') ?? undefined };
 }
 
-async function parseDefinitionsResponse(response: Response): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
+async function parseConditionalBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResponse | 'not-modified'> {
+	if (response.status === 304) return 'not-modified';
+	if (response.status === 429) {
+		const error = await httpError(response);
+		throw new FlagshipError(error.message, error.code, response, false, error.errorCode);
+	}
+	return parseBulkResponse(response);
+}
+
+/**
+ * Milliseconds until a `429` response allows another request, from its
+ * `Retry-After` header (delay in seconds or an HTTP date). `undefined` when
+ * `error` is not a rate-limit response or the header is absent or invalid.
+ *
+ * @internal
+ */
+export function retryAfterMs(error: unknown, now = Date.now()): number | undefined {
+	const response = error instanceof FlagshipError ? (error.cause as { status?: unknown; headers?: unknown } | undefined) : undefined;
+	if (response?.status !== 429 || !(response.headers instanceof Headers)) return undefined;
+	const value = response.headers.get('retry-after')?.trim();
+	if (!value) return undefined;
+	if (/^\d+$/.test(value)) return Number(value) * 1000;
+	const date = Date.parse(value);
+	return Number.isNaN(date) ? undefined : Math.max(0, date - now);
+}
+
+async function parseDefinitionsResponse(response: Response): Promise<FlagshipDefinitionsResponse | 'not-modified'> {
 	if (response.status === 304) {
 		return 'not-modified';
 	}
@@ -258,8 +364,8 @@ async function parseDefinitionsResponse(response: Response): Promise<{ etag: str
 		throw new FlagshipError('Invalid definitions response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
 
-	const etag = response.headers.get('etag') ?? '';
-	return { etag, flags: (data as { flags: Record<string, unknown> }).flags };
+	const envelope = data as Omit<FlagshipDefinitionsResponse, 'etag'>;
+	return { ...envelope, etag: response.headers.get('etag') ?? '' };
 }
 
 export function isAuthFailure(error: unknown): boolean {

@@ -151,15 +151,15 @@ Notes:
 
 ## Quick start — browser
 
+Keep your Flagship credential in your application backend, not in browser code. This example assumes your backend proxies the evaluation routes under `/api/flagship` and brokers SSE tickets.
+
 ```typescript
 import { OpenFeature } from '@openfeature/web-sdk';
 import { FlagshipClientProvider } from '@cloudflare/flagship/web';
 
 await OpenFeature.setProviderAndWait(
   new FlagshipClientProvider({
-    appId: 'your-app-id',
-    accountId: 'your-account-id',
-    authToken: 'your-token',
+    endpoint: '/api/flagship/evaluate',
   }),
 );
 
@@ -168,6 +168,49 @@ await OpenFeature.setContext({ userId: 'user-123', plan: 'premium' });
 const client = OpenFeature.getClient();
 const darkMode = client.getBooleanValue('dark-mode', false);
 ```
+
+### Broker browser SSE tickets
+
+Use the low-level client on your backend to request evaluations and a fresh stream ticket for an approved browser origin:
+
+```typescript
+import { FlagshipClient } from '@cloudflare/flagship/server';
+
+const flagship = new FlagshipClient({
+  appId: APP_ID,
+  accountId: ACCOUNT_ID,
+  authToken: FLAGSHIP_TOKEN,
+});
+const response = await flagship.evaluateAllResponse(context, undefined, {
+  browserOrigin: 'https://app.example.com',
+});
+```
+
+Replace `APP_ID`, `ACCOUNT_ID`, and `FLAGSHIP_TOKEN` with your server-side configuration. Supply the authenticated user's evaluation `context`. Validate the browser origin against your application's policy; do not blindly forward an untrusted value.
+
+Return the evaluations and advertised `eventStreams` to the browser, preserving the response ETag for subsequent revalidation. The browser connects directly to the advertised SSE URL using its limited-use ticket. Evaluation refreshes and fresh-ticket requests still go through your backend; forward version hints and request a fresh ticket after disconnection.
+
+`browserOrigin` is supported per request by `evaluateAllResponse`, `fetchBulk`, and `fetchDefinitionsResponse`. It sets `Origin` and requests SSE discovery without sending `If-None-Match`, so a `304` cannot suppress a fresh ticket. It does not change client defaults or the server provider's own connections. Use canonical HTTPS origins; loopback HTTP origins are accepted for local development, subject to server policy. Browsers set their own Origin header and must not use this backend option.
+
+### Change detection
+
+`FlagshipClientProvider` is an [OFREP static-context provider](https://github.com/open-feature/protocol/blob/main/guideline/static-context-provider.md): it evaluates every flag for the current context in one bulk request and resolves flags from that cache. It detects configuration changes as [OFREP ADR-0008](https://github.com/open-feature/protocol/blob/main/service/adrs/0008-sse-for-bulk-evaluation-changes.md) and [ADR-0010](https://github.com/open-feature/protocol/blob/main/service/adrs/0010-disable-default-polling-for-static-context-providers.md) describe:
+
+| `changeDetection` | Behavior                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `'sse'` (default) | Connects to every event stream the server advertises. Without a stream, refreshes when the page becomes visible. |
+| `'polling'`       | Ignores event streams. Refreshes every `pollInterval` milliseconds and when the page becomes visible.            |
+| `'none'`          | Refreshes only on `initialize()` and context changes.                                                            |
+
+`pollInterval` defaults to `0`, which disables timer polling. In `'sse'` mode, a positive `pollInterval` polls only while no stream is connected.
+
+When a change event arrives, the provider refreshes its cache before it emits `PROVIDER_CONFIGURATION_CHANGED`. It forwards the event's `etag` and `lastModified` as the `flagConfigEtag` and `flagConfigLastModified` query parameters, and revalidates other refreshes with the stored response `ETag`. After the page stays hidden for the stream's inactivity delay (`inactivityDelaySec`, default 120 seconds), the provider closes the stream; when the page becomes visible again, it refetches unconditionally and reconnects. A `429` response pauses requests until its `Retry-After` time, and a `401` or `403` moves the provider to `FATAL`.
+
+To use any OFREP-compatible server, pass `ofrepBaseUrl` (the URL up to, but not including, `/ofrep`) and `headers` instead of `appId` or `endpoint`. The provider's default request timeout is 10 seconds.
+
+Event stream URLs can carry credentials such as single-use tickets. Don't log or store them.
+
+Local-evaluation server providers emit `PROVIDER_CONFIGURATION_CHANGED` after a changed definitions snapshot has been applied. Binding providers can lazily invalidate cached evaluations when the platform binding exposes `getConfigurationVersion()`.
 
 ## Features
 

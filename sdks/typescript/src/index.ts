@@ -16,6 +16,7 @@
 export type {
 	FlagshipProviderOptions,
 	FlagshipRequestOptions,
+	FlagshipEventStreamRequestOptions,
 	FlagshipClientProviderOptions,
 	FlagshipEvaluationResponse,
 	CachedFlag,

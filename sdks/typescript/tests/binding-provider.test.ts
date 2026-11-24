@@ -12,6 +12,10 @@ import type { FlagshipBinding, FlagshipBindingEvaluationDetails } from '../src/t
 function createMockBinding(): FlagshipBinding {
 	return {
 		get: vi.fn((_flagKey: string, defaultValue?: unknown) => Promise.resolve(defaultValue)),
+		getValue: vi.fn((_flagKey: string, defaultValue: unknown) => Promise.resolve(defaultValue)) as unknown as FlagshipBinding['getValue'],
+		getDetails: vi.fn((flagKey: string, defaultValue: unknown) =>
+			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
+		) as unknown as FlagshipBinding['getDetails'],
 		getBooleanValue: vi.fn((_flagKey: string, defaultValue: boolean) => Promise.resolve(defaultValue)),
 		getStringValue: vi.fn((_flagKey: string, defaultValue: string) => Promise.resolve(defaultValue)),
 		getNumberValue: vi.fn((_flagKey: string, defaultValue: number) => Promise.resolve(defaultValue)),
@@ -201,6 +205,30 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			await OpenFeature.setProviderAndWait(provider);
 
 			expect(readyHandler).toHaveBeenCalled();
+		});
+	});
+
+	describe('configuration version', () => {
+		it('clears cached binding evaluations before emitting configuration changed', async () => {
+			vi.useFakeTimers();
+			const binding = createMockBinding();
+			binding.getConfigurationVersion = vi.fn().mockResolvedValueOnce('v1').mockResolvedValueOnce('v2');
+			(binding.getBooleanDetails as any).mockResolvedValue({ flagKey: 'flag', value: true, reason: 'DEFAULT' });
+			const provider = new FlagshipServerProvider({
+				binding,
+				cacheTtl: 60_000,
+				configurationVersionCheckInterval: 1_000,
+			});
+			const changed = vi.fn();
+			provider.events.addHandler(ProviderEvents.ConfigurationChanged, changed);
+
+			await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
+			await vi.advanceTimersByTimeAsync(1_000);
+			await provider.resolveBooleanEvaluation('flag', false, {}, noopLogger);
+
+			expect(binding.getBooleanDetails).toHaveBeenCalledTimes(2);
+			expect(changed).toHaveBeenCalledTimes(1);
+			vi.useRealTimers();
 		});
 	});
 

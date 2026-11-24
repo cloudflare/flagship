@@ -710,6 +710,58 @@ describe('FlagshipClient', () => {
 		});
 	});
 
+	describe('backend browser ticket discovery', () => {
+		it.each(['bulk', 'conditional-bulk', 'definitions'])('scopes browserOrigin to one %s discovery request', async (kind) => {
+			const transport = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+				Response.json({ flags: String(input).endsWith('/definitions') ? {} : [] }, { headers: { etag: '"v1"' } }),
+			);
+			const instance = new FlagshipClient({
+				endpoint: 'https://api.example.com/v1/acct/apps/app/evaluate',
+				authToken: 'backend-secret',
+				fetch: transport,
+				fetchOptions: { headers: { 'If-None-Match': '"old"' } },
+			});
+			const options = { browserOrigin: 'https://app.example.com' };
+			if (kind === 'bulk') await instance.evaluateAllResponse({}, undefined, options);
+			else if (kind === 'conditional-bulk') await instance.fetchBulk({}, { ...options, ifNoneMatch: '"old"' });
+			else await instance.fetchDefinitionsResponse('"old"', undefined, options);
+			const discoveryHeaders = new Headers(transport.mock.calls[0]?.[1]?.headers);
+			expect(discoveryHeaders.get('Origin')).toBe(options.browserOrigin);
+			expect(discoveryHeaders.get('Flagship-Event-Stream')).toBe('sse');
+			expect(discoveryHeaders.get('If-None-Match')).toBeNull();
+			expect(discoveryHeaders.get('Authorization')).toBe('Bearer backend-secret');
+
+			await instance.evaluateAllResponse({});
+			const ordinaryHeaders = new Headers(transport.mock.calls[1]?.[1]?.headers);
+			expect(ordinaryHeaders.get('Origin')).toBeNull();
+			expect(ordinaryHeaders.get('Flagship-Event-Stream')).toBeNull();
+			expect(ordinaryHeaders.get('If-None-Match')).toBe('"old"');
+		});
+
+		it('keeps concurrent browser origins independent', async () => {
+			const transport = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ flags: [] }));
+			const instance = new FlagshipClient({ appId: 'app', accountId: 'account', fetch: transport });
+			await Promise.all(
+				['https://a.example.com', 'https://b.example.com'].map((browserOrigin) =>
+					instance.evaluateAllResponse({}, undefined, { browserOrigin }),
+				),
+			);
+			expect(transport.mock.calls.map(([, init]) => new Headers(init?.headers).get('Origin'))).toEqual([
+				'https://a.example.com',
+				'https://b.example.com',
+			]);
+		});
+
+		it.each(['null', '*', 'not-a-url', 'https://app.example.com/', 'https://app.example.com/path', 'http://app.example.com'])(
+			'rejects invalid browserOrigin %s before sending credentials',
+			async (browserOrigin) => {
+				const instance = new FlagshipClient({ appId: 'app', accountId: 'account' });
+				await expect(instance.evaluateAllResponse({}, undefined, { browserOrigin })).rejects.toThrow('browserOrigin');
+				expect(global.fetch).not.toHaveBeenCalled();
+			},
+		);
+	});
+
 	describe('injectable transport', () => {
 		const okResponse = () => ({ ok: true, json: async () => ({ flagKey: 'my-flag', value: true }) }) as unknown as Response;
 

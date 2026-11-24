@@ -8,6 +8,7 @@ import {
 	type FlagshipBulkEvaluationResult,
 	type FlagshipDefinitionsResponse,
 	type FlagshipEvaluationResponse,
+	type FlagshipEventStreamRequestOptions,
 	type FlagshipProviderOptions,
 	type FlagshipRequestOptions,
 } from './types.js';
@@ -26,7 +27,7 @@ interface ResolvedOptions {
 }
 
 /** @internal */
-export interface BulkFetchOptions extends FlagshipRequestOptions {
+export interface BulkFetchOptions extends FlagshipEventStreamRequestOptions {
 	ifNoneMatch?: string;
 	flagConfigEtag?: string;
 	flagConfigLastModified?: number | string;
@@ -103,7 +104,7 @@ export class FlagshipClient {
 	async evaluateAllResponse(
 		context: EvaluationContext,
 		flagConfigEtag?: string,
-		options?: FlagshipRequestOptions,
+		options?: FlagshipEventStreamRequestOptions,
 		requestEventStream = false,
 	): Promise<FlagshipBulkEvaluationResponse> {
 		const endpoint = this.options.bulkEndpoint;
@@ -115,7 +116,7 @@ export class FlagshipClient {
 		const request = buildPostRequest(
 			url.toString(),
 			{ context: normalizeEvaluationContext(context).context },
-			withEventStreamCapability(this.options.fetchOptions, requestEventStream),
+			withEventStreamCapability(this.options.fetchOptions, requestEventStream, options?.browserOrigin),
 		);
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = options?.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -142,9 +143,9 @@ export class FlagshipClient {
 		if (request.flagConfigEtag) url.searchParams.set('flagConfigEtag', request.flagConfigEtag);
 		if (request.flagConfigLastModified !== undefined)
 			url.searchParams.set('flagConfigLastModified', String(request.flagConfigLastModified));
-		const init = withEventStreamCapability(this.options.fetchOptions, request.requestEventStream ?? false);
+		const init = withEventStreamCapability(this.options.fetchOptions, request.requestEventStream ?? false, request.browserOrigin);
 		const headers = new Headers(init.headers);
-		if (request.ifNoneMatch) headers.set('If-None-Match', request.ifNoneMatch);
+		if (request.ifNoneMatch && request.browserOrigin === undefined) headers.set('If-None-Match', request.ifNoneMatch);
 		const built = buildPostRequest(url.toString(), { context: normalizeEvaluationContext(context).context }, { ...init, headers });
 		const signals = [request.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
 		const transport = request.fetch ?? this.options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -170,7 +171,7 @@ export class FlagshipClient {
 	async fetchDefinitionsResponse(
 		etag?: string,
 		flagConfigEtag?: string,
-		options?: FlagshipRequestOptions,
+		options?: FlagshipEventStreamRequestOptions,
 		requestEventStream = false,
 	): Promise<FlagshipDefinitionsResponse | 'not-modified'> {
 		const endpoint = this.options.definitionsEndpoint;
@@ -180,9 +181,9 @@ export class FlagshipClient {
 		}
 		const url = new URL(endpoint);
 		if (flagConfigEtag) url.searchParams.set('flagConfigEtag', flagConfigEtag);
-		const requestOptions = withEventStreamCapability(this.options.fetchOptions, requestEventStream);
+		const requestOptions = withEventStreamCapability(this.options.fetchOptions, requestEventStream, options?.browserOrigin);
 		const headers = new Headers(requestOptions.headers);
-		if (etag) headers.set('If-None-Match', etag);
+		if (etag && options?.browserOrigin === undefined) headers.set('If-None-Match', etag);
 		const request: EvaluationRequest = {
 			url: url.toString(),
 			init: { ...requestOptions, method: 'GET', headers },
@@ -274,10 +275,26 @@ export class FlagshipClient {
 	}
 }
 
-function withEventStreamCapability(options: RequestInit, enabled: boolean): RequestInit {
-	if (!enabled) return options;
+function withEventStreamCapability(options: RequestInit, enabled: boolean, browserOrigin?: string): RequestInit {
+	if (browserOrigin !== undefined) {
+		let valid = false;
+		try {
+			const url = new URL(browserOrigin);
+			valid =
+				url.origin === browserOrigin &&
+				(url.protocol === 'https:' || (url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')));
+		} catch {
+			// Invalid configuration must fail before sending an authenticated request.
+		}
+		if (!valid) throw new Error('Flagship: browserOrigin must be a canonical HTTPS origin or a loopback HTTP origin.');
+	}
+	if (!enabled && browserOrigin === undefined) return options;
 	const headers = new Headers(options.headers);
 	headers.set('Flagship-Event-Stream', 'sse');
+	if (browserOrigin !== undefined) {
+		headers.set('Origin', browserOrigin);
+		headers.delete('If-None-Match');
+	}
 	return { ...options, headers };
 }
 

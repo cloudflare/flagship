@@ -143,6 +143,21 @@ export interface FlagshipRequestOptions {
 	signal?: AbortSignal;
 }
 
+/** Per-request options for a backend that brokers browser SSE tickets. */
+export interface FlagshipEventStreamRequestOptions extends FlagshipRequestOptions {
+	/**
+	 * Validated browser origin to bind a fresh SSE ticket to.
+	 *
+	 * Backend use only: browsers set their own Origin header. Supplying this
+	 * option requests a stream descriptor and disables conditional revalidation
+	 * for this call, so an unchanged configuration can still yield a fresh ticket.
+	 * Use a canonical HTTPS origin, or a loopback HTTP origin for local development.
+	 * Validate this against your application's origin policy; do not blindly
+	 * forward an untrusted value.
+	 */
+	browserOrigin?: string;
+}
+
 /**
  * Configuration options for `FlagshipClientProvider` (browser / static-context environments).
  */

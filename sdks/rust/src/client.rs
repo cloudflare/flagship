@@ -592,17 +592,57 @@ fn sanitize_message(message: &str) -> String {
     sanitized
 }
 
+// Escapes characters that render invisibly or could reorder or spoof text, and
+// keeps combining marks visible. `str::escape_debug` is not used because
+// whether it escapes combining marks varies between Rust versions.
 fn should_escape_message_character(character: char) -> bool {
-    if character == '\\' || character.is_control() {
-        return true;
-    }
+    character == '\\'
+        || character.is_control()
+        || is_format_character(character)
+        || is_non_ascii_separator(character)
+        || is_private_use_or_noncharacter(character)
+}
 
-    let mut prefixed = String::with_capacity(character.len_utf8() + 1);
-    prefixed.push('a');
-    prefixed.push(character);
-    let mut escaped = prefixed.escape_debug().skip(1);
+// Unicode general category Cf (format), plus the reserved U+2065.
+fn is_format_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{ad}'
+            | '\u{600}'..='\u{605}'
+            | '\u{61c}'
+            | '\u{6dd}'
+            | '\u{70f}'
+            | '\u{890}'..='\u{891}'
+            | '\u{8e2}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{110bd}'
+            | '\u{110cd}'
+            | '\u{13430}'..='\u{1343f}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0001}'
+            | '\u{e0020}'..='\u{e007f}'
+    )
+}
 
-    escaped.next() == Some('\\') && escaped.next() == Some('u')
+// Unicode general categories Zs, Zl, and Zp, except the ASCII space.
+fn is_non_ascii_separator(character: char) -> bool {
+    matches!(
+        character,
+        '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}'..='\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
+    )
+}
+
+fn is_private_use_or_noncharacter(character: char) -> bool {
+    matches!(
+        character,
+        '\u{e000}'..='\u{f8ff}' | '\u{f0000}'..='\u{ffffd}' | '\u{100000}'..='\u{10fffd}' | '\u{fdd0}'..='\u{fdef}'
+    ) || u32::from(character) & 0xfffe == 0xfffe
 }
 
 fn sanitize_server_code(code: String) -> Option<String> {
@@ -1511,6 +1551,30 @@ mod tests {
             '\u{e0061}',
         ] {
             assert!(!sanitized.contains(unsafe_character));
+        }
+
+        for visible in [
+            "e\u{301}",
+            "\u{20dd}",
+            "\u{fe0f}",
+            "\u{1f3fb}",
+            "\u{ff9e}",
+            "\u{e01ef}",
+        ] {
+            assert_eq!(sanitize_message(visible), visible);
+        }
+        for (character, escaped) in [
+            ('\u{a0}', "\\u{a0}"),
+            ('\u{3000}', "\\u{3000}"),
+            ('\u{600}', "\\u{600}"),
+            ('\u{2065}', "\\u{2065}"),
+            ('\u{e000}', "\\u{e000}"),
+            ('\u{10fffd}', "\\u{10fffd}"),
+            ('\u{fdd0}', "\\u{fdd0}"),
+            ('\u{fffe}', "\\u{fffe}"),
+            ('\u{10ffff}', "\\u{10ffff}"),
+        ] {
+            assert_eq!(sanitize_message(&character.to_string()), escaped);
         }
 
         let truncated = sanitize_message(&"é".repeat(ERROR_MESSAGE_LIMIT));

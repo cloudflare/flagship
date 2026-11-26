@@ -21,7 +21,10 @@ function mockResponse(value: unknown, reason = 'TARGETING_MATCH', variant = 'on'
 
 function createMockBinding(): FlagshipBinding {
 	return {
-		get: vi.fn((_flagKey: string, defaultValue?: unknown) => Promise.resolve(defaultValue)),
+		getValue: vi.fn((_flagKey: string, defaultValue: unknown) => Promise.resolve(defaultValue)) as unknown as FlagshipBinding['getValue'],
+		getDetails: vi.fn((flagKey: string, defaultValue: unknown) =>
+			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
+		) as unknown as FlagshipBinding['getDetails'],
 		getBooleanValue: vi.fn((_flagKey: string, defaultValue: boolean) => Promise.resolve(defaultValue)),
 		getStringValue: vi.fn((_flagKey: string, defaultValue: string) => Promise.resolve(defaultValue)),
 		getNumberValue: vi.fn((_flagKey: string, defaultValue: number) => Promise.resolve(defaultValue)),

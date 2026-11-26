@@ -13,7 +13,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import readChangesets from '@changesets/read';
+import { readChangesets } from '@changesets/read';
 import type { NewChangeset, Release, VersionType } from '@changesets/types';
 import { parse as parseToml, patch as patchToml } from '@decimalturn/toml-patch';
 import { getPackagesSync } from '@manypkg/get-packages';

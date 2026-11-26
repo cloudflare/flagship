@@ -11,7 +11,10 @@ import type { FlagshipBinding, FlagshipBindingEvaluationDetails } from '../src/t
  */
 function createMockBinding(): FlagshipBinding {
 	return {
-		get: vi.fn((_flagKey: string, defaultValue?: unknown) => Promise.resolve(defaultValue)),
+		getValue: vi.fn((_flagKey: string, defaultValue: unknown) => Promise.resolve(defaultValue)) as unknown as FlagshipBinding['getValue'],
+		getDetails: vi.fn((flagKey: string, defaultValue: unknown) =>
+			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
+		) as unknown as FlagshipBinding['getDetails'],
 		getBooleanValue: vi.fn((_flagKey: string, defaultValue: boolean) => Promise.resolve(defaultValue)),
 		getStringValue: vi.fn((_flagKey: string, defaultValue: string) => Promise.resolve(defaultValue)),
 		getNumberValue: vi.fn((_flagKey: string, defaultValue: number) => Promise.resolve(defaultValue)),
@@ -185,7 +188,8 @@ describe('FlagshipServerProvider (binding mode)', () => {
 			const provider = new FlagshipServerProvider({ binding });
 			await OpenFeature.setProviderAndWait(provider);
 
-			expect(binding.get).not.toHaveBeenCalled();
+			expect(binding.getValue).not.toHaveBeenCalled();
+			expect(binding.getDetails).not.toHaveBeenCalled();
 			expect(binding.getBooleanDetails).not.toHaveBeenCalled();
 			expect(binding.getStringDetails).not.toHaveBeenCalled();
 			expect(binding.getNumberDetails).not.toHaveBeenCalled();

@@ -2,7 +2,3 @@ packages:
   - 'sdks/*'
 allowBuilds:
   esbuild: true
-minimumReleaseAgeExclude:
-  - '@cloudflare/oxlint-config@0.2.0'
-  - '@nkzw/eslint-plugin@3.0.0'
-  - '@nkzw/oxlint-config@4.1.0'

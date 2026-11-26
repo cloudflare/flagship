@@ -1,3 +1,3 @@
 # @cloudflare/flagship-python
 
-## 0.7.0
+## 0.7.1

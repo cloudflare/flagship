@@ -64,7 +64,7 @@ wheels = [
 
 [[package]]
 name = "cloudflare-flagship"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "." }
 dependencies = [
     { name = "cachetools", version = "7.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },

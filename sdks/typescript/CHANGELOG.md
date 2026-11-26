@@ -1,5 +1,15 @@
 # @cloudflare/flagship
 
+## 0.7.1
+
+### Patch Changes
+
+- [`c343997`](https://github.com/cloudflare/flagship/commit/c343997a369950d33368254c63b9835c12fbcb3f) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Keep combining marks such as accents visible in sanitized error messages, whichever Rust version built the crate. Control, format, private-use, and non-ASCII separator characters are still escaped as `\u{...}`.
+
+- [`e971774`](https://github.com/cloudflare/flagship/commit/e9717748099af63c0879110e63e2c0ab1d926abd) Thanks [@akshitsinha](https://github.com/akshitsinha)! - Update SDK dependencies. The Python SDK refreshes its locked dependencies. The Rust SDK requires `ryu-js` 1.0.4 or later and refreshes its locked dependencies.
+
+- [#62](https://github.com/cloudflare/flagship/pull/62) [`5c8ae91`](https://github.com/cloudflare/flagship/commit/5c8ae91d577e7c27abe736f9fd0198eec30e38af) Thanks [@cpojer](https://github.com/cpojer)! - Handle rejected browser polling callbacks and tighten response parsing and error handling.
+
 ## 0.7.0
 
 ### Minor Changes

@@ -8,10 +8,10 @@
  *   FLAGSHIP_REPO=../flagship npx tsx spec/local-evaluation/generate.ts
  */
 import { writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const flagshipRepo = process.env.FLAGSHIP_REPO ?? resolve(__dirname, '../../../flagship');
 const evaluatePath = resolve(flagshipRepo, 'packages/data-plane/src/evaluate.ts');
 
@@ -31,55 +31,61 @@ function murmurhash3(str: string, seed: number): number {
 		b = encoder.encode(str);
 		n = b.byteLength;
 	} else {
-		if (hashBuf.byteLength < requiredBytes) hashBuf = new Uint8Array(requiredBytes);
+		if (hashBuf.byteLength < requiredBytes) {
+			hashBuf = new Uint8Array(requiredBytes);
+		}
 		b = hashBuf;
 		n = encoder.encodeInto(str, b).written;
 	}
 	let h = seed >>> 0;
 	let i = 0;
 	while (i + 4 <= n) {
-		let k = b[i]! | (b[i + 1]! << 8) | (b[i + 2]! << 16) | (b[i + 3]! << 24);
-		k = Math.imul(k, 0xcc9e2d51) >>> 0;
+		let k = b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);
+		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
-		k = Math.imul(k, 0x1b873593) >>> 0;
+		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
 		h ^= k;
 		h = ((h << 13) | (h >>> 19)) >>> 0;
-		h = (Math.imul(h, 5) + 0xe6546b64) >>> 0;
+		h = (Math.imul(h, 5) + 0xe6_54_6b_64) >>> 0;
 		i += 4;
 	}
 	let k = 0;
-	if (n - i >= 3) k ^= b[i + 2]! << 16;
-	if (n - i >= 2) k ^= b[i + 1]! << 8;
+	if (n - i >= 3) {
+		k ^= b[i + 2] << 16;
+	}
+	if (n - i >= 2) {
+		k ^= b[i + 1] << 8;
+	}
 	if (n > i) {
-		k ^= b[i]!;
-		k = Math.imul(k, 0xcc9e2d51) >>> 0;
+		k ^= b[i];
+		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
-		k = Math.imul(k, 0x1b873593) >>> 0;
+		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
 		h ^= k;
 	}
 	h ^= n;
 	h ^= h >>> 16;
-	h = Math.imul(h, 0x85ebca6b) >>> 0;
+	h = Math.imul(h, 0x85_eb_ca_6b) >>> 0;
 	h ^= h >>> 13;
-	h = Math.imul(h, 0xc2b2ae35) >>> 0;
+	h = Math.imul(h, 0xc2_b2_ae_35) >>> 0;
 	h ^= h >>> 16;
 	return h >>> 0;
 }
 
-type FlagValue = boolean | string | number | Record<string, unknown> | unknown[];
+type FlagValue = boolean | string | number | Record<string, unknown> | Array<unknown>;
 type EvalFlag = {
 	key: string;
 	enabled: boolean;
 	default_variation: string;
 	variations: Record<string, unknown>;
 	rules: Array<{
-		conditions: unknown[];
+		conditions: Array<unknown>;
 		serve_variation: string;
 		rollout?: { percentage: number; attribute?: string };
 	}>;
 };
 
-type CaseExpected = { value: FlagValue; variant: string; reason: string } | { error: string } | { reasonOneOf: string[] };
+type CaseExpected = { value: FlagValue; variant: string; reason: string } | { error: string } | { reasonOneOf: Array<string> };
 
 interface ConformanceCase {
 	name: string;
@@ -109,11 +115,11 @@ function base(attr: string, operator: string, value: unknown) {
 	return { attribute: attr, operator, value };
 }
 
-function and(...clauses: unknown[]) {
+function and(...clauses: Array<unknown>) {
 	return { logical_operator: 'AND' as const, clauses };
 }
 
-function or(...clauses: unknown[]) {
+function or(...clauses: Array<unknown>) {
 	return { logical_operator: 'OR' as const, clauses };
 }
 
@@ -144,7 +150,7 @@ function caseOf(name: string, flagDef: EvalFlag, context: Record<string, unknown
 	}
 }
 
-const cases: ConformanceCase[] = [];
+const cases: Array<ConformanceCase> = [];
 
 // --- STATIC / DISABLED / DEFAULT ---
 cases.push(
@@ -198,7 +204,7 @@ for (const [name, operator, attr, value, context, shouldMatch] of [
 		...stringOps,
 		rules: [{ conditions: [base(attr, operator, value)], serve_variation: 'hit' }],
 	});
-	const c = caseOf(`string-${name}`, f, context as Record<string, unknown>);
+	const c = caseOf(`string-${name}`, f, context);
 	if (shouldMatch) {
 		if (!('value' in c.expected) || c.expected.reason !== 'TARGETING_MATCH') {
 			throw new Error(`expected match for ${name}`);

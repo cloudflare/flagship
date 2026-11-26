@@ -53,7 +53,7 @@ sdks/
 pnpm install        # install all workspace dependencies
 ```
 
-Requires Node 22+ and pnpm 12+.
+Requires Node 22.18+ on the 22.x line or Node 24+, and pnpm 12+.
 
 ## Commands
 
@@ -165,7 +165,7 @@ The Rust SDK is published to crates.io as `cloudflare-flagship` and supports HTT
 
 ### Linting — Oxlint
 
-Config in `.oxlintrc.json`. Plugins: `typescript`, `import`, `unicorn`. Key rules:
+Config in `oxlint.config.ts`, based on `@cloudflare/oxlint-config`. Key project rules:
 
 - `eqeqeq: "error"` — always use `===`
 - `no-explicit-any: "warn"` (off in tests)

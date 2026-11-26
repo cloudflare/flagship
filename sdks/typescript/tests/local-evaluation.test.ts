@@ -1,14 +1,14 @@
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Logger } from '@openfeature/server-sdk';
 import { ErrorCode } from '@openfeature/server-sdk';
 import { FlagshipClient, resolveDefinitionsEndpoint } from '../src/client.js';
-import { evaluateFlag, FlagConfigError, murmurhash3, type EvalFlag } from '../src/local/evaluate.js';
+import { evaluateFlag, FlagConfigError, murmurhash3 } from '../src/local/evaluate.js';
+import type { EvalFlag } from '../src/local/evaluate.js';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const casesPath = resolve(__dirname, '../../../spec/local-evaluation/cases.json');
 const suite = JSON.parse(readFileSync(casesPath, 'utf8')) as {
 	cases: Array<{
@@ -17,7 +17,7 @@ const suite = JSON.parse(readFileSync(casesPath, 'utf8')) as {
 		accountId: string;
 		flagKey: string;
 		context: Record<string, unknown>;
-		expected: { value: unknown; variant: string; reason: string } | { error: string } | { reasonOneOf: string[] };
+		expected: { value: unknown; variant: string; reason: string } | { error: string } | { reasonOneOf: Array<string> };
 	}>;
 	murmur: Array<{ name: string; input: string; seed: number; expected: number }>;
 };
@@ -49,17 +49,17 @@ describe('local evaluation engine — shared vectors', () => {
 			expect(flagDef).toBeDefined();
 
 			if ('error' in c.expected) {
-				expect(() => evaluateFlag(flagDef!, c.context as never, c.accountId)).toThrow(FlagConfigError);
+				expect(() => evaluateFlag(flagDef, c.context as never, c.accountId)).toThrow(FlagConfigError);
 				return;
 			}
 
 			if ('reasonOneOf' in c.expected) {
-				const result = evaluateFlag(flagDef!, c.context as never, c.accountId);
+				const result = evaluateFlag(flagDef, c.context as never, c.accountId);
 				expect(c.expected.reasonOneOf).toContain(result.reason);
 				return;
 			}
 
-			const result = evaluateFlag(flagDef!, c.context as never, c.accountId);
+			const result = evaluateFlag(flagDef, c.context as never, c.accountId);
 			expect(result).toEqual({
 				value: c.expected.value,
 				variant: c.expected.variant,
@@ -121,7 +121,7 @@ describe('FlagshipClient.fetchDefinitions', () => {
 		const result = await client.fetchDefinitions();
 		expect(result).toEqual({ etag: '"abc"', flags: { f1: { key: 'f1' } } });
 		expect(fetch).toHaveBeenCalledOnce();
-		const [url, init] = fetch.mock.calls[0]!;
+		const [url, init] = fetch.mock.calls[0];
 		expect(String(url)).toContain('/definitions');
 		expect(init.method).toBe('GET');
 	});
@@ -147,7 +147,7 @@ describe('FlagshipClient.fetchDefinitions', () => {
 
 		const result = await client.fetchDefinitions('"abc"');
 		expect(result).toBe('not-modified');
-		const init = fetch.mock.calls[0]![1] as RequestInit;
+		const init = fetch.mock.calls[0][1] as RequestInit;
 		expect(new Headers(init.headers).get('If-None-Match')).toBe('"abc"');
 	});
 
@@ -211,7 +211,9 @@ describe('FlagshipServerProvider local evaluation', () => {
 			const href = String(url);
 			if (href.includes('/definitions')) {
 				handlers.onDefinitions?.({ ...init, url: href });
-				if (handlers.definitions) return handlers.definitions();
+				if (handlers.definitions) {
+					return handlers.definitions();
+				}
 				return {
 					ok: true,
 					status: 200,
@@ -265,7 +267,7 @@ describe('FlagshipServerProvider local evaluation', () => {
 			).toThrow(/binding/);
 		});
 
-		it.each([0, -1, NaN, Infinity])('throws on invalid refreshInterval %s', (refreshInterval) => {
+		it.each([0, -1, Number.NaN, Infinity])('throws on invalid refreshInterval %s', (refreshInterval) => {
 			expect(() => new FlagshipServerProvider({ appId: 'a', accountId: 'b', localEvaluation: true, refreshInterval })).toThrow(
 				/refreshInterval/,
 			);
@@ -683,7 +685,7 @@ describe('FlagshipServerProvider local evaluation', () => {
 			await Promise.resolve();
 
 			await provider.onClose();
-			resolveFetch!({
+			resolveFetch({
 				ok: true,
 				status: 200,
 				headers: new Headers({ etag: '"v2"' }),
@@ -786,7 +788,7 @@ describe('FlagshipServerProvider local evaluation', () => {
 
 			// Stale refresh from the previous session finally resolves with the
 			// old definitions. It must not overwrite the fresh snapshot.
-			resolveStale!({
+			resolveStale({
 				ok: true,
 				status: 200,
 				headers: new Headers({ etag: '"stale"' }),

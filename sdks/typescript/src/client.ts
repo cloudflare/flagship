@@ -1,14 +1,7 @@
 import type { EvaluationContext } from '@openfeature/core';
 import { buildEvaluationUrl, normalizeEvaluationContext } from './context.js';
-import {
-	FlagshipError,
-	FlagshipErrorCode,
-	FLAGSHIP_DEFAULT_BASE_URL,
-	type FlagshipBulkEvaluationResult,
-	type FlagshipEvaluationResponse,
-	type FlagshipProviderOptions,
-	type FlagshipRequestOptions,
-} from './types.js';
+import { FlagshipError, FlagshipErrorCode, FLAGSHIP_DEFAULT_BASE_URL } from './types.js';
+import type { FlagshipBulkEvaluationResult, FlagshipEvaluationResponse, FlagshipProviderOptions, FlagshipRequestOptions } from './types.js';
 
 interface ResolvedOptions {
 	endpoint: string;
@@ -69,7 +62,7 @@ export class FlagshipClient {
 		const request = normalized.requiresPost
 			? buildPostRequest(this.options.endpoint, { flagKey, context: normalized.context }, this.options.fetchOptions)
 			: {
-					url: buildEvaluationUrl(this.options.endpoint, flagKey, normalized.context as EvaluationContext),
+					url: buildEvaluationUrl(this.options.endpoint, flagKey, normalized.context),
 					init: this.options.fetchOptions,
 				};
 		const signals = [options?.signal, this.options.signal].filter((signal): signal is AbortSignal => Boolean(signal));
@@ -86,7 +79,7 @@ export class FlagshipClient {
 	 *
 	 * @internal
 	 */
-	async evaluateAll(context: EvaluationContext, options?: FlagshipRequestOptions): Promise<FlagshipBulkEvaluationResult[]> {
+	async evaluateAll(context: EvaluationContext, options?: FlagshipRequestOptions): Promise<Array<FlagshipBulkEvaluationResult>> {
 		const endpoint = this.options.bulkEndpoint;
 		if (!endpoint) {
 			throw new Error('Flagship: bulk evaluation requires an endpoint ending in /evaluate, or appId and accountId.');
@@ -118,7 +111,9 @@ export class FlagshipClient {
 		}
 
 		const headers = new Headers(this.options.fetchOptions.headers);
-		if (etag) headers.set('If-None-Match', etag);
+		if (etag) {
+			headers.set('If-None-Match', etag);
+		}
 
 		const request: EvaluationRequest = {
 			url: endpoint,
@@ -143,7 +138,7 @@ export class FlagshipClient {
 		request: EvaluationRequest,
 		retriesLeft: number,
 		transport: typeof globalThis.fetch,
-		signals: AbortSignal[],
+		signals: Array<AbortSignal>,
 		parse: (response: Response) => Promise<T>,
 	): Promise<T> {
 		try {
@@ -171,7 +166,7 @@ export class FlagshipClient {
 		request: EvaluationRequest,
 		timeout: number,
 		transport: typeof globalThis.fetch,
-		signals: AbortSignal[],
+		signals: Array<AbortSignal>,
 		parse: (response: Response) => Promise<T>,
 	): Promise<T> {
 		const alreadyAborted = signals.find((signal) => signal.aborted);
@@ -208,7 +203,7 @@ export class FlagshipClient {
 				throw new FlagshipError(`Request timeout after ${timeout}ms`, FlagshipErrorCode.TIMEOUT_ERROR, error, true);
 			}
 
-			throw new FlagshipError(`Network error: ${error}`, FlagshipErrorCode.NETWORK_ERROR, error, true);
+			throw new FlagshipError(`Network error: ${String(error)}`, FlagshipErrorCode.NETWORK_ERROR, error, true);
 		} finally {
 			clearTimeout(timeoutId);
 			merged.dispose();
@@ -217,7 +212,9 @@ export class FlagshipClient {
 }
 
 async function parseEvaluationResponse(response: Response): Promise<FlagshipEvaluationResponse> {
-	if (!response.ok) throw await httpError(response);
+	if (!response.ok) {
+		throw await httpError(response);
+	}
 
 	const data = await response.json();
 
@@ -228,15 +225,17 @@ async function parseEvaluationResponse(response: Response): Promise<FlagshipEval
 	return data as FlagshipEvaluationResponse;
 }
 
-async function parseBulkResponse(response: Response): Promise<FlagshipBulkEvaluationResult[]> {
-	if (!response.ok) throw await httpError(response);
+async function parseBulkResponse(response: Response): Promise<Array<FlagshipBulkEvaluationResult>> {
+	if (!response.ok) {
+		throw await httpError(response);
+	}
 
-	const data = (await response.json()) as { flags?: unknown } | null;
-	if (!data || !Array.isArray(data.flags)) {
+	const data: unknown = await response.json();
+	if (!data || typeof data !== 'object' || !('flags' in data) || !Array.isArray(data.flags)) {
 		throw new FlagshipError('Invalid bulk evaluation response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
 
-	return data.flags as FlagshipBulkEvaluationResult[];
+	return data.flags as Array<FlagshipBulkEvaluationResult>;
 }
 
 async function parseDefinitionsResponse(response: Response): Promise<{ etag: string; flags: Record<string, unknown> } | 'not-modified'> {
@@ -244,16 +243,18 @@ async function parseDefinitionsResponse(response: Response): Promise<{ etag: str
 		return 'not-modified';
 	}
 
-	if (!response.ok) throw await httpError(response);
+	if (!response.ok) {
+		throw await httpError(response);
+	}
 
 	const data: unknown = await response.json();
 	if (
 		!data ||
 		typeof data !== 'object' ||
 		!('flags' in data) ||
-		typeof (data as { flags: unknown }).flags !== 'object' ||
-		(data as { flags: unknown }).flags === null ||
-		Array.isArray((data as { flags: unknown }).flags)
+		typeof data.flags !== 'object' ||
+		data.flags === null ||
+		Array.isArray(data.flags)
 	) {
 		throw new FlagshipError('Invalid definitions response from Flagship API', FlagshipErrorCode.PARSE_ERROR, undefined, true);
 	}
@@ -278,14 +279,20 @@ async function httpError(response: Response): Promise<FlagshipError> {
 	);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 async function readErrorBody(response: Response): Promise<{ message?: string; errorCode?: string }> {
 	try {
-		const body = (await response.json()) as Record<string, unknown> | null;
-		if (!body || typeof body !== 'object') return {};
+		const body: unknown = await response.json();
+		if (!isRecord(body)) {
+			return {};
+		}
 		const errors = Array.isArray(body.errors) ? (body.errors[0] as { message?: unknown } | undefined) : undefined;
 		const message = [body.errorMessage, body.errorDetails, body.error, errors?.message].find((value) => typeof value === 'string');
 		return {
-			message: message as string | undefined,
+			message,
 			errorCode: typeof body.errorCode === 'string' ? body.errorCode : undefined,
 		};
 	} catch {
@@ -295,7 +302,9 @@ async function readErrorBody(response: Response): Promise<{ message?: string; er
 
 function buildPostRequest(url: string, body: object, fetchOptions: RequestInit): EvaluationRequest {
 	const headers = new Headers(fetchOptions.headers);
-	if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+	if (!headers.has('Content-Type')) {
+		headers.set('Content-Type', 'application/json');
+	}
 	return {
 		url,
 		init: {
@@ -310,7 +319,9 @@ function buildPostRequest(url: string, body: object, fetchOptions: RequestInit):
 function resolveBulkEndpoint(endpoint: string): string | undefined {
 	const url = new URL(endpoint);
 	const path = url.pathname.replace(/\/+$/, '');
-	if (!path.endsWith('/evaluate')) return undefined;
+	if (!path.endsWith('/evaluate')) {
+		return undefined;
+	}
 	url.pathname = `${path.slice(0, -'/evaluate'.length)}/ofrep/v1/evaluate/flags`;
 	return url.toString();
 }
@@ -320,19 +331,31 @@ function abortedError(cause: unknown): FlagshipError {
 }
 
 function discardResponse(error: unknown): void {
-	if (!(error instanceof FlagshipError) || typeof error.cause !== 'object' || error.cause === null || !('body' in error.cause)) return;
+	if (!(error instanceof FlagshipError) || typeof error.cause !== 'object' || error.cause === null || !('body' in error.cause)) {
+		return;
+	}
 	const body = error.cause.body;
-	if (typeof body !== 'object' || body === null || !('cancel' in body) || typeof body.cancel !== 'function') return;
+	if (typeof body !== 'object' || body === null || !('cancel' in body) || typeof body.cancel !== 'function') {
+		return;
+	}
 
 	try {
 		void Promise.resolve(body.cancel()).catch(noop);
-	} catch {}
+	} catch {
+		// Response body cancellation is best effort.
+	}
 }
 
-function waitForRetry(delay: number, signals: AbortSignal[]): Promise<void> {
+function waitForRetry(delay: number, signals: Array<AbortSignal>): Promise<void> {
 	const alreadyAborted = signals.find((signal) => signal.aborted);
-	if (alreadyAborted) return Promise.reject(abortedError(alreadyAborted.reason));
-	if (signals.length === 0) return new Promise((resolve) => setTimeout(resolve, delay));
+	if (alreadyAborted) {
+		return Promise.reject(abortedError(alreadyAborted.reason));
+	}
+	if (signals.length === 0) {
+		return new Promise((resolve) => {
+			setTimeout(resolve, delay);
+		});
+	}
 
 	const merged = mergeSignals(signals);
 	return new Promise((resolve, reject) => {
@@ -350,7 +373,9 @@ function waitForRetry(delay: number, signals: AbortSignal[]): Promise<void> {
 			resolve();
 		}, delay);
 		merged.signal.addEventListener('abort', onAbort, { once: true });
-		if (merged.signal.aborted) onAbort();
+		if (merged.signal.aborted) {
+			onAbort();
+		}
 	});
 }
 
@@ -366,9 +391,9 @@ function isRetryableStatus(status: number): boolean {
  *
  * @internal Exported for tests; not part of the package's public API.
  */
-export function mergeSignals(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
+export function mergeSignals(signals: Array<AbortSignal>): { signal: AbortSignal; dispose: () => void } {
 	if (signals.length === 1) {
-		return { signal: signals[0]!, dispose: noop };
+		return { signal: signals[0], dispose: noop };
 	}
 
 	if (typeof AbortSignal.any === 'function') {
@@ -414,7 +439,7 @@ function buildFetchOptions(options: FlagshipProviderOptions): RequestInit {
 		return fetchOptions;
 	}
 
-	const existingHeaders = new Headers(fetchOptions.headers as HeadersInit | undefined);
+	const existingHeaders = new Headers(fetchOptions.headers);
 
 	// Only inject the Authorization header when the caller hasn't already
 	// provided one explicitly — their value takes precedence.

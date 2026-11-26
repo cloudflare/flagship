@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { HookContext, EvaluationDetails, FlagValue } from '@openfeature/server-sdk';
 import { ErrorCode } from '@openfeature/server-sdk';
-import { TelemetryHook, type TelemetryEvent } from '../../src/hooks/telemetry-hook.js';
+import { TelemetryHook } from '../../src/hooks/telemetry-hook.js';
+import type { TelemetryEvent } from '../../src/hooks/telemetry-hook.js';
 
 function makeHookContext(flagKey = 'test-flag'): HookContext {
 	return {
@@ -29,14 +30,14 @@ function makeDetails(overrides: Partial<EvaluationDetails<FlagValue>> = {}): Eva
 describe('TelemetryHook (unit)', () => {
 	describe('before + after (evaluation event)', () => {
 		it('emits an evaluation event with correct fields', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext('my-flag');
 			const details = makeDetails({ value: true, reason: 'TARGETING_MATCH', variant: 'on', errorCode: undefined });
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, details);
-			hook.finally(ctx as any, details);
+			hook.before(ctx);
+			hook.after(ctx, details);
+			hook.finally(ctx, details);
 
 			expect(events).toHaveLength(1);
 			expect(events[0].type).toBe('evaluation');
@@ -48,77 +49,77 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('forwards hookHints to the evaluation event', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 			const hints = { requestId: 'req-123', traceId: 'trace-abc' };
 
-			hook.before(ctx as any, hints);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx, hints);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].hints).toEqual(hints);
 		});
 
 		it('hints is undefined when no hookHints were passed to before', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].hints).toBeUndefined();
 		});
 
 		it('includes context in the evaluation event', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].context).toEqual(ctx.context);
 		});
 
 		it('includes errorCode from evaluationDetails when present', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 			const details = makeDetails({ errorCode: ErrorCode.TYPE_MISMATCH });
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, details);
-			hook.finally(ctx as any, details);
+			hook.before(ctx);
+			hook.after(ctx, details);
+			hook.finally(ctx, details);
 
 			expect(events[0].errorCode).toBe(ErrorCode.TYPE_MISMATCH);
 		});
 
 		it('duration is non-negative', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].duration).toBeGreaterThanOrEqual(0);
 		});
 
 		it('duration increases with elapsed time', async () => {
 			vi.useFakeTimers();
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
+			hook.before(ctx);
 			vi.advanceTimersByTime(100);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].duration).toBeGreaterThanOrEqual(100);
 			vi.useRealTimers();
@@ -127,13 +128,13 @@ describe('TelemetryHook (unit)', () => {
 
 	describe('before + error (error event)', () => {
 		it('emits an error event with errorMessage from Error instance', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext('err-flag');
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, new Error('network down'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, new Error('network down'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events).toHaveLength(1);
 			expect(events[0].type).toBe('error');
@@ -142,50 +143,50 @@ describe('TelemetryHook (unit)', () => {
 		});
 
 		it('stringifies non-Error thrown values', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, 'some string error');
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, 'some string error');
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].errorMessage).toBe('some string error');
 		});
 
 		it('forwards hookHints to the error event', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 			const hints = { requestId: 'req-456' };
 
-			hook.before(ctx as any, hints);
-			hook.error(ctx as any, new Error('boom'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx, hints);
+			hook.error(ctx, new Error('boom'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].hints).toEqual(hints);
 		});
 
 		it('includes context in the error event', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, new Error('x'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, new Error('x'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].context).toEqual(ctx.context);
 		});
 
 		it('error event has no errorCode field', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, new Error('x'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, new Error('x'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events[0].errorCode).toBeUndefined();
 		});
@@ -196,9 +197,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook(() => {});
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			const startTimesSize = (hook as any).startTimes.size;
 			expect(startTimesSize).toBe(0);
@@ -208,9 +209,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook(() => {});
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any);
-			hook.error(ctx as any, new Error('x'));
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx);
+			hook.error(ctx, new Error('x'));
+			hook.finally(ctx, makeDetails());
 
 			expect((hook as any).startTimes.size).toBe(0);
 		});
@@ -219,9 +220,9 @@ describe('TelemetryHook (unit)', () => {
 			const hook = new TelemetryHook(() => {});
 			const ctx = makeHookContext();
 
-			hook.before(ctx as any, { traceId: 'abc' });
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.before(ctx, { traceId: 'abc' });
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect((hook as any).hints.has(ctx)).toBe(false);
 		});
@@ -234,12 +235,12 @@ describe('TelemetryHook (unit)', () => {
 
 	describe('after without preceding before', () => {
 		it('still emits event with undefined duration', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.after(ctx as any, makeDetails());
-			hook.finally(ctx as any, makeDetails());
+			hook.after(ctx, makeDetails());
+			hook.finally(ctx, makeDetails());
 
 			expect(events).toHaveLength(1);
 			expect(events[0].duration).toBeUndefined();
@@ -248,12 +249,12 @@ describe('TelemetryHook (unit)', () => {
 
 	describe('error without preceding before', () => {
 		it('still emits event with undefined duration', () => {
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx = makeHookContext();
 
-			hook.error(ctx as any, new Error('x'));
-			hook.finally(ctx as any, makeDetails());
+			hook.error(ctx, new Error('x'));
+			hook.finally(ctx, makeDetails());
 
 			expect(events).toHaveLength(1);
 			expect(events[0].duration).toBeUndefined();
@@ -263,20 +264,20 @@ describe('TelemetryHook (unit)', () => {
 	describe('multiple concurrent evaluations', () => {
 		it('tracks timing independently per hookContext object', () => {
 			vi.useFakeTimers();
-			const events: TelemetryEvent[] = [];
+			const events: Array<TelemetryEvent> = [];
 			const hook = new TelemetryHook((e) => events.push(e));
 			const ctx1 = makeHookContext('flag-1');
 			const ctx2 = makeHookContext('flag-2');
 
-			hook.before(ctx1 as any);
+			hook.before(ctx1);
 			vi.advanceTimersByTime(50);
-			hook.before(ctx2 as any);
+			hook.before(ctx2);
 			vi.advanceTimersByTime(50);
 
-			hook.after(ctx1 as any, makeDetails({ flagKey: 'flag-1' }));
-			hook.finally(ctx1 as any, makeDetails());
-			hook.after(ctx2 as any, makeDetails({ flagKey: 'flag-2' }));
-			hook.finally(ctx2 as any, makeDetails());
+			hook.after(ctx1, makeDetails({ flagKey: 'flag-1' }));
+			hook.finally(ctx1, makeDetails());
+			hook.after(ctx2, makeDetails({ flagKey: 'flag-2' }));
+			hook.finally(ctx2, makeDetails());
 
 			expect(events).toHaveLength(2);
 			expect(events[0].flagKey).toBe('flag-1');
@@ -293,8 +294,8 @@ describe('TelemetryHook (unit)', () => {
 			const ctx1 = makeHookContext('flag');
 			const ctx2 = makeHookContext('flag');
 
-			hook.before(ctx1 as any);
-			hook.before(ctx2 as any);
+			hook.before(ctx1);
+			hook.before(ctx2);
 
 			expect((hook as any).startTimes.size).toBe(2);
 		});

@@ -43,7 +43,7 @@ describe('FlagshipServerProvider lifecycle', () => {
 
 	it('fails initialization with the original error on other failures', async () => {
 		const provider = localProvider([() => failure(500)]);
-		const error = await provider.initialize().catch((e: unknown) => e);
+		const error = await provider.initialize().catch((error_: unknown) => error_);
 		expect(error).toMatchObject({ message: expect.stringContaining('500') });
 		expect(error).not.toMatchObject({ code: ErrorCode.PROVIDER_FATAL });
 	});

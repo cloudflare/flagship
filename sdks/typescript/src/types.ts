@@ -151,7 +151,7 @@ export interface FlagshipClientProviderOptions extends FlagshipProviderOptions {
 	 * @deprecated Ignored. The provider evaluates every flag in a single request
 	 * during `initialize()` and on every `onContextChange()`.
 	 */
-	prefetchFlags?: string[];
+	prefetchFlags?: Array<string>;
 	/**
 	 * Milliseconds between background re-evaluations of every flag for the
 	 * current context. Emits `PROVIDER_CONFIGURATION_CHANGED` when results

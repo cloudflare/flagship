@@ -3,7 +3,8 @@ import { OpenFeature } from '@openfeature/server-sdk';
 import { FlagshipServerProvider } from '../src/server-provider.js';
 import { toFlagMetadata } from '../src/metadata.js';
 import type { FlagshipBinding } from '../src/types.js';
-import { evaluateFlag, type EvalFlag } from '../src/local/evaluate.js';
+import { evaluateFlag } from '../src/local/evaluate.js';
+import type { EvalFlag } from '../src/local/evaluate.js';
 
 const metadata = { owner: 'team-payments', 'jira.id': 'PROJ-123', 'experiment.active': false, weight: 2 };
 const logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
@@ -25,7 +26,7 @@ describe('toFlagMetadata', () => {
 	});
 
 	it('drops non-primitive and non-finite entries', () => {
-		expect(toFlagMetadata({ ok: 'yes', nested: { a: 1 }, list: [1], nil: null, nan: NaN, inf: Infinity })).toEqual({ ok: 'yes' });
+		expect(toFlagMetadata({ ok: 'yes', nested: { a: 1 }, list: [1], nil: null, nan: Number.NaN, inf: Infinity })).toEqual({ ok: 'yes' });
 	});
 
 	it('keeps __proto__ as an own key without polluting the prototype', () => {
@@ -48,9 +49,9 @@ describe('local evaluation metadata', () => {
 });
 
 describe('FlagshipServerProvider flag metadata', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		OpenFeature.clearHandlers();
-		OpenFeature.clearProviders();
+		await OpenFeature.clearProviders();
 	});
 
 	describe('HTTP mode', () => {

@@ -21,7 +21,10 @@ function mockResponse(value: unknown, reason = 'TARGETING_MATCH', variant = 'on'
 
 function createMockBinding(): FlagshipBinding {
 	return {
-		get: vi.fn((_flagKey: string, defaultValue?: unknown) => Promise.resolve(defaultValue)),
+		getValue: vi.fn((_flagKey: string, defaultValue: unknown) => Promise.resolve(defaultValue)) as unknown as FlagshipBinding['getValue'],
+		getDetails: vi.fn((flagKey: string, defaultValue: unknown) =>
+			Promise.resolve({ flagKey, value: defaultValue, reason: 'DEFAULT' }),
+		) as unknown as FlagshipBinding['getDetails'],
 		getBooleanValue: vi.fn((_flagKey: string, defaultValue: boolean) => Promise.resolve(defaultValue)),
 		getStringValue: vi.fn((_flagKey: string, defaultValue: string) => Promise.resolve(defaultValue)),
 		getNumberValue: vi.fn((_flagKey: string, defaultValue: number) => Promise.resolve(defaultValue)),
@@ -88,13 +91,8 @@ describe('FlagshipServerProvider caching', () => {
 		mockResponse(true);
 		const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', cacheTtl: 60_000 });
 
-		await provider.resolveBooleanEvaluation('flag', false, { profile: { plan: 'enterprise', region: 'us' } } as any, noopLogger);
-		const cached = await provider.resolveBooleanEvaluation(
-			'flag',
-			false,
-			{ profile: { region: 'us', plan: 'enterprise' } } as any,
-			noopLogger,
-		);
+		await provider.resolveBooleanEvaluation('flag', false, { profile: { plan: 'enterprise', region: 'us' } }, noopLogger);
+		const cached = await provider.resolveBooleanEvaluation('flag', false, { profile: { region: 'us', plan: 'enterprise' } }, noopLogger);
 
 		expect(global.fetch).toHaveBeenCalledTimes(1);
 		expect(cached.reason).toBe('CACHED');
@@ -105,8 +103,8 @@ describe('FlagshipServerProvider caching', () => {
 		mockResponse(false);
 		const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', cacheTtl: 60_000 });
 
-		await provider.resolveBooleanEvaluation('flag', false, { tags: ['beta', 'internal'] } as any, noopLogger);
-		await provider.resolveBooleanEvaluation('flag', false, { tags: ['internal', 'beta'] } as any, noopLogger);
+		await provider.resolveBooleanEvaluation('flag', false, { tags: ['beta', 'internal'] }, noopLogger);
+		await provider.resolveBooleanEvaluation('flag', false, { tags: ['internal', 'beta'] }, noopLogger);
 
 		expect(global.fetch).toHaveBeenCalledTimes(2);
 	});
@@ -139,7 +137,9 @@ describe('FlagshipServerProvider caching', () => {
 		const provider = new FlagshipServerProvider({ endpoint: 'https://api.example.com/evaluate', cacheTtl: 20 });
 
 		await provider.resolveBooleanEvaluation('flag', false, { targetingKey: 'u1' }, noopLogger);
-		await new Promise((resolve) => setTimeout(resolve, 40));
+		await new Promise((resolve) => {
+			setTimeout(resolve, 40);
+		});
 		await provider.resolveBooleanEvaluation('flag', false, { targetingKey: 'u1' }, noopLogger);
 
 		expect(global.fetch).toHaveBeenCalledTimes(2);

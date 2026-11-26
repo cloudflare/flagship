@@ -209,10 +209,10 @@ describe('ContextTransformer', () => {
 		});
 
 		it('should populate droppedKeys when complex context values are present', () => {
-			const dropped: string[] = [];
+			const dropped: Array<string> = [];
 			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-			ContextTransformer.buildUrl('https://api.example.com/evaluate', 'my-flag', { nested: { a: 1 } as any }, dropped);
+			ContextTransformer.buildUrl('https://api.example.com/evaluate', 'my-flag', { nested: { a: 1 } }, dropped);
 
 			expect(dropped).toContain('nested');
 			expect(consoleSpy).not.toHaveBeenCalled();
@@ -238,14 +238,14 @@ describe('ContextTransformer', () => {
 		});
 
 		it('collects multiple dropped keys when droppedKeys array provided', () => {
-			const dropped: string[] = [];
+			const dropped: Array<string> = [];
 			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
 			const result = ContextTransformer.toQueryParams(
 				{
 					name: 'Alice',
-					meta: { role: 'admin' } as any,
-					tags: ['a', 'b'] as any,
+					meta: { role: 'admin' },
+					tags: ['a', 'b'],
 				},
 				dropped,
 			);
@@ -260,7 +260,7 @@ describe('ContextTransformer', () => {
 		it('emits console.warn for each complex key when no droppedKeys collector', () => {
 			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-			ContextTransformer.toQueryParams({ a: { x: 1 } as any, b: [1, 2] as any });
+			ContextTransformer.toQueryParams({ a: { x: 1 }, b: [1, 2] });
 
 			expect(consoleSpy).toHaveBeenCalledTimes(2);
 			expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('"a"'));

@@ -51,9 +51,9 @@ describe('FlagshipError', () => {
 		}
 		try {
 			throwFlagshipError();
-		} catch (e) {
-			expect(e instanceof FlagshipError).toBe(true);
-			expect(e instanceof Error).toBe(true);
+		} catch (error) {
+			expect(error instanceof FlagshipError).toBe(true);
+			expect(error instanceof Error).toBe(true);
 		}
 	});
 });

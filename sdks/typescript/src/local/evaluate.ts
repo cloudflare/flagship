@@ -4,14 +4,14 @@
  * @internal
  */
 
-export type FlagValue = boolean | string | number | Record<string, unknown> | unknown[];
+export type FlagValue = boolean | string | number | Record<string, unknown> | Array<unknown>;
 export type EvaluationReason = 'STATIC' | 'TARGETING_MATCH' | 'DEFAULT' | 'DISABLED' | 'SPLIT' | 'ERROR';
 export type EvaluationContextValue =
 	| string
 	| number
 	| boolean
 	| null
-	| EvaluationContextValue[]
+	| Array<EvaluationContextValue>
 	| { [key: string]: EvaluationContextValue };
 export type EvaluationContext = Record<string, EvaluationContextValue>;
 
@@ -26,7 +26,7 @@ export class FlagConfigError extends Error {
 
 /** Evaluation-only rule — priority is stripped at write time after sorting. */
 export interface EvalRule {
-	conditions: Condition[];
+	conditions: Array<Condition>;
 	serve_variation: string;
 	rollout?: { percentage: number; attribute?: string };
 }
@@ -37,7 +37,7 @@ export interface EvalFlag {
 	default_variation: string;
 	variations: Record<string, unknown>;
 	/** Rules pre-sorted by priority at write time. Priority field stripped — iteration order is evaluation order. */
-	rules: EvalRule[];
+	rules: Array<EvalRule>;
 	/** Flat flag metadata; omitted by the backend when empty. */
 	metadata?: Record<string, string | number | boolean>;
 }
@@ -69,7 +69,7 @@ export interface BaseCondition {
 
 export interface LogicalCondition {
 	logical_operator: 'AND' | 'OR';
-	clauses: Condition[];
+	clauses: Array<Condition>;
 }
 
 export type Condition = BaseCondition | LogicalCondition;
@@ -97,15 +97,23 @@ function hasOwn(obj: object, key: PropertyKey): boolean {
 }
 
 function getContextValue(context: EvaluationContext, attribute: string): unknown {
-	if (hasOwn(context, attribute)) return context[attribute];
-	if (attribute.indexOf('.') === -1) return undefined;
+	if (hasOwn(context, attribute)) {
+		return context[attribute];
+	}
+	if (attribute.indexOf('.') === -1) {
+		return undefined;
+	}
 
 	const path = attribute.split('.');
-	if (path.length > MAX_PATH_DEPTH) return undefined;
+	if (path.length > MAX_PATH_DEPTH) {
+		return undefined;
+	}
 
 	let value: unknown = context;
 	for (const segment of path) {
-		if (isPrimitive(value) || !hasOwn(value as object, segment)) return undefined;
+		if (isPrimitive(value) || !hasOwn(value as object, segment)) {
+			return undefined;
+		}
 		value = (value as Record<string, unknown>)[segment];
 	}
 	return value;
@@ -115,8 +123,12 @@ type StringOperator = 'equals' | 'not_equals' | 'contains' | 'starts_with' | 'en
 type OrderingOperator = 'greater_than' | 'less_than' | 'greater_than_or_equals' | 'less_than_or_equals';
 
 function evaluateStringOperator(operator: StringOperator, attrValue: unknown, target: unknown): boolean {
-	if (attrValue === null) return operator === 'not_equals';
-	if (!isScalar(attrValue) || !isPrimitive(target)) return false;
+	if (attrValue === null) {
+		return operator === 'not_equals';
+	}
+	if (!isScalar(attrValue) || !isPrimitive(target)) {
+		return false;
+	}
 	const actual = String(attrValue);
 	const expected = String(target);
 
@@ -135,11 +147,13 @@ function evaluateStringOperator(operator: StringOperator, attrValue: unknown, ta
 }
 
 function toNumber(value: string | number | boolean): number {
-	return typeof value === 'string' && value.trim() === '' ? NaN : Number(value);
+	return typeof value === 'string' && value.trim() === '' ? Number.NaN : Number(value);
 }
 
 function compareValues(attrValue: unknown, target: unknown): number | undefined {
-	if (!isScalar(attrValue) || !isScalar(target)) return undefined;
+	if (!isScalar(attrValue) || !isScalar(target)) {
+		return undefined;
+	}
 
 	let actual: number;
 	let expected: number;
@@ -157,14 +171,20 @@ function compareValues(attrValue: unknown, target: unknown): number | undefined 
 		expected = toNumber(target);
 	}
 
-	if (Number.isNaN(actual) || Number.isNaN(expected)) return undefined;
-	if (actual === expected) return 0;
+	if (Number.isNaN(actual) || Number.isNaN(expected)) {
+		return undefined;
+	}
+	if (actual === expected) {
+		return 0;
+	}
 	return actual < expected ? -1 : 1;
 }
 
 function evaluateOrderingOperator(operator: OrderingOperator, attrValue: unknown, target: unknown): boolean {
 	const comparison = compareValues(attrValue, target);
-	if (comparison === undefined) return false;
+	if (comparison === undefined) {
+		return false;
+	}
 
 	switch (operator) {
 		case 'greater_than':
@@ -178,18 +198,22 @@ function evaluateOrderingOperator(operator: OrderingOperator, attrValue: unknown
 	}
 }
 
-function containsValue(values: unknown[], target: unknown): boolean {
+function containsValue(values: Array<unknown>, target: unknown): boolean {
 	const expected = String(target);
 	for (const value of values) {
-		if (value !== null && String(value) === expected) return true;
+		if (value !== null && String(value) === expected) {
+			return true;
+		}
 	}
 	return false;
 }
 
-function containsPrimitiveValue(values: unknown[], target: unknown): boolean {
+function containsPrimitiveValue(values: Array<unknown>, target: unknown): boolean {
 	const expected = String(target);
 	for (const value of values) {
-		if (isScalar(value) && String(value) === expected) return true;
+		if (isScalar(value) && String(value) === expected) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -203,37 +227,43 @@ export function murmurhash3(str: string, seed: number): number {
 		b = encoder.encode(str);
 		n = b.byteLength;
 	} else {
-		if (hashBuf.byteLength < requiredBytes) hashBuf = new Uint8Array(requiredBytes);
+		if (hashBuf.byteLength < requiredBytes) {
+			hashBuf = new Uint8Array(requiredBytes);
+		}
 		b = hashBuf;
 		n = encoder.encodeInto(str, b).written;
 	}
 	let h = seed >>> 0;
 	let i = 0;
 	while (i + 4 <= n) {
-		let k = b[i]! | (b[i + 1]! << 8) | (b[i + 2]! << 16) | (b[i + 3]! << 24);
-		k = Math.imul(k, 0xcc9e2d51) >>> 0;
+		let k = b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);
+		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
-		k = Math.imul(k, 0x1b873593) >>> 0;
+		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
 		h ^= k;
 		h = ((h << 13) | (h >>> 19)) >>> 0;
-		h = (Math.imul(h, 5) + 0xe6546b64) >>> 0;
+		h = (Math.imul(h, 5) + 0xe6_54_6b_64) >>> 0;
 		i += 4;
 	}
 	let k = 0;
-	if (n - i >= 3) k ^= b[i + 2]! << 16;
-	if (n - i >= 2) k ^= b[i + 1]! << 8;
+	if (n - i >= 3) {
+		k ^= b[i + 2] << 16;
+	}
+	if (n - i >= 2) {
+		k ^= b[i + 1] << 8;
+	}
 	if (n > i) {
-		k ^= b[i]!;
-		k = Math.imul(k, 0xcc9e2d51) >>> 0;
+		k ^= b[i];
+		k = Math.imul(k, 0xcc_9e_2d_51) >>> 0;
 		k = ((k << 15) | (k >>> 17)) >>> 0;
-		k = Math.imul(k, 0x1b873593) >>> 0;
+		k = Math.imul(k, 0x1b_87_35_93) >>> 0;
 		h ^= k;
 	}
 	h ^= n;
 	h ^= h >>> 16;
-	h = Math.imul(h, 0x85ebca6b) >>> 0;
+	h = Math.imul(h, 0x85_eb_ca_6b) >>> 0;
 	h ^= h >>> 13;
-	h = Math.imul(h, 0xc2b2ae35) >>> 0;
+	h = Math.imul(h, 0xc2_b2_ae_35) >>> 0;
 	h ^= h >>> 16;
 	return h >>> 0;
 }
@@ -243,19 +273,25 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): bo
 		const { logical_operator, clauses } = condition;
 		if (logical_operator === 'AND') {
 			for (const clause of clauses) {
-				if (!evaluateCondition(clause, context)) return false;
+				if (!evaluateCondition(clause, context)) {
+					return false;
+				}
 			}
 			return true;
 		}
 		for (const clause of clauses) {
-			if (evaluateCondition(clause, context)) return true;
+			if (evaluateCondition(clause, context)) {
+				return true;
+			}
 		}
 		return false;
 	}
 
-	const { attribute, operator, value: target } = condition as BaseCondition;
+	const { attribute, operator, value: target } = condition;
 	const attrValue = getContextValue(context, attribute);
-	if (attrValue === undefined) return false;
+	if (attrValue === undefined) {
+		return false;
+	}
 
 	switch (operator) {
 		case 'equals':
@@ -271,13 +307,21 @@ function evaluateCondition(condition: Condition, context: EvaluationContext): bo
 			return evaluateOrderingOperator(operator, attrValue, target);
 		case 'in':
 		case 'not_in':
-			if (!Array.isArray(target)) return false;
-			if (attrValue === null) return operator === 'not_in';
-			if (!isScalar(attrValue)) return false;
+			if (!Array.isArray(target)) {
+				return false;
+			}
+			if (attrValue === null) {
+				return operator === 'not_in';
+			}
+			if (!isScalar(attrValue)) {
+				return false;
+			}
 			return operator === 'in' ? containsValue(target, attrValue) : !containsValue(target, attrValue);
 		case 'has':
 		case 'not_has':
-			if (!Array.isArray(attrValue) || !isPrimitive(target)) return false;
+			if (!Array.isArray(attrValue) || !isPrimitive(target)) {
+				return false;
+			}
 			return operator === 'has' ? containsPrimitiveValue(attrValue, target) : !containsPrimitiveValue(attrValue, target);
 		default:
 			return false;
@@ -300,15 +344,19 @@ export function evaluateFlag(
 		return { value: flagDef.variations[variant] as FlagValue, variant, reason, metadata: flagDef.metadata };
 	};
 
-	if (!flagDef.enabled) return serve(flagDef.default_variation, 'DISABLED');
-	if (flagDef.rules.length === 0) return serve(flagDef.default_variation, 'STATIC');
+	if (!flagDef.enabled) {
+		return serve(flagDef.default_variation, 'DISABLED');
+	}
+	if (flagDef.rules.length === 0) {
+		return serve(flagDef.default_variation, 'STATIC');
+	}
 
 	// Seed derived from accountId+flagKey so the same targetingKey lands in different buckets
 	// across different flags and accounts, preventing correlated rollouts.
 	let seed: number | undefined;
 
 	for (let i = 0; i < flagDef.rules.length; i++) {
-		const rule = flagDef.rules[i]!;
+		const rule = flagDef.rules[i];
 		let ruleMatches = true;
 
 		for (const condition of rule.conditions) {
@@ -332,9 +380,11 @@ export function evaluateFlag(
 					const h = murmurhash3(String(attr), seed);
 					bucket = (h % 100) + Math.floor(h / 100) / HASH_QUOTIENT_RANGE;
 				} else {
-					bucket = (globalThis.crypto.getRandomValues(randomBuf)[0]! / 0x100000000) * 100;
+					bucket = (globalThis.crypto.getRandomValues(randomBuf)[0] / 0x1_00_00_00_00) * 100;
 				}
-				if (bucket >= rollout.percentage) ruleMatches = false;
+				if (bucket >= rollout.percentage) {
+					ruleMatches = false;
+				}
 			}
 		}
 

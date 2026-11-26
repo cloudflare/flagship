@@ -15,8 +15,8 @@ type Sdk = (typeof SDKS)[number];
 export type SdkChanges = Record<Sdk, boolean>;
 const NO_CHANGES: SdkChanges = { typescript: false, python: false, go: false, rust: false };
 
-export function classifySdkChanges(paths: string[]): SdkChanges {
-	const relative = (sdk: Sdk): string[] =>
+export function classifySdkChanges(paths: Array<string>): SdkChanges {
+	const relative = (sdk: Sdk): Array<string> =>
 		paths.filter((path) => path.startsWith(`sdks/${sdk}/`)).map((path) => path.slice(`sdks/${sdk}/`.length));
 	const typescript = relative('typescript');
 	const python = relative('python');
@@ -32,7 +32,9 @@ export function classifySdkChanges(paths: string[]): SdkChanges {
 }
 
 export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): SdkChanges {
-	if (!isReleaseCommit(cwd, releaseCommit)) return { ...NO_CHANGES };
+	if (!isReleaseCommit(cwd, releaseCommit)) {
+		return { ...NO_CHANGES };
+	}
 
 	const releaseParent = `${releaseCommit}^1`;
 	const canonicalTag = describeTag(cwd, '@cloudflare/flagship@*', releaseParent);
@@ -50,13 +52,16 @@ export function detectSdkChanges(releaseCommit = 'HEAD', cwd = process.cwd()): S
 
 type ChangesetCommand = ['changeset', 'publish' | 'git-tag'];
 
-export function publishCommands(changes: SdkChanges): ChangesetCommand[] {
-	if (changes.typescript)
+export function publishCommands(changes: SdkChanges): Array<ChangesetCommand> {
+	if (changes.typescript) {
 		return [
 			['changeset', 'publish'],
 			['changeset', 'git-tag'],
 		];
-	if (changes.python || changes.go || changes.rust) return [['changeset', 'git-tag']];
+	}
+	if (changes.python || changes.go || changes.rust) {
+		return [['changeset', 'git-tag']];
+	}
 	return [];
 }
 
@@ -71,7 +76,9 @@ export function publishCommands(changes: SdkChanges): ChangesetCommand[] {
  */
 function isReleaseCommit(cwd: string, commit: string): boolean {
 	const subjects = [subject(cwd, commit)];
-	if (revisionExists(cwd, `${commit}^2`)) subjects.push(subject(cwd, `${commit}^2`));
+	if (revisionExists(cwd, `${commit}^2`)) {
+		subjects.push(subject(cwd, `${commit}^2`));
+	}
 
 	return subjects.some((value) => value.startsWith(RELEASE_COMMIT_SUBJECT));
 }
@@ -99,12 +106,12 @@ function revisionExists(cwd: string, revision: string): boolean {
  * This is a union of per-commit changes rather than a net diff, so a change that is
  * later reverted still counts — deliberately conservative.
  */
-function changedPaths(cwd: string, base: string, head: string): string[] {
+function changedPaths(cwd: string, base: string, head: string): Array<string> {
 	const output = git(cwd, 'log', '--format=', '--name-only', '--invert-grep', '--grep', RELEASE_COMMIT_PATTERN, `${base}..${head}`);
 	return [...new Set(output.split('\n').filter(Boolean))];
 }
 
-function git(cwd: string, ...args: string[]): string {
+function git(cwd: string, ...args: Array<string>): string {
 	return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
@@ -124,7 +131,9 @@ function writeChanges(changes: SdkChanges): void {
 	const lines = [...SDKS.map((sdk) => `${sdk}=${changes[sdk]}`), `any=${Object.values(changes).some(Boolean)}`];
 	const output = process.env.GITHUB_OUTPUT;
 
-	if (output) appendFileSync(output, `${lines.join('\n')}\n`);
+	if (output) {
+		appendFileSync(output, `${lines.join('\n')}\n`);
+	}
 	console.log(lines.join('\n'));
 }
 
@@ -137,11 +146,17 @@ function publish(): void {
 		return;
 	}
 
-	if (!changes.typescript) console.log('TypeScript SDK unchanged; creating the canonical release tag without publishing to npm.');
+	if (!changes.typescript) {
+		console.log('TypeScript SDK unchanged; creating the canonical release tag without publishing to npm.');
+	}
 	for (const command of commands) {
 		const result = spawnSync('pnpm', command, { stdio: 'inherit' });
-		if (result.error) throw result.error;
-		if (result.status !== 0) process.exit(result.status ?? 1);
+		if (result.error) {
+			throw result.error;
+		}
+		if (result.status !== 0) {
+			process.exit(result.status ?? 1);
+		}
 	}
 }
 
@@ -158,4 +173,6 @@ async function main(): Promise<void> {
 	}
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	await main();
+}

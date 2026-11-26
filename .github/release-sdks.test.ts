@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifySdkChanges, detectSdkChanges, publishCommands } from './release-sdks.js';
 
-test('classifies changes by SDK directory', () => {
+void test('classifies changes by SDK directory', () => {
 	assert.deepEqual(classifySdkChanges(['sdks/typescript/src/client.ts', 'sdks/go/client.go', 'sdks/rust/src/client.rs', 'README.md']), {
 		typescript: true,
 		python: false,
@@ -15,7 +15,7 @@ test('classifies changes by SDK directory', () => {
 	});
 });
 
-test('ignores test-only changes', () => {
+void test('ignores test-only changes', () => {
 	assert.deepEqual(
 		classifySdkChanges([
 			'sdks/typescript/tests/client.test.ts',
@@ -27,7 +27,7 @@ test('ignores test-only changes', () => {
 	);
 });
 
-test('ignores examples, documentation, and licenses', () => {
+void test('ignores examples, documentation, and licenses', () => {
 	assert.deepEqual(
 		classifySdkChanges([
 			'sdks/typescript/README.md',
@@ -45,7 +45,7 @@ test('ignores examples, documentation, and licenses', () => {
 	);
 });
 
-test('excludes generated changelogs', () => {
+void test('excludes generated changelogs', () => {
 	assert.deepEqual(
 		classifySdkChanges(['sdks/typescript/CHANGELOG.md', 'sdks/python/CHANGELOG.md', 'sdks/go/CHANGELOG.md', 'sdks/rust/CHANGELOG.md']),
 		{
@@ -57,7 +57,7 @@ test('excludes generated changelogs', () => {
 	);
 });
 
-test('includes package and build configuration changes but excludes lockfiles', () => {
+void test('includes package and build configuration changes but excludes lockfiles', () => {
 	assert.deepEqual(
 		classifySdkChanges(['sdks/typescript/package.json', 'sdks/python/pyproject.toml', 'sdks/go/go.mod', 'sdks/rust/Cargo.toml']),
 		{
@@ -75,7 +75,7 @@ test('includes package and build configuration changes but excludes lockfiles', 
 	});
 });
 
-test('publishes npm only for TypeScript changes', () => {
+void test('publishes npm only for TypeScript changes', () => {
 	assert.deepEqual(publishCommands({ typescript: true, python: false, go: false, rust: false }), [
 		['changeset', 'publish'],
 		['changeset', 'git-tag'],
@@ -86,7 +86,7 @@ test('publishes npm only for TypeScript changes', () => {
 	assert.deepEqual(publishCommands({ typescript: false, python: false, go: false, rust: false }), []);
 });
 
-test('ignores mechanical SDK version changes in the release commit', () => {
+void test('ignores mechanical SDK version changes in the release commit', () => {
 	const repo = createRepository();
 	write(repo, 'sdks/python/src/client.py', 'changed\n');
 	commit(repo, 'change python');
@@ -95,7 +95,7 @@ test('ignores mechanical SDK version changes in the release commit', () => {
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false, rust: false });
 });
 
-test('reports no SDK changes after the release is tagged', () => {
+void test('reports no SDK changes after the release is tagged', () => {
 	const repo = createRepository();
 	write(repo, 'sdks/go/client.go', 'changed\n');
 	commit(repo, 'change go');
@@ -108,7 +108,7 @@ test('reports no SDK changes after the release is tagged', () => {
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false });
 });
 
-test('reports no changes when the head commit is not a release commit', () => {
+void test('reports no changes when the head commit is not a release commit', () => {
 	const repo = createRepository();
 	write(repo, 'sdks/python/src/client.py', 'changed\n');
 	write(repo, 'sdks/go/client.go', 'changed\n');
@@ -120,7 +120,7 @@ test('reports no changes when the head commit is not a release commit', () => {
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false });
 });
 
-test('does not publish native SDKs for documentation changes', () => {
+void test('does not publish native SDKs for documentation changes', () => {
 	const repo = createRepository();
 	git(repo, 'tag', 'sdks/go/v0.1.0');
 	write(repo, 'sdks/go/README.md', 'changed\n');
@@ -134,7 +134,7 @@ test('does not publish native SDKs for documentation changes', () => {
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: true, python: false, go: false, rust: false });
 });
 
-test('uses the first parent of a merged release PR', () => {
+void test('uses the first parent of a merged release PR', () => {
 	const repo = createRepository();
 	const mainBranch = git(repo, 'branch', '--show-current');
 	write(repo, 'sdks/go/client.go', 'changed\n');
@@ -147,7 +147,7 @@ test('uses the first parent of a merged release PR', () => {
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: true, rust: false });
 });
 
-test('fails safely when the canonical baseline tag is missing', () => {
+void test('fails safely when the canonical baseline tag is missing', () => {
 	const repo = createRepository();
 	git(repo, 'tag', '-d', '@cloudflare/flagship@0.1.0');
 	write(repo, 'README.md', 'changed\n');
@@ -157,7 +157,7 @@ test('fails safely when the canonical baseline tag is missing', () => {
 	assert.throws(() => detectSdkChanges('HEAD', repo));
 });
 
-test('retains unpublished SDK changes across canonical releases', () => {
+void test('retains unpublished SDK changes across canonical releases', () => {
 	const repo = createRepository();
 	git(repo, 'tag', 'sdks/go/v0.1.0');
 	write(repo, 'sdks/go/client.go', 'changed\n');
@@ -171,7 +171,7 @@ test('retains unpublished SDK changes across canonical releases', () => {
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: true, rust: false });
 });
 
-test('retains Python changes after an unsuccessful first publish without a Python tag', () => {
+void test('retains Python changes after an unsuccessful first publish without a Python tag', () => {
 	const repo = createRepository();
 	git(repo, 'tag', '-d', 'sdks/python/v0.1.0');
 	git(repo, 'tag', '@cloudflare/flagship@0.4.0');
@@ -186,7 +186,7 @@ test('retains Python changes after an unsuccessful first publish without a Pytho
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: true, go: false, rust: false });
 });
 
-test('retains Rust changes after an unsuccessful first publish without a Rust tag', () => {
+void test('retains Rust changes after an unsuccessful first publish without a Rust tag', () => {
 	const repo = createRepository();
 	git(repo, 'tag', '-d', 'sdks/rust/v0.1.0');
 	releaseCommit(repo, '0.6.0');
@@ -214,7 +214,7 @@ test('retains Rust changes after an unsuccessful first publish without a Rust ta
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: false, python: false, go: false, rust: false });
 });
 
-test('ignores release commits inside a stale SDK baseline window', () => {
+void test('ignores release commits inside a stale SDK baseline window', () => {
 	const repo = createRepository();
 	git(repo, 'tag', 'sdks/go/v0.1.0');
 	write(repo, 'sdks/typescript/src/client.ts', 'changed\n');
@@ -228,7 +228,7 @@ test('ignores release commits inside a stale SDK baseline window', () => {
 	assert.deepEqual(detectSdkChanges('HEAD', repo), { typescript: true, python: false, go: false, rust: false });
 });
 
-test('ignores an SDK tag that is not reachable from the release parent', () => {
+void test('ignores an SDK tag that is not reachable from the release parent', () => {
 	const repo = createRepository();
 	write(repo, 'sdks/python/src/client.py', 'changed\n');
 	commit(repo, 'change python');
@@ -282,6 +282,6 @@ function commit(repo: string, message: string): void {
 	git(repo, 'commit', '-m', message);
 }
 
-function git(repo: string, ...args: string[]): string {
+function git(repo: string, ...args: Array<string>): string {
 	return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }

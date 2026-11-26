@@ -70,7 +70,7 @@ describe('FlagshipClient', () => {
 		it('should accept custom timeout and retries', () => {
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				timeout: 10000,
+				timeout: 10_000,
 				retries: 3,
 			});
 			expect(client).toBeInstanceOf(FlagshipClient);
@@ -210,7 +210,7 @@ describe('FlagshipClient', () => {
 			await expect(client.evaluate('my-flag', {})).rejects.toThrow(FlagshipError);
 			// The client catches PARSE_ERROR but re-throws as NETWORK_ERROR in the outer catch
 			// This is expected behavior - the inner error is a PARSE_ERROR but wrapped
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 			expect(error).toBeInstanceOf(FlagshipError);
 			// The underlying cause has PARSE_ERROR, but it gets wrapped
 		});
@@ -250,7 +250,7 @@ describe('FlagshipClient', () => {
 			expect((global.fetch as any).mock.calls[0][1].body).toBe((global.fetch as any).mock.calls[1][1].body);
 		});
 
-		it('should not retry on 404', { timeout: 10000 }, async () => {
+		it('should not retry on 404', { timeout: 10_000 }, async () => {
 			// Reset mock to ensure clean state
 			vi.clearAllMocks();
 
@@ -267,7 +267,7 @@ describe('FlagshipClient', () => {
 
 			try {
 				await client.evaluate('my-flag', {});
-			} catch (_e) {
+			} catch {
 				// Expected to throw
 			}
 
@@ -275,7 +275,7 @@ describe('FlagshipClient', () => {
 			expect(global.fetch).toHaveBeenCalledTimes(1);
 		});
 
-		it('should handle timeout', { timeout: 10000 }, async () => {
+		it('should handle timeout', { timeout: 10_000 }, async () => {
 			// Mock a fetch that simulates an abort
 			(global.fetch as any).mockImplementation(() => {
 				const error = new Error('The operation was aborted');
@@ -289,7 +289,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 			expect(error).toBeInstanceOf(FlagshipError);
 			expect(error.code).toBe(FlagshipErrorCode.TIMEOUT_ERROR);
 		});
@@ -416,7 +416,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 			expect(error).toBeInstanceOf(FlagshipError);
 			expect(error.code).toBe(FlagshipErrorCode.PARSE_ERROR);
 		});
@@ -497,7 +497,7 @@ describe('FlagshipClient', () => {
 			const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 1,
 				retryDelay: 10_000,
 			});
@@ -506,7 +506,7 @@ describe('FlagshipClient', () => {
 			await vi.waitFor(() => expect(setTimeoutSpy.mock.calls.some((call) => call[1] === 10_000)).toBe(true));
 			controller.abort('cancelled');
 
-			const error = await pending.catch((e) => e);
+			const error = await pending.catch((error_) => error_);
 			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
 			expect(error.cause).toBe('cancelled');
 			expect(transport).toHaveBeenCalledTimes(1);
@@ -521,7 +521,7 @@ describe('FlagshipClient', () => {
 				.mockResolvedValueOnce({ ok: true, json: async () => ({ flagKey: 'my-flag', value: true }) });
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 1,
 				retryDelay: 0,
 			});
@@ -583,7 +583,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 			expect(error).toBeInstanceOf(FlagshipError);
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 		});
@@ -735,7 +735,7 @@ describe('FlagshipClient', () => {
 
 			const original = globalThis.fetch;
 			const lateInstalled = vi.fn(async () => okResponse());
-			globalThis.fetch = lateInstalled as unknown as typeof globalThis.fetch;
+			globalThis.fetch = lateInstalled;
 
 			try {
 				await client.evaluate('my-flag', {});
@@ -749,9 +749,9 @@ describe('FlagshipClient', () => {
 	describe('abort signal', () => {
 		/** Transport that only settles when the signal it was handed aborts. */
 		function pendingTransport() {
-			const seen: (AbortSignal | undefined)[] = [];
+			const seen: Array<AbortSignal | undefined> = [];
 			const fetchImpl = vi.fn((_url: any, init?: RequestInit) => {
-				const signal = (init?.signal ?? undefined) as AbortSignal | undefined;
+				const signal = init?.signal ?? undefined;
 				seen.push(signal);
 				return new Promise<Response>((_resolve, reject) => {
 					const fail = () => {
@@ -759,8 +759,11 @@ describe('FlagshipClient', () => {
 						error.name = 'AbortError';
 						reject(error);
 					};
-					if (signal?.aborted) fail();
-					else signal?.addEventListener('abort', fail);
+					if (signal?.aborted) {
+						fail();
+					} else {
+						signal?.addEventListener('abort', fail);
+					}
 				});
 			});
 			return { fetchImpl: fetchImpl as unknown as typeof globalThis.fetch, calls: fetchImpl, seen };
@@ -779,7 +782,7 @@ describe('FlagshipClient', () => {
 			const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
 			controller.abort();
 
-			const error = await pending.catch((e) => e);
+			const error = await pending.catch((error_) => error_);
 
 			expect(seen[0]?.aborted).toBe(true);
 			expect(error).toBeInstanceOf(FlagshipError);
@@ -800,7 +803,7 @@ describe('FlagshipClient', () => {
 
 			const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
 			controller.abort();
-			const error = await pending.catch((e) => e);
+			const error = await pending.catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
 			expect(calls).toHaveBeenCalledTimes(1);
@@ -817,7 +820,7 @@ describe('FlagshipClient', () => {
 				retryDelay: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.TIMEOUT_ERROR);
 			expect(error.retryable).toBe(true);
@@ -834,7 +837,7 @@ describe('FlagshipClient', () => {
 				retryDelay: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}, { signal: AbortSignal.abort('gone') }).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}, { signal: AbortSignal.abort('gone') }).catch((error_) => error_);
 
 			expect(error).toBeInstanceOf(FlagshipError);
 			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
@@ -855,7 +858,7 @@ describe('FlagshipClient', () => {
 
 			const pending = client.evaluate('my-flag', {});
 			controller.abort();
-			const error = await pending.catch((e) => e);
+			const error = await pending.catch((error_) => error_);
 
 			expect(seen[0]?.aborted).toBe(true);
 			expect(error.code).toBe(FlagshipErrorCode.ABORTED);
@@ -876,13 +879,13 @@ describe('FlagshipClient', () => {
 			const callController = new AbortController();
 			const first = client.evaluate('my-flag', {}, { signal: callController.signal });
 			callController.abort();
-			expect((await first.catch((e) => e)).code).toBe(FlagshipErrorCode.ABORTED);
+			expect((await first.catch((error) => error)).code).toBe(FlagshipErrorCode.ABORTED);
 			expect(seen[0]?.aborted).toBe(true);
 
 			// fetchOptions signal aborts.
 			const second = client.evaluate('my-flag', {}, { signal: new AbortController().signal });
 			fetchOptionsController.abort();
-			expect((await second.catch((e) => e)).code).toBe(FlagshipErrorCode.ABORTED);
+			expect((await second.catch((error) => error)).code).toBe(FlagshipErrorCode.ABORTED);
 			expect(seen[1]?.aborted).toBe(true);
 		});
 
@@ -901,7 +904,7 @@ describe('FlagshipClient', () => {
 
 				const pending = client.evaluate('my-flag', {}, { signal: controller.signal });
 				controller.abort();
-				const error = await pending.catch((e) => e);
+				const error = await pending.catch((error_) => error_);
 
 				expect(seen[0]).not.toBe(controller.signal);
 				expect(seen[0]?.aborted).toBe(true);
@@ -921,7 +924,7 @@ describe('FlagshipClient', () => {
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(seen[0]).toBeInstanceOf(AbortSignal);
 			expect(seen[0]?.aborted).toBe(true);
@@ -939,12 +942,12 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 1,
 				retryDelay: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 			expect(error.retryable).toBe(true);
@@ -957,12 +960,12 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 3,
 				retryDelay: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 			expect(error.retryable).toBe(false);
@@ -977,11 +980,11 @@ describe('FlagshipClient', () => {
 
 			const client = new FlagshipClient({
 				endpoint: 'https://api.example.com/evaluate',
-				fetch: transport as unknown as typeof globalThis.fetch,
+				fetch: transport,
 				retries: 0,
 			});
 
-			const error = await client.evaluate('my-flag', {}).catch((e) => e);
+			const error = await client.evaluate('my-flag', {}).catch((error_) => error_);
 
 			expect(error.code).toBe(FlagshipErrorCode.NETWORK_ERROR);
 			expect(error.retryable).toBe(true);

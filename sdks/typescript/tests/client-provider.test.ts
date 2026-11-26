@@ -3,32 +3,40 @@ import type { Logger } from '@openfeature/web-sdk';
 import { ErrorCode, ProviderEvents, ProviderStatus } from '@openfeature/web-sdk';
 import { FlagshipClientProvider } from '../src/client-provider.js';
 import { FlagshipClient } from '../src/client.js';
-import { FlagshipError, FlagshipErrorCode, type FlagshipBulkEvaluationResult } from '../src/types.js';
+import { FlagshipError, FlagshipErrorCode } from '../src/types.js';
+import type { FlagshipBulkEvaluationResult } from '../src/types.js';
 
 const noopLogger: Logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 const spyLogger = (): Logger => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });
 const endpoint = 'https://api.example.com/evaluate';
 
-vi.mock('../src/client.js', async (importOriginal) => ({
-	...(await importOriginal<typeof import('../src/client.js')>()),
-	FlagshipClient: vi.fn().mockImplementation(function () {
-		return { evaluateAll: vi.fn().mockResolvedValue([]) };
-	}),
+vi.mock(import('../src/client.js'), async (importOriginal) => ({
+	...(await importOriginal()),
+	FlagshipClient: vi.fn(
+		class {
+			evaluateAll = vi.fn().mockResolvedValue([]);
+		},
+	),
 }));
 
-function mockBulk(...responses: Array<FlagshipBulkEvaluationResult[] | Error>) {
+function mockBulk(...responses: Array<Array<FlagshipBulkEvaluationResult> | Error>) {
 	const evaluateAll = vi.fn();
 	for (const response of responses) {
-		if (response instanceof Error) evaluateAll.mockRejectedValueOnce(response);
-		else evaluateAll.mockResolvedValueOnce(response);
+		if (response instanceof Error) {
+			evaluateAll.mockRejectedValueOnce(response);
+		} else {
+			evaluateAll.mockResolvedValueOnce(response);
+		}
 	}
-	(FlagshipClient as any).mockImplementation(function () {
-		return { evaluateAll };
-	});
+	(FlagshipClient as any).mockImplementation(
+		class {
+			evaluateAll = evaluateAll;
+		},
+	);
 	return evaluateAll;
 }
 
-async function initialized(flags: FlagshipBulkEvaluationResult[], options: { logging?: boolean } = {}) {
+async function initialized(flags: Array<FlagshipBulkEvaluationResult>, options: { logging?: boolean } = {}) {
 	mockBulk(flags);
 	const provider = new FlagshipClientProvider({ endpoint, ...options });
 	await provider.initialize({});
@@ -247,7 +255,7 @@ describe('FlagshipClientProvider', () => {
 		});
 
 		it('logs warnings through the injected logger only when logging is enabled', async () => {
-			const entries: FlagshipBulkEvaluationResult[] = [{ key: 'f', value: 'x', reason: 'DEFAULT', variant: 'v' }];
+			const entries: Array<FlagshipBulkEvaluationResult> = [{ key: 'f', value: 'x', reason: 'DEFAULT', variant: 'v' }];
 			const quiet = spyLogger();
 			const loud = spyLogger();
 
@@ -282,9 +290,13 @@ describe('FlagshipClientProvider', () => {
 		});
 
 		it('discards an in-flight initialize on close without emitting READY', async () => {
-			let resolveEvaluate!: (flags: FlagshipBulkEvaluationResult[]) => void;
+			let resolveEvaluate!: (flags: Array<FlagshipBulkEvaluationResult>) => void;
 			const evaluateAll = mockBulk();
-			evaluateAll.mockReturnValueOnce(new Promise((resolve) => (resolveEvaluate = resolve)));
+			evaluateAll.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveEvaluate = resolve;
+				}),
+			);
 			const provider = new FlagshipClientProvider({ endpoint });
 			const onReady = vi.fn();
 			provider.events.addHandler(ProviderEvents.Ready, onReady);

@@ -2,17 +2,13 @@ import type { Provider, ResolutionDetails, EvaluationContext, JsonValue, Provide
 import { ErrorCode, OpenFeatureEventEmitter, ProviderEvents, ProviderFatalError } from '@openfeature/server-sdk';
 import { LRUCache } from 'lru-cache';
 import { FlagshipClient, isAuthFailure, resolveDefinitionsEndpoint } from './client.js';
-import { normalizeEvaluationContext, type NormalizedContextValue } from './context.js';
-import { evaluateFlag, FlagConfigError, type EvalFlag } from './local/evaluate.js';
+import { normalizeEvaluationContext } from './context.js';
+import type { NormalizedContextValue } from './context.js';
+import { evaluateFlag, FlagConfigError } from './local/evaluate.js';
+import type { EvalFlag } from './local/evaluate.js';
 import { toFlagMetadata } from './metadata.js';
-import {
-	FlagshipError,
-	FlagshipErrorCode,
-	isBindingOptions,
-	type FlagshipBinding,
-	type FlagshipBindingEvaluationDetails,
-	type FlagshipServerProviderOptions,
-} from './types.js';
+import { FlagshipError, FlagshipErrorCode, isBindingOptions } from './types.js';
+import type { FlagshipBinding, FlagshipBindingEvaluationDetails, FlagshipServerProviderOptions } from './types.js';
 
 const DEFAULT_CACHE_MAX_SIZE = 1000;
 const DEFAULT_REFRESH_INTERVAL_MS = 30_000;
@@ -192,7 +188,9 @@ export class FlagshipServerProvider implements Provider {
 	 * the SDK produces no console output unless the caller opts in.
 	 */
 	private logger(logger: Logger): Logger {
-		if (this.logging) return logger;
+		if (this.logging) {
+			return logger;
+		}
 		return { debug: _noop, info: _noop, warn: _noop, error: _noop };
 	}
 
@@ -201,7 +199,9 @@ export class FlagshipServerProvider implements Provider {
 	 * Failure puts the OpenFeature provider in ERROR.
 	 */
 	async initialize(): Promise<void> {
-		if (!this.localEvaluation || !this.client) return;
+		if (!this.localEvaluation || !this.client) {
+			return;
+		}
 		// Bump the epoch so any refresh still in flight from a prior session is
 		// ignored when it resolves. Drop residual state before the blocking fetch.
 		this.epoch += 1;
@@ -214,7 +214,9 @@ export class FlagshipServerProvider implements Provider {
 		const epoch = this.epoch;
 		await this.fetchAndApplySnapshot(/* initial */ true, undefined, epoch);
 		// Only mark ready if this initialize was not superseded by onClose/re-init.
-		if (epoch === this.epoch) this.localReady = true;
+		if (epoch === this.epoch) {
+			this.localReady = true;
+		}
 	}
 
 	async onClose(): Promise<void> {
@@ -295,7 +297,7 @@ export class FlagshipServerProvider implements Provider {
 
 		const result = await this.resolve(flagKey, defaultValue, context, expectedType, logger);
 		if (isCacheable(result)) {
-			this.cache.set(key, result as ResolutionDetails<unknown>);
+			this.cache.set(key, result);
 		}
 		return result;
 	}
@@ -414,8 +416,12 @@ export class FlagshipServerProvider implements Provider {
 	 * so a down API isn't hammered on every evaluate.
 	 */
 	private maybeRefresh(log: Logger): void {
-		if (!this.localReady || this.refreshInFlight) return;
-		if (Date.now() - this.lastFetch < this.refreshInterval) return;
+		if (!this.localReady || this.refreshInFlight) {
+			return;
+		}
+		if (Date.now() - this.lastFetch < this.refreshInterval) {
+			return;
+		}
 
 		const epoch = this.epoch;
 		const pending = this.fetchAndApplySnapshot(false, log, epoch);
@@ -423,7 +429,9 @@ export class FlagshipServerProvider implements Provider {
 		void pending.finally(() => {
 			// Only clear the slot if we still own it — a later initialize/onClose
 			// may have started a different fetch or cleared the pointer.
-			if (this.refreshInFlight === pending) this.refreshInFlight = undefined;
+			if (this.refreshInFlight === pending) {
+				this.refreshInFlight = undefined;
+			}
 		});
 	}
 
@@ -431,7 +439,9 @@ export class FlagshipServerProvider implements Provider {
 		try {
 			const result = await this.client!.fetchDefinitions(this.etag);
 			// Stale session (closed or superseded by a newer initialize).
-			if (epoch !== this.epoch) return;
+			if (epoch !== this.epoch) {
+				return;
+			}
 
 			if (result === 'not-modified') {
 				this.lastFetch = Date.now();
@@ -451,23 +461,31 @@ export class FlagshipServerProvider implements Provider {
 			this.recover();
 			log?.debug(`[Flagship] Definitions snapshot updated (${Object.keys(this.snapshot).length} flags)`);
 		} catch (error) {
-			if (epoch !== this.epoch) return;
+			if (epoch !== this.epoch) {
+				return;
+			}
 			this.lastFetch = Date.now();
 			const message = error instanceof Error ? error.message : String(error);
-			if (initial) throw isAuthFailure(error) ? new ProviderFatalError(message) : error;
+			if (initial) {
+				throw isAuthFailure(error) ? new ProviderFatalError(message) : error;
+			}
 			this.markStale(message);
 			log?.warn(`[Flagship] Definitions refresh failed; keeping last good snapshot: ${message}`);
 		}
 	}
 
 	private markStale(message: string): void {
-		if (this.stale) return;
+		if (this.stale) {
+			return;
+		}
 		this.stale = true;
 		this.events.emit(ProviderEvents.Stale, { message });
 	}
 
 	private recover(): void {
-		if (!this.stale) return;
+		if (!this.stale) {
+			return;
+		}
 		this.stale = false;
 		this.events.emit(ProviderEvents.Ready);
 	}
@@ -501,7 +519,9 @@ export class FlagshipServerProvider implements Provider {
 			// The binding returns `metadata` at runtime even though the published workers-types omit it.
 			return finalizeEvaluation(flagKey, defaultValue, expectedType, details, log);
 		} catch (error) {
-			if (error instanceof FlagshipError) return this.handleHttpError(flagKey, defaultValue, error, log);
+			if (error instanceof FlagshipError) {
+				return this.handleHttpError(flagKey, defaultValue, error, log);
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			log.error(`[Flagship] Flag "${flagKey}" binding evaluation failed (GENERAL): ${errorMessage}`);
 			return { value: defaultValue, errorCode: ErrorCode.GENERAL, errorMessage, reason: 'ERROR' };
@@ -585,9 +605,15 @@ function finalizeEvaluation<T>(
  * JSON null which belongs to the object/structure category.
  */
 function getValueType(value: unknown): ExpectedType {
-	if (typeof value === 'boolean') return 'boolean';
-	if (typeof value === 'string') return 'string';
-	if (typeof value === 'number') return 'number';
+	if (typeof value === 'boolean') {
+		return 'boolean';
+	}
+	if (typeof value === 'string') {
+		return 'string';
+	}
+	if (typeof value === 'number') {
+		return 'number';
+	}
 	return 'object';
 }
 
@@ -606,7 +632,7 @@ function buildCacheKey(flagKey: string, expectedType: ExpectedType, context: Eva
 
 function serializeContextValue(value: NormalizedContextValue): string {
 	// Sort object keys at every depth so semantically equal objects share a cache key.
-	return JSON.stringify(value, (_key, val) =>
+	return JSON.stringify(value, (_key, val: unknown) =>
 		val !== null && typeof val === 'object' && !Array.isArray(val)
 			? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 			: val,
